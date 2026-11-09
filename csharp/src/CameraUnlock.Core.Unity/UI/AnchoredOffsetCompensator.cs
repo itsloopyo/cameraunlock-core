@@ -17,7 +17,7 @@ namespace CameraUnlock.Core.Unity.UI
 
         private RectTransform _targetRect;
         private Canvas _canvas;
-        private RectTransform _canvasRect;
+        private RectTransform _rootCanvasRect;
         private Vector2 _originalAnchoredPosition;
         private bool _hasOriginal;
         private bool _isOffset;
@@ -46,7 +46,8 @@ namespace CameraUnlock.Core.Unity.UI
 
         /// <summary>
         /// Offsets the element by a normalized-device-coordinate amount (±1 at the edges of the
-        /// view), scaled by the canvas's own rect.
+        /// view), measured on the outermost canvas the element is under and carried into the
+        /// element's parent space through the transforms in between.
         ///
         /// Prefer this over <see cref="ApplyOffset"/>. Screen pixels are only the correct unit
         /// for a screen-space-overlay canvas filling the window: a world-space HUD canvas has no
@@ -60,13 +61,26 @@ namespace CameraUnlock.Core.Unity.UI
             if (!EnsureTarget())
                 return;
 
-            if (_canvasRect == null)
+            if (_rootCanvasRect == null)
                 return;
 
-            Rect canvasArea = _canvasRect.rect;
-            ApplyLocalOffset(new Vector2(
+            Transform parent = _targetRect.parent;
+            if (parent == null)
+                throw new InvalidOperationException(_cachedTarget.name + " is a root Canvas, whose position Unity sets itself; offset an element under it instead");
+
+            Rect canvasArea = _rootCanvasRect.rect;
+            Vector3 onRoot = new Vector3(
                 ndcOffset.x * canvasArea.width * 0.5f,
-                ndcOffset.y * canvasArea.height * 0.5f));
+                ndcOffset.y * canvasArea.height * 0.5f,
+                0f);
+            Vector3 from = parent.InverseTransformPoint(_rootCanvasRect.TransformPoint(Vector3.zero));
+            Vector3 to = parent.InverseTransformPoint(_rootCanvasRect.TransformPoint(onRoot));
+            Vector2 local = new Vector2(to.x - from.x, to.y - from.y);
+            // A panel the game hides by scaling it to zero cannot be inverted: leave the element
+            // where it is rather than write a non-finite position into it.
+            if (float.IsNaN(local.x) || float.IsNaN(local.y) || float.IsInfinity(local.x) || float.IsInfinity(local.y))
+                return;
+            ApplyLocalOffset(local);
         }
 
         private void ApplyLocalOffset(Vector2 localOffset)
@@ -109,12 +123,27 @@ namespace CameraUnlock.Core.Unity.UI
                 _cachedTarget = target;
                 _targetRect = target.GetComponent<RectTransform>();
                 _canvas = target.GetComponentInParent<Canvas>();
-                _canvasRect = _canvas != null ? _canvas.GetComponent<RectTransform>() : null;
+                Canvas root = OutermostCanvas(target.transform);
+                _rootCanvasRect = root != null ? root.GetComponent<RectTransform>() : null;
                 _hasOriginal = false;
                 _isOffset = false;
             }
 
             return _targetRect != null;
+        }
+
+        // On a screen-space HUD the outermost canvas is the one sized to the view. A nested canvas
+        // can be the size of the element's own box, and an offset measured on it moves the element
+        // by a fraction of the view.
+        private static Canvas OutermostCanvas(Transform from)
+        {
+            Canvas outermost = null;
+            for (Transform t = from; t != null; t = t.parent)
+            {
+                Canvas c = t.GetComponent<Canvas>();
+                if (c != null) outermost = c;
+            }
+            return outermost;
         }
     }
 }

@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - `AnchoredOffsetCompensator.ApplyNdcOffset` measures on the outermost canvas
+
+`ApplyNdcOffset` scaled the offset by the rect of the nearest `Canvas` above the element and
+applied it as parent-space units. An element that carries a nested `Canvas` of its own, the size
+of its own box (Risk of Rain 2's hit marker), moved by a fraction of the view and stayed near the
+screen centre while the crosshair moved. It now measures the offset on the outermost canvas the
+element is under and carries it into the element's parent space with `TransformPoint` and
+`InverseTransformPoint`, so a scaled or rotated transform between that canvas and the element's
+parent is accounted for too. Where the nearest canvas is the outermost one and nothing below it down
+to the element's parent is scaled or rotated, the result is the same as before. An element that is
+itself a root canvas now throws, since Unity places a root canvas itself and the offset never took.
+`ApplyOffset` is unchanged.
+
 ### Added - `[View] CutsceneTracking`, whether head tracking stays on in a game's cutscenes
 
 `CutsceneTracking` is a canonical concept: a bool, `default` false, global, under `[View]` after
