@@ -58,6 +58,7 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `miniz.txt` | miniz | MIT |
 | `mono-cecil.txt` | Mono.Cecil | MIT |
 | `monomod.txt` | MonoMod | MIT |
+| `opentrack.txt` | opentrack `filter-accela` (Stanislaw Halik), which core's `AccelaFilter` (C++ and C#) is a port of. The file is the header of `filter-accela/ftnoir_filter_accela.cpp`, then the warranty terms `OPENTRACK-LICENSING.txt` applies to modules whose header carries none | ISC |
 | `nlohmann.txt` | JSON for Modern C++ (nlohmann/json), `LICENSE.MIT` at `v3.12.0` | MIT |
 | `red4ext.txt` | RED4ext | MIT |
 | `reframework.txt` | REFramework | MIT |
@@ -100,6 +101,8 @@ terms are byte-identical; they differ only in what each upstream appended after
 "How to Apply These Terms" appendix). A notices file may reproduce the licence
 body once and name both components against it.
 
-OpenTrack is deliberately absent. The mods implement its UDP wire format and
-link none of its code, so its ISC licence triggers no notice obligation. It is
-credited in each mod's notices as the origin of the protocol.
+OpenTrack's UDP wire format is a protocol the mods implement, which triggers no
+notice obligation of its own; it is credited in each mod's notices as the origin
+of the protocol. Core's Accela filter is another matter: `AccelaFilter` (C++ and
+C#) is a port of opentrack's `filter-accela`, so a distribution that carries
+core's filter carries `opentrack.txt`.
