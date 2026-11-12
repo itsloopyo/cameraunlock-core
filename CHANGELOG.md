@@ -17,12 +17,11 @@ DirectInput 8 game's are, whichever of `DirectInputCreateA`, `DirectInputCreateW
 answers the 16-byte records those devices read. Nothing for a mod to change.
 
 - `data/isolated-input.json`: the `directinput` path claims `dinput8.dll` alone, where it also
-  claimed `dinput.dll` it did not cover. The new `directinput7` path claims `dinput.dll` and stays
-  unsupported until a game proves it. The coverage tests check that no DLL or function is claimed
+  claimed `dinput.dll` it did not cover. The new `directinput7` path claims `dinput.dll`, and is
+  supported: proven in Arx Fatalis (32-bit), whose menu clicks, keys and walking came from the script. The coverage tests check that no DLL or function is claimed
   by two paths.
 - `pixi run test-isolated-input-host` makes DirectInput mice and keyboards through `DirectInputCreateA`,
-  `DirectInputCreateW` and `DirectInputCreateEx`, in A and W, and reads them. It runs 64-bit; no
-  32-bit game has been driven through these detours yet.
+  `DirectInputCreateW` and `DirectInputCreateEx`, in A and W, and reads them. It runs 64-bit.
 
 ### Added - `[View] CutsceneTracking`, whether head tracking stays on in a game's cutscenes
 
