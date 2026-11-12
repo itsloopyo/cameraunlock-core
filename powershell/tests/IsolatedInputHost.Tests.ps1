@@ -355,7 +355,175 @@ Check 'a cursor set while the count is below zero stays hidden' (-not (CursorInf
 [CameraUnlockHostTest.User32]::ShowCursor($true) | Out-Null
 Check 'GetCursorInfo with a wrong cbSize is refused, as Windows refuses it' (-not (CursorInfo -Size 20).Read)
 
+# DirectInput 7: dinput.dll is loaded only now, after the host started, as a game may load it
+# late. One mouse is made through IDirectInput7A's CreateDeviceEx as IDirectInputDevice7A and
+# one through DirectInputCreateA for DirectInput 5; one keyboard through IDirectInput7A's
+# CreateDevice and one through DirectInputCreateW for DirectInput 3. All are read buffered in
+# 16-byte records.
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DirectInput7 {
+    [DllImport("dinput.dll")] static extern int DirectInputCreateEx(IntPtr instance, int version, ref Guid iid, out IntPtr directInput, IntPtr outer);
+    [DllImport("dinput.dll")] static extern int DirectInputCreateA(IntPtr instance, int version, out IntPtr directInput, IntPtr outer);
+    [DllImport("dinput.dll")] static extern int DirectInputCreateW(IntPtr instance, int version, out IntPtr directInput, IntPtr outer);
+    [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandleW(IntPtr name);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int CreateDeviceFn(IntPtr self, ref Guid device, out IntPtr made, IntPtr outer);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int CreateDeviceExFn(IntPtr self, ref Guid device, ref Guid iid, out IntPtr made, IntPtr outer);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int ThisFn(IntPtr self);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int GetDeviceDataFn(IntPtr self, int size, byte[] data, ref int count, int flags);
+    static T Slot<T>(IntPtr o, int slot) where T : class {
+        return Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(Marshal.ReadIntPtr(o), slot * IntPtr.Size), typeof(T)) as T;
+    }
+    static Guid DirectInput7A = new Guid("9A4CB684-236D-11D3-8E9D-00C04F6844AE");
+    static Guid Device7A = new Guid("57D7C6BC-2356-11D3-8E9D-00C04F6844AE");
+    static Guid SysMouse = new Guid("6F1D2B60-D5A0-11CF-BFC7-444553540000");
+    static Guid SysKeyboard = new Guid("6F1D2B61-D5A0-11CF-BFC7-444553540000");
+    public static IntPtr Mouse, Keyboard, MouseA5, KeyboardW3;
+    static int MakeOne(int made, IntPtr di, ref Guid device, out IntPtr result) {
+        result = IntPtr.Zero;
+        if (made != 0) return made;
+        made = Slot<CreateDeviceFn>(di, 3)(di, ref device, out result, IntPtr.Zero);
+        Slot<ThisFn>(di, 2)(di);
+        return made;
+    }
+    public static int Make() {
+        IntPtr instance = GetModuleHandleW(IntPtr.Zero);
+        IntPtr di;
+        int result = DirectInputCreateEx(instance, 0x0700, ref DirectInput7A, out di, IntPtr.Zero);
+        if (result != 0) return result;
+        result = Slot<CreateDeviceExFn>(di, 9)(di, ref SysMouse, ref Device7A, out Mouse, IntPtr.Zero);
+        if (result != 0) { Slot<ThisFn>(di, 2)(di); return result; }
+        result = MakeOne(0, di, ref SysKeyboard, out Keyboard);
+        if (result != 0) return result;
+        result = DirectInputCreateA(instance, 0x0500, out di, IntPtr.Zero);
+        result = MakeOne(result, di, ref SysMouse, out MouseA5);
+        if (result != 0) return result;
+        result = DirectInputCreateW(instance, 0x0300, out di, IntPtr.Zero);
+        return MakeOne(result, di, ref SysKeyboard, out KeyboardW3);
+    }
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int SetDataFormatFn(IntPtr self, IntPtr format);
+    static IntPtr Unmanaged(Guid guid) {
+        IntPtr at = Marshal.AllocHGlobal(16);
+        Marshal.Copy(guid.ToByteArray(), 0, at, 16);
+        return at;
+    }
+    // A DIDATAFORMAT laid out as c_dfDIMouse or c_dfDIKeyboard is, in memory that is never freed.
+    static IntPtr Format(int dataSize, IntPtr[] guids, int[] offsets, uint[] types) {
+        int objectSize = IntPtr.Size == 8 ? 24 : 16;
+        IntPtr objects = Marshal.AllocHGlobal(objectSize * guids.Length);
+        for (int i = 0; i < guids.Length; i++) {
+            IntPtr o = objects + objectSize * i;
+            Marshal.WriteIntPtr(o, guids[i]);
+            Marshal.WriteInt32(o, IntPtr.Size, offsets[i]);
+            Marshal.WriteInt32(o, IntPtr.Size + 4, unchecked((int)types[i]));
+            Marshal.WriteInt32(o, IntPtr.Size + 8, 0);
+        }
+        int formatSize = IntPtr.Size == 8 ? 32 : 24;
+        IntPtr format = Marshal.AllocHGlobal(formatSize);
+        Marshal.WriteInt32(format, 0, formatSize);
+        Marshal.WriteInt32(format, 4, objectSize);
+        Marshal.WriteInt32(format, 8, 2);
+        Marshal.WriteInt32(format, 12, dataSize);
+        Marshal.WriteInt32(format, 16, guids.Length);
+        Marshal.WriteIntPtr(format, formatSize - IntPtr.Size, objects);
+        return format;
+    }
+    const uint AnyInstance = 0x00FFFF00, Axis = 0x03, Button = 0x0C, Optional = 0x80000000;
+    public static int SetFormats() {
+        IntPtr x = Unmanaged(new Guid("A36D02E0-C9F3-11CF-BFC7-444553540000"));
+        IntPtr y = Unmanaged(new Guid("A36D02E1-C9F3-11CF-BFC7-444553540000"));
+        IntPtr z = Unmanaged(new Guid("A36D02E2-C9F3-11CF-BFC7-444553540000"));
+        IntPtr mouse = Format(16, new IntPtr[] { x, y, z, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero },
+                              new int[] { 0, 4, 8, 12, 13, 14, 15 },
+                              new uint[] { Axis | AnyInstance, Axis | AnyInstance, Axis | AnyInstance | Optional,
+                                           Button | AnyInstance, Button | AnyInstance, Button | AnyInstance | Optional,
+                                           Button | AnyInstance | Optional });
+        IntPtr key = Unmanaged(new Guid("55728220-D33C-11CF-BFC7-444553540000"));
+        IntPtr[] keys = new IntPtr[256];
+        int[] keyOffsets = new int[256];
+        uint[] keyTypes = new uint[256];
+        for (int i = 0; i < 256; i++) { keys[i] = key; keyOffsets[i] = i; keyTypes[i] = Button | ((uint)i << 8) | Optional; }
+        IntPtr keyboard = Format(256, keys, keyOffsets, keyTypes);
+        int result = 0;
+        foreach (IntPtr device in new IntPtr[] { Mouse, MouseA5 }) if (result == 0) result = Slot<SetDataFormatFn>(device, 11)(device, mouse);
+        foreach (IntPtr device in new IntPtr[] { Keyboard, KeyboardW3 }) if (result == 0) result = Slot<SetDataFormatFn>(device, 11)(device, keyboard);
+        return result;
+    }
+    public static int Acquire(IntPtr device) { return Slot<ThisFn>(device, 7)(device); }
+    // The records read, as offset and data pairs. Bytes past the last record are checked
+    // to be as they were left, so a record wider than 16 bytes is caught.
+    public static int Read(IntPtr device, out uint[] pairs, out bool untouchedPast) {
+        byte[] data = new byte[16 * 32];
+        for (int i = 0; i < data.Length; i++) data[i] = 0xCC;
+        int count = 32;
+        int result = Slot<GetDeviceDataFn>(device, 10)(device, 16, data, ref count, 0);
+        pairs = new uint[2 * Math.Max(count, 0)];
+        for (int i = 0; i < count; i++) {
+            pairs[2 * i] = BitConverter.ToUInt32(data, 16 * i);
+            pairs[2 * i + 1] = BitConverter.ToUInt32(data, 16 * i + 4);
+        }
+        untouchedPast = true;
+        for (int i = 16 * Math.Max(count, 0); i < data.Length; i++) untouchedPast = untouchedPast && data[i] == 0xCC;
+        return result;
+    }
+    public static void Release() {
+        foreach (IntPtr device in new IntPtr[] { Mouse, Keyboard, MouseA5, KeyboardW3 }) Slot<ThisFn>(device, 2)(device);
+    }
+}
+'@
+function HasRecord([uint32[]]$Pairs, [uint32]$Offset, [uint32]$Data) {
+    for ($i = 0; $i -lt $Pairs.Count; $i += 2) { if ($Pairs[$i] -eq $Offset -and $Pairs[$i + 1] -eq $Data) { return $true } }
+    $false
+}
+function PairsText([uint32[]]$Pairs) { ($Pairs | ForEach-Object { '0x{0:X}' -f $_ }) -join ' ' }
+
+$made = [DirectInput7]::Make()
+Check 'two mice and two keyboards are made through dinput.dll' ($made -eq 0) ('0x{0:X8}' -f $made)
+# Nothing below can run on devices that were not made.
+if ($made -eq 0) {
+    $read = 'DirectInput 7 keyboard and mouse devices answer from the command file'
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        Start-Sleep -Milliseconds 100
+        $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
+    } while ($hostLog -notmatch $read -and (Get-Date) -lt $deadline)
+    Check 'dinput.dll loaded after the host started is detoured once the command-file thread sees it' ($hostLog -match $read) $hostLog
+    $result = [DirectInput7]::SetFormats()
+    Check 'all four take the mouse and keyboard data formats' ($result -eq 0) ('0x{0:X8}' -f $result)
+    $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
+    $mouseFormats = [regex]::Matches($hostLog, 'DirectInput mouse data format: 16 bytes, 7 objects, [1-9]\d* of them answered').Count
+    $keyboardFormats = [regex]::Matches($hostLog, 'DirectInput keyboard data format: 256 bytes, 256 objects, [1-9]\d* of them answered').Count
+    Check 'and the format read back answers the mice''s axes and buttons and every key' ($mouseFormats -eq 2 -and $keyboardFormats -eq 2) $hostLog
+    $devices = [DirectInput7]::Mouse, [DirectInput7]::Keyboard, [DirectInput7]::MouseA5, [DirectInput7]::KeyboardW3
+    Check 'Acquire succeeds on all four' (@($devices | Where-Object { [DirectInput7]::Acquire($_) -ne 0 }).Count -eq 0)
+    $pairs = $null; $past = $false
+    $result = [DirectInput7]::Read([DirectInput7]::Mouse, [ref]$pairs, [ref]$past)
+    Check 'the mouse answers GetDeviceData with nothing before a script moves it' ($result -eq 0 -and $pairs.Count -eq 0) "0x$('{0:X8}' -f $result), $(PairsText $pairs)"
+    foreach ($device in $devices | Select-Object -Skip 1) { [void][DirectInput7]::Read($device, [ref]$pairs, [ref]$past) }
+
+    Play 5 'move 7 -3', 'mouse left click'
+    $result = [DirectInput7]::Read([DirectInput7]::Mouse, [ref]$pairs, [ref]$past)
+    Check 'the mouse answers the move as DIMOFS_X and DIMOFS_Y records' `
+        ($result -eq 0 -and (HasRecord $pairs 0 7) -and (HasRecord $pairs 4 ([uint32]::MaxValue - 2))) (PairsText $pairs)
+    Check 'and the click as DIMOFS_BUTTON0 down and up' ((HasRecord $pairs 12 0x80) -and (HasRecord $pairs 12 0)) (PairsText $pairs)
+    Check 'in 16-byte records, writing nothing past the last one' $past
+    $result = [DirectInput7]::Read([DirectInput7]::MouseA5, [ref]$pairs, [ref]$past)
+    Check 'the mouse made through DirectInputCreateA for DirectInput 5 answers the same' `
+        ($result -eq 0 -and (HasRecord $pairs 0 7) -and (HasRecord $pairs 12 0x80) -and $past) (PairsText $pairs)
+    Play 6 'down A'
+    $result = [DirectInput7]::Read([DirectInput7]::Keyboard, [ref]$pairs, [ref]$past)
+    Check 'the keyboard made through CreateDevice answers a held key as a DIK_A record' `
+        ($result -eq 0 -and $pairs.Count -eq 2 -and (HasRecord $pairs 0x1E 0x80) -and $past) (PairsText $pairs)
+    $result = [DirectInput7]::Read([DirectInput7]::KeyboardW3, [ref]$pairs, [ref]$past)
+    Check 'and so does the keyboard made through DirectInputCreateW for DirectInput 3' `
+        ($result -eq 0 -and $pairs.Count -eq 2 -and (HasRecord $pairs 0x1E 0x80) -and $past) (PairsText $pairs)
+    Play 7 'up A'
+    [DirectInput7]::Release()
+}
+
 $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
+Check 'the host log names a DirectInput read through GetDeviceData in 16-byte records' ($hostLog -match 'through GetDeviceData \(16 bytes\)')
 Check 'the host log says where the game link listens' ($hostLog -match "game link: listening on 127\.0\.0\.1:$linkPort")
 Check 'the host log says the detours are in' ($hostLog -match 'takes its keyboard and mouse from the command file')
 Check 'the host log names GetKeyState once it is read' ($hostLog -match 'through GetKeyState')

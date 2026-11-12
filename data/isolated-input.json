@@ -28,9 +28,15 @@
     },
     "directinput": {
       "what": "DirectInput 8 devices",
-      "dlls": ["dinput8.dll", "dinput.dll"],
+      "dlls": ["dinput8.dll"],
       "status": "supported",
       "proven_in": ["fallout-new-vegas", "far-cry-6", "fear", "resident-evil-requiem", "stalker-call-of-prypiat-enhanced-edition"]
+    },
+    "directinput7": {
+      "what": "DirectInput 7 and earlier devices from dinput.dll, made through DirectInputCreateA, DirectInputCreateW or DirectInputCreateEx, read with GetDeviceState or in 16-byte buffered records with GetDeviceData",
+      "dlls": ["dinput.dll"],
+      "status": "unsupported",
+      "build": "The detours are in cameraunlock/dev/isolated_input.h (InstallDirectInput7) and pass the 64-bit isolated-input host test, which makes A and W devices through DirectInputCreateA, DirectInputCreateW and DirectInputCreateEx outside a game. Prove them in a 32-bit game that imports dinput.dll (Arx Fatalis imports DirectInputCreateEx from it), then make this entry supported with that game."
     },
     "cursor-position": {
       "what": "where the mouse cursor is, read with GetCursorPos or from WM_MOUSEMOVE, as a menu with a pointer does. The `cursor` command places it.",

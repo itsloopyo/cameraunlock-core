@@ -56,6 +56,36 @@ Check 'every supported input path names a game it was proven in' ($unproven.Coun
 $undetectable = @($coverage.input_paths.PSObject.Properties |
                   Where-Object { -not $_.Value.PSObject.Properties['imports'] -and -not $_.Value.PSObject.Properties['dlls'] })
 Check 'every input path has something an import table shows' ($undetectable.Count -eq 0) (($undetectable | ForEach-Object Name) -join ', ')
+# A DLL or function claimed by two paths would let a supported one vouch for what only the
+# other covers, as the DirectInput 8 entry once claimed dinput.dll.
+$claims = @($coverage.input_paths.PSObject.Properties | ForEach-Object {
+    $p = $_.Value
+    @(@(if ($p.PSObject.Properties['dlls']) { $p.dlls }) + @(if ($p.PSObject.Properties['imports']) { $p.imports }) |
+      Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+})
+$twice = @($claims | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
+Check 'no DLL or function is claimed by two input paths' ($twice.Count -eq 0) ($twice -join ', ')
+
+# Classifies a binary whose import table holds `Dll` alone, with its one function.
+function PathsForImport([string]$Dll, [string]$Function) {
+    & (Get-Module IsolatedGameTest) {
+        param($dll, $function)
+        $real = ${function:script:Get-PeImports}
+        Set-Item function:script:Get-PeImports { param($Path) [pscustomobject]@{ Dll = $dll; Functions = @($function) } }
+        try { @(Get-GameInputPaths -BinaryPath 'game.exe') } finally { Set-Item function:script:Get-PeImports $real }
+    } $Dll $Function
+}
+$paths = @(PathsForImport 'DINPUT8.dll' 'DirectInput8Create')
+Check 'a binary importing dinput8.dll reads the DirectInput 8 path, which is supported' `
+    ($paths.Count -eq 1 -and $paths[0].Path -eq 'directinput' -and $paths[0].Status -eq 'supported') (($paths | ForEach-Object { "$($_.Path) $($_.Status)" }) -join ', ')
+$paths = @(PathsForImport 'DINPUT.dll' 'DirectInputCreateEx')
+Check 'a binary importing dinput.dll reads the DirectInput 7 path alone' `
+    ($paths.Count -eq 1 -and $paths[0].Path -eq 'directinput7') (($paths | ForEach-Object Path) -join ', ')
+Check 'and that path is supported only once a game proves it' `
+    ($paths.Count -eq 1 -and (($paths[0].Status -eq 'supported') -eq [bool]$coverage.input_paths.directinput7.PSObject.Properties['proven_in'])) `
+    (($paths | ForEach-Object Status) -join ', ')
+$again = Get-PeImports -Path $user32
+Check 'the real Get-PeImports is put back after' ($again.Count -eq $imports.Count) "$($again.Count) imports, where $($imports.Count) were read before"
 
 # --- classifying a binary ---------------------------------------------------
 # A synthetic classification: user32.dll imports none of the input APIs from itself, so the

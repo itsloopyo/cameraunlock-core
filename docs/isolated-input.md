@@ -781,6 +781,15 @@ The detours go in from the command-file thread once `dinput8.dll` is loaded, and
 `dinput8.dll` is never loaded into a game that has not loaded it. A DirectInput
 device that is neither a keyboard nor a mouse is left as it was.
 
+A game that reads DirectInput 7 or earlier (`dinput.dll` loaded in the process)
+gets the same detours on `dinput.dll`'s device vtables, found from throwaway
+devices made through `DirectInputCreateEx`: what `CreateDevice` hands out, and
+what `CreateDeviceEx` hands out for `IDirectInputDevice`, `IDirectInputDevice2`
+and `IDirectInputDevice7`, in A and W. So a game is covered whether it calls
+`DirectInputCreateA`, `DirectInputCreateW` or `DirectInputCreateEx`.
+`GetDeviceData` answers its 16-byte records as it answers DirectInput 8's.
+`dinput.dll` is never loaded into a game that has not loaded it either.
+
 | Method | Answer | Why |
 |---|---|---|
 | `GetDeviceState` | in the data format the game set: `0x80` at the offset of each key or button the script holds, the movement since that device last asked at the offset of X and of Y, and 0 everywhere else. With `c_dfDIKeyboard` that is 256 bytes with `0x80` at each held key's `DIK_` code; with `c_dfDIMouse` or `c_dfDIMouse2` it is `DIMOUSESTATE` or `DIMOUSESTATE2` | the real device is never read |

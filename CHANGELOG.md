@@ -9,6 +9,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - isolated input drives DirectInput 7 devices from `dinput.dll`
+
+A game that loads `dinput.dll` has its keyboard and mouse device methods detoured as a
+DirectInput 8 game's are, whichever of `DirectInputCreateA`, `DirectInputCreateW` and
+`DirectInputCreateEx` it calls and whichever device interface it asks for. `GetDeviceData`
+answers the 16-byte records those devices read. Nothing for a mod to change.
+
+- `data/isolated-input.json`: the `directinput` path claims `dinput8.dll` alone, where it also
+  claimed `dinput.dll` it did not cover. The new `directinput7` path claims `dinput.dll` and stays
+  unsupported until a game proves it. The coverage tests check that no DLL or function is claimed
+  by two paths.
+- `pixi run test-isolated-input-host` makes DirectInput mice and keyboards through `DirectInputCreateA`,
+  `DirectInputCreateW` and `DirectInputCreateEx`, in A and W, and reads them. It runs 64-bit; no
+  32-bit game has been driven through these detours yet.
+
 ### Added - `[View] CutsceneTracking`, whether head tracking stays on in a game's cutscenes
 
 `CutsceneTracking` is a canonical concept: a bool, `default` false, global, under `[View]` after

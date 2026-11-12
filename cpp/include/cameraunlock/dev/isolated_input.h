@@ -76,6 +76,10 @@
 // SetCooperativeLevel is passed on as background and non-exclusive. Any other
 // DirectInput device (a controller) is left as it was. dinput8.dll is never
 // loaded by this header: a game that has not loaded it gets no such detours.
+// A game that reads DirectInput 7 or earlier (dinput.dll loaded in the
+// process) gets the same detours on dinput.dll's device vtables, whichever
+// device interface it asked for, and dinput.dll is never loaded by this header
+// either.
 //
 // For games that read GameInput (GameInputRedist.dll or GameInput.dll loaded in
 // the process): the readings of API version 2 answer their keyboard, mouse and
@@ -153,9 +157,11 @@ bool HoldIsolatedKey(int vk, bool down);
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace cameraunlock::dev {
@@ -645,7 +651,8 @@ static_assert(offsetof(DIMOUSESTATE2, lX) == kMouseOffsetX && offsetof(DIMOUSEST
               "directinput_state.h names a mouse control by its offset in DIMOUSESTATE2");
 static_assert(DIK_LSHIFT == kDikLeftShift, "directinput_state.h holds this Shift for a shifted character");
 
-// IDirectInputDevice8 vtable slots, the same in the A and the W interface.
+// Device vtable slots, the same in the A and the W interface, in
+// IDirectInputDevice8 and in every device interface of dinput.dll.
 enum DirectInputMethod {
     kDiRelease,
     kDiGetCapabilities,
@@ -662,9 +669,16 @@ inline constexpr int kDiGetObjectInfoSlot = 14;
 // How far into a format whose size is not known DirectInput is asked for
 // objects: a keyboard laid out four bytes a key reaches 1024.
 inline constexpr DWORD kFormatProbeBytes = 2048;
-// A and W interface, keyboard and mouse: at most this many addresses for one
-// method.
-inline constexpr int kDiVariants = 4;
+// At most this many addresses for one method: dinput8.dll's A and W
+// interface for a keyboard and a mouse, and as many again from dinput.dll.
+// Windows 11's dinput.dll hands out one A and one W vtable for every device
+// interface and kind, whose methods share one address. More is refused at
+// install, with a log line.
+inline constexpr int kDiVariants = 8;
+// dinput.dll's device types, which dinput.h defines only for a
+// DIRECTINPUT_VERSION of 0x0700 or below.
+inline constexpr BYTE kDi7DevTypeMouse = 2;
+inline constexpr BYTE kDi7DevTypeKeyboard = 3;
 
 using DiRelease_t = ULONG (STDMETHODCALLTYPE*)(void*);
 using DiGetCapabilities_t = HRESULT (STDMETHODCALLTYPE*)(void*, LPDIDEVCAPS);
@@ -676,10 +690,25 @@ using DiSetDataFormat_t = HRESULT (STDMETHODCALLTYPE*)(void*, LPCDIDATAFORMAT);
 using DiGetObjectInfo_t = HRESULT (STDMETHODCALLTYPE*)(void*, void*, DWORD, DWORD);
 using DirectInput8Create_t = HRESULT (WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 using DiCreateDevice_t = HRESULT (STDMETHODCALLTYPE*)(void*, REFGUID, void**, LPUNKNOWN);
+// DirectInputCreateEx takes the same arguments as DirectInput8Create.
+using DirectInputCreateEx_t = DirectInput8Create_t;
+using DiCreateDeviceEx_t = HRESULT (STDMETHODCALLTYPE*)(void*, REFGUID, REFIID, void**, LPUNKNOWN);
+// IDirectInput7 slots.
+inline constexpr int kDi7CreateDeviceSlot = 3;
+inline constexpr int kDi7CreateDeviceExSlot = 9;
+inline constexpr DWORD kDirectInput7Version = 0x0700;
 
 // Spelled out here so that a mod needs neither dxguid.lib nor dinput8.lib.
 inline constexpr GUID kIidDirectInput8A = {0xBF798030, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
 inline constexpr GUID kIidDirectInput8W = {0xBF798031, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
+inline constexpr GUID kIidDirectInput7A = {0x9A4CB684, 0x236D, 0x11D3, {0x8E, 0x9D, 0x00, 0xC0, 0x4F, 0x68, 0x44, 0xAE}};
+inline constexpr GUID kIidDirectInput7W = {0x9A4CB685, 0x236D, 0x11D3, {0x8E, 0x9D, 0x00, 0xC0, 0x4F, 0x68, 0x44, 0xAE}};
+inline constexpr GUID kIidDirectInputDeviceA = {0x5944E680, 0xC92E, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kIidDirectInputDeviceW = {0x5944E681, 0xC92E, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kIidDirectInputDevice2A = {0x5944E682, 0xC92E, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kIidDirectInputDevice2W = {0x5944E683, 0xC92E, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kIidDirectInputDevice7A = {0x57D7C6BC, 0x2356, 0x11D3, {0x8E, 0x9D, 0x00, 0xC0, 0x4F, 0x68, 0x44, 0xAE}};
+inline constexpr GUID kIidDirectInputDevice7W = {0x57D7C6BD, 0x2356, 0x11D3, {0x8E, 0x9D, 0x00, 0xC0, 0x4F, 0x68, 0x44, 0xAE}};
 inline constexpr GUID kGuidSysMouse = {0x6F1D2B60, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 inline constexpr GUID kGuidSysKeyboard = {0x6F1D2B61, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 inline constexpr GUID kGuidXAxis = {0xA36D02E0, 0xC9F3, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
@@ -705,6 +734,8 @@ struct DirectInput {
     std::vector<DirectInputDevice> devices;
     bool hooked = false;
     bool attempted = false;
+    bool attempted7 = false;
+    int variants[kDiMethods] = {};
     void* targets[kDiMethods][kDiVariants] = {};
     void* originals[kDiMethods][kDiVariants] = {};
 };
@@ -774,8 +805,9 @@ inline DirectInputDevice& DiDevice(void* object, std::unique_lock<std::mutex>& l
     caps.dwSize = sizeof(caps);
     reinterpret_cast<DiGetCapabilities_t>(Vtable(object)[kDiSlots[kDiGetCapabilities]])(object, &caps);
     const BYTE type = GET_DIDEVICE_TYPE(caps.dwDevType);
-    const bool synthetic = type == DI8DEVTYPE_KEYBOARD || type == DI8DEVTYPE_MOUSE;
-    const DirectInputKind kind = type == DI8DEVTYPE_MOUSE ? DirectInputKind::kMouse : DirectInputKind::kKeyboard;
+    const bool mouse = type == DI8DEVTYPE_MOUSE || type == kDi7DevTypeMouse;
+    const bool synthetic = mouse || type == DI8DEVTYPE_KEYBOARD || type == kDi7DevTypeKeyboard;
+    const DirectInputKind kind = mouse ? DirectInputKind::kMouse : DirectInputKind::kKeyboard;
     DirectInputFormat format;
     if (synthetic) format = ReadDataFormat(object, kind, kFormatProbeBytes, 0);
     lock.lock();
@@ -964,13 +996,18 @@ inline void* DiDetour(DirectInputMethod method) {
     }
 }
 
+template <int... Variant>
+inline void* DiDetourOf(DirectInputMethod method, int variant, std::integer_sequence<int, Variant...>) {
+    void* const detours[] = {DiDetour<Variant>(method)...};
+    return detours[variant];
+}
+
 inline void* DiDetour(DirectInputMethod method, int variant) {
-    switch (variant) {
-        case 0:  return DiDetour<0>(method);
-        case 1:  return DiDetour<1>(method);
-        case 2:  return DiDetour<2>(method);
-        default: return DiDetour<3>(method);
-    }
+    return DiDetourOf(method, variant, std::make_integer_sequence<int, kDiVariants>{});
+}
+
+inline void ReleaseObject(void* object) {
+    reinterpret_cast<DiRelease_t>(Vtable(object)[kDiSlots[kDiRelease]])(object);
 }
 
 // Adds the vtables of a keyboard and a mouse device made from a throwaway
@@ -987,21 +1024,100 @@ inline bool CollectDeviceVtables(DirectInput8Create_t create, const GUID& interf
             continue;
         }
         vtables.push_back(Vtable(device));
-        reinterpret_cast<DiRelease_t>(Vtable(device)[kDiSlots[kDiRelease]])(device);
+        ReleaseObject(device);
     }
-    reinterpret_cast<DiRelease_t>(Vtable(directInput)[2])(directInput);
+    ReleaseObject(directInput);
     return ok;
 }
 
-inline void RemoveDirectInputHooks() {
-    for (auto& method : D().targets) {
-        for (void*& target : method) {
-            if (!target) continue;
-            MH_DisableHook(target);
-            MH_RemoveHook(target);
-            target = nullptr;
+// Adds the vtables of a keyboard and a mouse device made from a throwaway
+// IDirectInput7 of one character set: what CreateDevice hands out, and what
+// CreateDeviceEx hands out for each device interface of that character set, so
+// a game on any of them is covered.
+inline bool CollectDevice7Vtables(DirectInputCreateEx_t create, const GUID& interfaceId,
+                                  std::initializer_list<const GUID*> deviceInterfaces, std::vector<void**>& vtables) {
+    void* directInput = nullptr;
+    if (FAILED(create(GetModuleHandleW(nullptr), kDirectInput7Version, interfaceId, &directInput, nullptr))) return false;
+    const auto createDevice = reinterpret_cast<DiCreateDevice_t>(Vtable(directInput)[kDi7CreateDeviceSlot]);
+    const auto createDeviceEx = reinterpret_cast<DiCreateDeviceEx_t>(Vtable(directInput)[kDi7CreateDeviceExSlot]);
+    bool ok = true;
+    for (const GUID* guid : {&kGuidSysKeyboard, &kGuidSysMouse}) {
+        void* device = nullptr;
+        if (FAILED(createDevice(directInput, *guid, &device, nullptr))) {
+            ok = false;
+            continue;
+        }
+        vtables.push_back(Vtable(device));
+        ReleaseObject(device);
+        for (const GUID* deviceInterface : deviceInterfaces) {
+            if (FAILED(createDeviceEx(directInput, *guid, *deviceInterface, &device, nullptr))) {
+                ok = false;
+                continue;
+            }
+            vtables.push_back(Vtable(device));
+            ReleaseObject(device);
         }
     }
+    ReleaseObject(directInput);
+    return ok;
+}
+
+// Detours each method in `vtables` at the next free variant, skipping an
+// address already detoured. Every detour it put in is taken out again when one
+// fails, and those another call put in are left.
+inline bool DetourDeviceVtables(const std::vector<void**>& vtables, int& detours) {
+    DirectInput& d = D();
+    int before[kDiMethods];
+    std::memcpy(before, d.variants, sizeof(before));
+    bool ok = true;
+    for (int method = 0; ok && method < kDiMethods; ++method) {
+        if (method == kDiGetCapabilities) continue;
+        for (void** vtable : vtables) {
+            void* const target = vtable[kDiSlots[method]];
+            int& variants = d.variants[method];
+            bool known = false;
+            for (int i = 0; i < variants; ++i) known = known || d.targets[method][i] == target;
+            if (known) continue;
+            if (variants == kDiVariants) {
+                Log("isolated input: a DirectInput device method has more addresses than there are detours for it");
+                ok = false;
+                break;
+            }
+            if (MH_CreateHook(target, DiDetour(static_cast<DirectInputMethod>(method), variants),
+                              &d.originals[method][variants]) != MH_OK) {
+                Log("isolated input: could not hook a DirectInput device method");
+                ok = false;
+                break;
+            }
+            d.targets[method][variants++] = target;
+            if (MH_EnableHook(target) != MH_OK) {
+                Log("isolated input: could not enable the hook on a DirectInput device method");
+                ok = false;
+                break;
+            }
+            ++detours;
+        }
+    }
+    if (ok) return true;
+    // `originals` is left as it is: a game thread may still be inside a detour
+    // that is about to call through it.
+    for (int method = 0; method < kDiMethods; ++method) {
+        for (int i = before[method]; i < d.variants[method]; ++i) {
+            MH_DisableHook(d.targets[method][i]);
+            MH_RemoveHook(d.targets[method][i]);
+            d.targets[method][i] = nullptr;
+        }
+        d.variants[method] = before[method];
+    }
+    return false;
+}
+
+inline void LogDirectInputDetoured(const char* which, int detours, size_t vtables) {
+    char line[220];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: %s keyboard and mouse devices answer from the command file (%d detours over %zu device vtables)",
+                  which, detours, vtables);
+    Log(line);
 }
 
 // Detours the device methods once dinput8.dll is in the process. Run from the
@@ -1023,36 +1139,52 @@ inline void InstallDirectInput() {
         Log("isolated input: could not make DirectInput devices to find their vtable, so DirectInput is not detoured");
         return;
     }
-
     int detours = 0;
-    for (int method = 0; method < kDiMethods; ++method) {
-        if (method == kDiGetCapabilities) continue;
-        int variants = 0;
-        for (void** vtable : vtables) {
-            void* const target = vtable[kDiSlots[method]];
-            bool known = false;
-            for (int i = 0; i < variants; ++i) known = known || d.targets[method][i] == target;
-            if (known) continue;
-            const bool created = MH_CreateHook(target, DiDetour(static_cast<DirectInputMethod>(method), variants),
-                                               &d.originals[method][variants]) == MH_OK;
-            if (created) d.targets[method][variants++] = target;
-            if (!created || MH_EnableHook(target) != MH_OK) {
-                Log("isolated input: could not hook a DirectInput device method, so DirectInput is not detoured");
-                RemoveDirectInputHooks();
-                return;
-            }
-            ++detours;
-        }
+    if (!DetourDeviceVtables(vtables, detours)) {
+        Log("isolated input: DirectInput 8 is not detoured");
+        return;
     }
     {
         std::lock_guard<std::mutex> lock(d.mutex);
         d.hooked = true;
     }
-    char line[200];
-    std::snprintf(line, sizeof(line),
-                  "isolated input: DirectInput keyboard and mouse devices answer from the command file (%d detours over %zu device vtables)",
-                  detours, vtables.size());
-    Log(line);
+    LogDirectInputDetoured("DirectInput", detours, vtables.size());
+}
+
+// The same for dinput.dll, DirectInput 7 and before, whichever of
+// DirectInputCreateA, DirectInputCreateW and DirectInputCreateEx the game
+// calls: the device vtables are found through DirectInputCreateEx, and the
+// buffered records a game reads from these devices are the 16-byte
+// DIDEVICEOBJECTDATA_DX3, which GetDeviceData answers as it does the larger
+// DirectInput 8 record.
+inline void InstallDirectInput7() {
+    DirectInput& d = D();
+    if (d.attempted7) return;
+    const HMODULE module = GetModuleHandleW(L"dinput.dll");
+    if (!module) return;
+    d.attempted7 = true;
+
+    const auto create = reinterpret_cast<DirectInputCreateEx_t>(
+        reinterpret_cast<void*>(GetProcAddress(module, "DirectInputCreateEx")));
+    std::vector<void**> vtables;
+    if (!create
+        || !CollectDevice7Vtables(create, kIidDirectInput7A,
+                                  {&kIidDirectInputDeviceA, &kIidDirectInputDevice2A, &kIidDirectInputDevice7A}, vtables)
+        || !CollectDevice7Vtables(create, kIidDirectInput7W,
+                                  {&kIidDirectInputDeviceW, &kIidDirectInputDevice2W, &kIidDirectInputDevice7W}, vtables)) {
+        Log("isolated input: could not make DirectInput 7 devices to find their vtable, so dinput.dll is not detoured");
+        return;
+    }
+    int detours = 0;
+    if (!DetourDeviceVtables(vtables, detours)) {
+        Log("isolated input: DirectInput 7 is not detoured");
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(d.mutex);
+        d.hooked = true;
+    }
+    LogDirectInputDetoured("DirectInput 7", detours, vtables.size());
 }
 
 // False only when the game reads DirectInput and the key has no DirectInput
@@ -1919,6 +2051,7 @@ inline void RunCommandFile() {
     for (;;) {
         Sleep(kPollMs);
         InstallDirectInput();
+        InstallDirectInput7();
         InstallGameInput();
         std::ifstream file(S().commandFile);
         std::string header;
