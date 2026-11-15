@@ -234,5 +234,110 @@ namespace CameraUnlock.Core.Tests.Processing
                     $"Frame deltas should be equal: {refDelta} vs {delta} at frame {i}");
             }
         }
+
+        // A 30 Hz tracker and a 60 fps game, the head turning 2 degrees a sample (60 a second).
+        // Frame i is drawn at i/60 s and carries the newest sample sent by then.
+        private const float GameDt = 1f / 60f;
+        private const float DegreesPerSample = 2f;
+
+        private static float Head(int sample) => sample * DegreesPerSample;
+
+        private sealed class Feed
+        {
+            private readonly PoseInterpolator _interp = new PoseInterpolator();
+            private int _sample = -1;
+            private float _t;
+            public long Ticks = 1;
+
+            /// Draws one frame `dt` after the last; returns the drawn yaw and the newest sample's.
+            public (float drawn, float head) Frame(float dt)
+            {
+                _t += dt;
+                int newest = (int)System.Math.Floor(_t * 30f + 1e-4f);
+                bool fresh = newest != _sample;
+                _sample = newest;
+                if (fresh) Ticks++;
+                return (_interp.Update(MakePose(Head(newest), 0f, 0f, Ticks), fresh, dt).Yaw, Head(newest));
+            }
+        }
+
+        [Fact]
+        public void AfterAGameFreeze_TheViewLandsOnTheNewestSampleAndDoesNotSwingPastIt()
+        {
+            var feed = new Feed();
+            for (int i = 0; i < 60; i++) feed.Frame(GameDt);
+
+            var (drawn, head) = feed.Frame(0.5f);
+            Assert.Equal(head, drawn, precision: 3);
+
+            for (int i = 0; i < 30; i++)
+            {
+                (drawn, head) = feed.Frame(GameDt);
+                Assert.True(drawn <= head + 0.01f, $"frame {i} after the freeze drew {drawn}, past the newest sample {head}");
+            }
+        }
+
+        [Fact]
+        public void WhenTheFreezesSampleComesAFrameLate_ThatFrameDrawsIt()
+        {
+            var interp = new PoseInterpolator();
+            long ticks = 1;
+            float yaw = 0f;
+            for (int i = 0; i < 60; i++)
+            {
+                bool fresh = i % 2 == 0;
+                if (fresh) { yaw = DegreesPerSample * (i / 2); ticks++; }
+                interp.Update(MakePose(yaw, 0f, 0f, ticks), fresh, GameDt);
+            }
+
+            interp.Update(MakePose(yaw, 0f, 0f, ticks), false, 0.5f);
+            yaw += 30f;
+            ticks++;
+            Assert.Equal(yaw, interp.Update(MakePose(yaw, 0f, 0f, ticks), true, GameDt).Yaw, precision: 3);
+        }
+
+        [Fact]
+        public void AfterAGameFreeze_TheViewIsBackToItsUsualLagWithin200Ms()
+        {
+            var feed = new Feed();
+            float usual = 0f;
+            for (int i = 0; i < 60; i++)
+            {
+                var (d, h) = feed.Frame(GameDt);
+                if (i >= 30) usual = System.Math.Max(usual, h - d);
+            }
+
+            feed.Frame(0.5f);
+            for (int i = 0; i < 12; i++) feed.Frame(GameDt);
+            for (int i = 0; i < 30; i++)
+            {
+                var (d, h) = feed.Frame(GameDt);
+                Assert.True(h - d <= usual + 0.1f, $"{(12 + i) * 1000 / 60} ms after the freeze the view trails by {h - d}, usually at most {usual}");
+            }
+        }
+
+        [Fact]
+        public void ATrackerThatSlowsTo10Hz_IsStillFilledInWithoutFlatSpots()
+        {
+            var interp = new PoseInterpolator();
+            long ticks = 1;
+            float yaw = 0f;
+            float last = 0f;
+            const int FramesPerSample = 6;
+            for (int i = 0; i < 2 * 60; i++)
+            {
+                bool fresh = i % 2 == 0;
+                if (fresh) { yaw += 1f; ticks++; }
+                last = interp.Update(MakePose(yaw, 0f, 0f, ticks), fresh, GameDt).Yaw;
+            }
+            for (int i = 0; i < 2 * 60; i++)
+            {
+                bool fresh = i % FramesPerSample == 0;
+                if (fresh) { yaw += 3f; ticks++; }
+                float drawn = interp.Update(MakePose(yaw, 0f, 0f, ticks), fresh, GameDt).Yaw;
+                if (i >= 60) Assert.True(drawn - last > 0.1f, $"frame {i} at 10 Hz moved {drawn - last}: a flat spot");
+                last = drawn;
+            }
+        }
     }
 }

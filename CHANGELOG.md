@@ -40,6 +40,26 @@ the receiver and the hotkeys work there (docs/core-jar.md, "On Linux"). Windows 
 - `windowCenter` throws `UnsupportedOperationException` on Linux.
 - `pixi run test-java-linux` runs the module's Linux checks in a container.
 
+### Fixed - the interpolators catch up after the game freezes, and no longer swing past the head
+
+After a long frame, `PoseInterpolator` and `PositionInterpolator` (C# and C++) draw the newest
+sample and go on from it. Off a 30 Hz tracker turning 60 degrees a second at 60 fps, a 500 ms
+freeze used to draw the view 15 degrees past the head and swing it back over 150 ms, then trail
+by an extra 10 to 20 ms for 300 ms. Now the frame after the freeze lands on the newest sample and
+the lag is back to normal within 200 ms. Nothing for a mod to change.
+
+- After a frame longer than `1 + MaxExtrapolationFraction` sample intervals, the next new sample
+  is drawn as it is and the segment starts from it, holding there until the sample after. An
+  ordinary hitch is one when it is long enough: off a 60 Hz tracker, a frame over about 25 ms.
+- A gap between samples counts into the interval estimate as at most twice the estimate
+  (`MaxIntervalGrowth`, `kMaxIntervalGrowth`). A tracker that really slows is followed over more
+  samples: 30 Hz to 4 Hz in about 7, where it took 4.
+- `docs/porting-the-pipeline.md` section 12, and two vectors in `data/pipeline-conformance.json`
+  (`a-long-frame-lands-on-the-newest-sample` and its position twin), with `max_interval_growth`
+  in its constants. A port that runs the vectors fails both until it does the same: of the ports
+  in that doc, cyberpunk-2077-headtracking (Lua), minecraft-java-edition-headtracking (Java) and
+  fusion-360-headtracking (Python) run them.
+
 ### Added - isolated input drives DirectInput 7 devices from `dinput.dll`
 
 A game that loads `dinput.dll` has its keyboard and mouse device methods detoured as a

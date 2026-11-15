@@ -120,6 +120,51 @@ void TestPositionStall() {
           "a dropped-packet position gap still holds the prediction");
 }
 
+// A 30 Hz tracker turning 2 degrees a sample, a 60 fps game, then one 500 ms frame: the
+// frame after draws the newest sample, and none after it goes past the newest. The old code
+// put the view 15 degrees past and swung it back.
+void TestPoseCatchesUpAfterAGameFreeze() {
+    cameraunlock::PoseInterpolator interp;
+    float yaw = 0.0f;
+    for (int i = 0; i < 60; ++i) {
+        const bool fresh = i % 2 == 0;
+        if (fresh) yaw += 2.0f;
+        interp.Update(yaw, 0.0f, 0.0f, fresh, 1.0f / 60.0f);
+    }
+    yaw += 30.0f;
+    Check(NearEqual(interp.Update(yaw, 0.0f, 0.0f, true, 0.5f).yaw, yaw, 1e-3f),
+          "the frame after a freeze draws the newest sample");
+    bool past = false;
+    for (int i = 0; i < 30; ++i) {
+        const bool fresh = i % 2 == 1;
+        if (fresh) yaw += 2.0f;
+        if (interp.Update(yaw, 0.0f, 0.0f, fresh, 1.0f / 60.0f).yaw > yaw + 0.01f) past = true;
+    }
+    Check(!past, "no frame after a freeze goes past the newest sample");
+}
+
+void TestPositionCatchesUpAfterAGameFreeze() {
+    cameraunlock::PositionInterpolator interp;
+    float x = 0.0f;
+    int64_t t = 1;
+    for (int i = 0; i < 60; ++i) {
+        const bool fresh = i % 2 == 0;
+        if (fresh) { x += 0.01f; ++t; }
+        interp.Update(cameraunlock::PositionData(x, 0.0f, 0.0f, t), fresh, 1.0f / 60.0f);
+    }
+    x += 0.15f;
+    ++t;
+    Check(NearEqual(interp.Update(cameraunlock::PositionData(x, 0.0f, 0.0f, t), true, 0.5f).x, x, 1e-4f),
+          "the frame after a freeze draws the newest position sample");
+    bool past = false;
+    for (int i = 0; i < 30; ++i) {
+        const bool fresh = i % 2 == 1;
+        if (fresh) { x += 0.01f; ++t; }
+        if (interp.Update(cameraunlock::PositionData(x, 0.0f, 0.0f, t), fresh, 1.0f / 60.0f).x > x + 1e-4f) past = true;
+    }
+    Check(!past, "no frame after a freeze goes past the newest position sample");
+}
+
 }  // namespace
 
 int RunInterpolatorTests() {
@@ -128,5 +173,7 @@ int RunInterpolatorTests() {
     TestPoseDroppedPacketStillExtrapolates();
     TestSegmentPositionShape();
     TestPositionStall();
+    TestPoseCatchesUpAfterAGameFreeze();
+    TestPositionCatchesUpAfterAGameFreeze();
     return g_failures;
 }

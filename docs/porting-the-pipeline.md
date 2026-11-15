@@ -383,3 +383,33 @@ the runtime yaw-mode toggle switched between them mid-session.
 
 **Check.** Feed the same forward-lean offset through every apply path with a
 rotated game camera and assert they place the camera at the same world point.
+
+## 12. A frame that froze catches up, it does not play out
+
+Reference: `PoseInterpolator::Update`, `kMaxIntervalGrowth`.
+
+When the game stalls, the next frame's `delta_time` is the whole stall. Two things in the
+interpolator must not take it at face value.
+
+The new segment runs from the pose shown before the stall to the newest sample. Advancing it by
+the stalled frame's `delta_time` drives progress straight to the `1.0 + max_extrapolation_fraction`
+cap, and the cap is a fraction of a segment that now spans the whole stall. So a frame whose
+`delta_time` is more than `sample_interval * (1 + max_extrapolation_fraction)`, taking the estimate
+as it stands before that frame's sample updates it, marks a long frame. The next new sample, on
+that frame or a later one (the first sample after a freeze can come a frame late), is drawn as it
+is and the segment starts from it (`from = to`), so the view holds on it until the sample after.
+Off a 30 Hz tracker turning 60 degrees a second, a 500 ms freeze drew 103 degrees for a head at 88
+and swung back over 150 ms. An ordinary hitch meets the same rule when it is long enough: off a
+60 Hz tracker, a frame over about 25 ms is one.
+
+The stall is the game's gap, not the tracker's. Folded whole into the interval estimate it set the
+estimate to 173 ms, and since every later segment is spread over the estimate, the view trailed
+the head by an extra 10 to 20 ms for 300 ms while the estimate shrank back. A gap counts into the
+estimate as at most `kMaxIntervalGrowth` (2) times the estimate, so the estimate still follows a
+tracker that really slows, by up to 1.3x a sample: from 30 Hz to 4 Hz in about 7 samples, where
+the whole gap took 4. The first measured gap is still taken whole.
+
+**Check.** A 30 Hz tracker turning 2 degrees a sample at 60 fps, then one 500 ms frame with the
+newest sample at 88: that frame draws 88, the next two draw no more than the newest sample, and
+14 frames (233 ms) on the view is back to its usual lag. The same with the freeze's sample
+coming on the frame after the long one: that frame draws it.

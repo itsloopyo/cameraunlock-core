@@ -85,6 +85,13 @@ namespace CameraUnlock.Core.Processing
         internal const float MinSampleInterval = 0.001f;
         internal const float MaxSampleInterval = 0.2f;
 
+        // A gap between samples counts into the estimate as at most this many times the
+        // estimate. A game frame that froze for half a second is the game's gap, not the
+        // tracker's: taken whole, it set the estimate to 173 ms off a 30 Hz tracker, and the
+        // view trailed the head for 300 ms after the freeze while it shrank back. A tracker
+        // that really slows is still followed, the estimate growing by up to 1.3x a sample.
+        internal const float MaxIntervalGrowth = 2f;
+
         // Interpolation start point (where we're coming from)
         private float _fromYaw, _fromPitch, _fromRoll;
 
@@ -105,6 +112,9 @@ namespace CameraUnlock.Core.Processing
 
         private bool _hasFirstSample;
         private bool _hasSecondSample;
+
+        // A frame since the last new sample took longer than the run-ahead covers.
+        private bool _longFrame;
 
         /// <summary>
         /// Update with the latest raw pose and frame delta time.
@@ -134,6 +144,7 @@ namespace CameraUnlock.Core.Processing
             }
 
             _timeSinceLastNewSample += deltaTime;
+            if (deltaTime > _sampleInterval * (1f + MaxExtrapolationFraction)) _longFrame = true;
 
             if (isNewSample)
             {
@@ -150,21 +161,22 @@ namespace CameraUnlock.Core.Processing
                     _progress = 1f;
                     _timeSinceLastNewSample = 0f;
                     _hasFirstSample = true;
+                    _longFrame = false;
                     return rawPose;
                 }
 
                 // Update sample interval estimate (EMA).
                 //
-                // A packet-loss gap does get folded in here and transiently inflates the
-                // estimate, which costs a few hundred ms of extra smoothing after a
-                // dropout. Do NOT "fix" that by gating the observation on
-                // <= MaxSampleInterval: _hasSecondSample is only set inside this block,
-                // so any tracker whose genuine interval exceeds MaxSampleInterval (a
+                // A packet-loss gap or a game freeze is folded in here, but at most at
+                // MaxIntervalGrowth times the estimate, so it inflates the estimate by up to
+                // 1.3x rather than to the whole gap. Do NOT gate the observation on
+                // <= MaxSampleInterval instead: _hasSecondSample is only set inside this
+                // block, so any tracker whose genuine interval exceeds MaxSampleInterval (a
                 // throttled phone below 5Hz) would then never update the estimate at all
                 // and would sit permanently at the default, extrapolating to the cap for
-                // most of every sample period. Telling a one-off gap from a genuinely slow
-                // source needs a consistency check across several samples, not a
-                // single-observation bound.
+                // most of every sample period. The relative bound still lets the estimate
+                // reach a genuinely slow source, over more samples: 30 Hz to 4 Hz takes about
+                // 7 samples, where the whole gap took 4.
                 if (_timeSinceLastNewSample > MinSampleInterval)
                 {
                     if (!_hasSecondSample)
@@ -174,7 +186,8 @@ namespace CameraUnlock.Core.Processing
                     }
                     else
                     {
-                        _sampleInterval += (_timeSinceLastNewSample - _sampleInterval) * IntervalBlend;
+                        float gap = System.Math.Min(_timeSinceLastNewSample, _sampleInterval * MaxIntervalGrowth);
+                        _sampleInterval += (gap - _sampleInterval) * IntervalBlend;
                     }
 
                     if (_sampleInterval < MinSampleInterval) _sampleInterval = MinSampleInterval;
@@ -199,6 +212,21 @@ namespace CameraUnlock.Core.Processing
 
                 _progress = 0f;
                 _timeSinceLastNewSample = 0f;
+
+                // After a frame that alone ran past the extrapolation cap (the game froze or
+                // hitched), the new sample is drawn as it is and the segment starts from it,
+                // holding there until the next sample. Lerped from the pose shown before, the
+                // segment spans the whole long frame, and its run-ahead threw the view half of
+                // it past the head: 15 degrees after a 500 ms freeze with the head turning at 60
+                // degrees a second, swinging back over 150 ms. The long frame need not be this
+                // one: the first sample after a freeze can come a frame late.
+                if (_longFrame)
+                {
+                    _fromYaw = _toYaw;
+                    _fromPitch = _toPitch;
+                    _fromRoll = _toRoll;
+                    _longFrame = false;
+                }
             }
 
             // Advance interpolation
@@ -234,6 +262,7 @@ namespace CameraUnlock.Core.Processing
             _timeSinceLastNewSample = 0f;
             _hasFirstSample = false;
             _hasSecondSample = false;
+            _longFrame = false;
         }
     }
 }

@@ -96,6 +96,11 @@
     },
     "min_sample_interval": { "value": 0.001, "cpp": "PoseInterpolator::kMinSampleInterval" },
     "max_sample_interval": { "value": 0.2, "cpp": "PoseInterpolator::kMaxSampleInterval" },
+    "max_interval_growth": {
+      "value": 2.0,
+      "cpp": "PoseInterpolator::kMaxIntervalGrowth",
+      "note": "A gap between samples counts into the interval estimate as at most this many times the estimate. The first measured gap is taken whole."
+    },
     "extrapolation_hold_seconds": {
       "value": 0.25,
       "cpp": "PoseInterpolator::kExtrapolationHoldSeconds",
@@ -954,6 +959,60 @@
         { "kind": "min_step", "from": "steady", "to": "steady:last", "field": "yaw", "value": 0.85 },
         { "kind": "max_step", "from": "steady", "to": "steady:last", "field": "yaw", "value": 1.25 },
         { "kind": "equals", "at": "tail:last", "field": "yaw", "value": 120.0, "tolerance": 0.05 }
+      ]
+    },
+    {
+      "id": "a-long-frame-lands-on-the-newest-sample",
+      "section": 12,
+      "title": "After a frame that froze, the view draws the newest sample and is back to its usual lag 233 ms on",
+      "catches": "A long game frame taken as interpolation progress and as a sample gap. Here a 30 Hz tracker turns 2 degrees a sample at 60 fps and one frame takes 500 ms. Counted into the new segment, which runs from the pose shown before the freeze, that frame drove progress to the 1.5x cap and drew 103 degrees for a head at 88, then swung back. Folded whole into the interval estimate, it set the estimate to about 178 ms, and the view trailed by an extra 10 to 20 ms for 300 ms while the estimate shrank.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "steady", "dt": 0.016666666666666666, "count": 60, "new_every": 2, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 2.0 } },
+        { "op": "step", "label": "freeze", "yaw": 88.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.5 },
+        { "op": "ramp", "label": "after", "dt": 0.016666666666666666, "count": 30, "new_every": 2, "from": { "yaw": 90.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 2.0 } }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "freeze", "field": "yaw", "value": 88.0, "tolerance": 0.01 },
+        { "kind": "abs_at_most", "from": "freeze", "to": 62, "field": "yaw", "value": 90.01 },
+        { "kind": "equals", "at": 74, "field": "yaw", "value": 102.0, "tolerance": 0.05 }
+      ]
+    },
+    {
+      "id": "position-interpolator-a-long-frame-lands-on-the-newest-sample",
+      "section": 12,
+      "title": "The position interpolator also draws the newest sample after a frame that froze",
+      "catches": "The catch-up fixed in the rotation interpolator only. A 30 Hz tracker leans 1 cm a sample at 60 fps and one frame takes 500 ms.",
+      "unit": "position_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "steady", "dt": 0.016666666666666666, "count": 60, "new_every": 2, "from": { "x": 0.0, "y": 0.0, "z": 0.0 }, "per_sample": { "x": 0.01 } },
+        { "op": "step", "label": "freeze", "x": 0.44, "y": 0.0, "z": 0.0, "new": true, "dt": 0.5 },
+        { "op": "ramp", "label": "after", "dt": 0.016666666666666666, "count": 30, "new_every": 2, "from": { "x": 0.45, "y": 0.0, "z": 0.0 }, "per_sample": { "x": 0.01 } }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "freeze", "field": "x", "value": 0.44, "tolerance": 0.0001 },
+        { "kind": "abs_at_most", "from": "freeze", "to": 62, "field": "x", "value": 0.4501 },
+        { "kind": "equals", "at": 74, "field": "x", "value": 0.51, "tolerance": 0.0005 }
+      ]
+    },
+    {
+      "id": "a-long-frame-lands-on-the-newest-sample-a-frame-late",
+      "section": 12,
+      "title": "When the first sample after a frame that froze comes a frame late, that frame still draws it",
+      "catches": "A catch-up keyed on the long frame carrying the new sample. The receiver can hand the freeze's sample over a frame later. On the old code the segment then ran from the pose shown before the freeze over the inflated interval estimate: that frame drew 61 degrees for a head at 88, and 250 ms on the view was still 2 degrees behind, where it usually trails by 1 at most. Catching up only on a long frame that carries the sample drew 70, and was back to its usual lag four frames later.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "steady", "dt": 0.016666666666666666, "count": 60, "new_every": 2, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 2.0 } },
+        { "op": "step", "label": "freeze", "yaw": 58.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.5 },
+        { "op": "step", "label": "late", "yaw": 88.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.016666666666666666 },
+        { "op": "ramp", "label": "after", "dt": 0.016666666666666666, "count": 30, "new_every": 2, "from": { "yaw": 90.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 2.0 } }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "late", "field": "yaw", "value": 88.0, "tolerance": 0.01 },
+        { "kind": "abs_at_most", "from": "late", "to": 63, "field": "yaw", "value": 90.01 }
       ]
     }
   ]

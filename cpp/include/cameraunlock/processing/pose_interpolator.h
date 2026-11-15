@@ -85,6 +85,7 @@ public:
     inline InterpolatedPose Update(float yaw, float pitch, float roll,
                                    bool is_new_sample, float delta_time) {
         m_timeSinceLastNewSample += delta_time;
+        if (delta_time > m_sampleInterval * (1.0f + max_extrapolation_fraction)) m_longFrame = true;
 
         if (is_new_sample) {
             if (!m_hasFirstSample) {
@@ -94,6 +95,7 @@ public:
                 m_progress = 1.0f;
                 m_timeSinceLastNewSample = 0.0f;
                 m_hasFirstSample = true;
+                m_longFrame = false;
                 return {yaw, pitch, roll};
             }
 
@@ -103,7 +105,9 @@ public:
                     m_sampleInterval = m_timeSinceLastNewSample;
                     m_hasSecondSample = true;
                 } else {
-                    m_sampleInterval += (m_timeSinceLastNewSample - m_sampleInterval) * kIntervalBlend;
+                    const float gap = m_timeSinceLastNewSample < m_sampleInterval * kMaxIntervalGrowth
+                                          ? m_timeSinceLastNewSample : m_sampleInterval * kMaxIntervalGrowth;
+                    m_sampleInterval += (gap - m_sampleInterval) * kIntervalBlend;
                 }
                 if (m_sampleInterval < kMinSampleInterval) m_sampleInterval = kMinSampleInterval;
                 if (m_sampleInterval > kMaxSampleInterval) m_sampleInterval = kMaxSampleInterval;
@@ -124,6 +128,19 @@ public:
             m_toYaw = yaw;    m_toPitch = pitch;    m_toRoll = roll;
             m_progress = 0.0f;
             m_timeSinceLastNewSample = 0.0f;
+
+            // After a frame that alone ran past the extrapolation cap (the game froze or
+            // hitched), the new sample is drawn as it is and the segment starts from it,
+            // holding there until the next sample. Lerped from the pose shown before, the
+            // segment spans the whole long frame, and its run-ahead threw the view half of
+            // it past the head: 15 degrees after a 500 ms freeze with the head turning at 60
+            // degrees a second, swinging back over 150 ms. The long frame need not be this
+            // one: the first sample after a freeze can come a frame late. Matches C#
+            // PoseInterpolator.
+            if (m_longFrame) {
+                m_fromYaw = m_toYaw;    m_fromPitch = m_toPitch;    m_fromRoll = m_toRoll;
+                m_longFrame = false;
+            }
         }
 
         if (!m_hasFirstSample) {
@@ -153,6 +170,7 @@ public:
         m_timeSinceLastNewSample = 0.0f;
         m_hasFirstSample = false;
         m_hasSecondSample = false;
+        m_longFrame = false;
     }
 
 private:
@@ -167,6 +185,13 @@ private:
     // Bounds for sample interval estimate
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;
+    // A gap between samples counts into the estimate as at most this many times the
+    // estimate. A game frame that froze for half a second is the game's gap, not the
+    // tracker's: taken whole, it set the estimate to 173 ms off a 30 Hz tracker, and the
+    // view trailed the head for 300 ms after the freeze while it shrank back. A tracker
+    // that really slows is still followed, the estimate growing by up to 1.3x a sample.
+    // Matches C# PoseInterpolator.MaxIntervalGrowth.
+    static constexpr float kMaxIntervalGrowth = 2.0f;
 
     // Interpolation segment: lerp from -> to
     float m_fromYaw = 0.0f, m_fromPitch = 0.0f, m_fromRoll = 0.0f;
@@ -183,6 +208,8 @@ private:
 
     bool m_hasFirstSample = false;
     bool m_hasSecondSample = false;
+    // A frame since the last new sample took longer than the run-ahead covers.
+    bool m_longFrame = false;
 };
 
 }  // namespace cameraunlock

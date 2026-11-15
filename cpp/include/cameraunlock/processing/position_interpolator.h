@@ -54,6 +54,7 @@ public:
         }
 
         m_timeSinceLastNewSample += delta_time;
+        if (delta_time > m_sampleInterval * (1.0f + m_maxExtrapolationFraction)) m_longFrame = true;
 
         if (is_new_sample) {
             if (!m_hasFirstSample) {
@@ -63,6 +64,7 @@ public:
                 m_progress = 1.0f;
                 m_timeSinceLastNewSample = 0.0f;
                 m_hasFirstSample = true;
+                m_longFrame = false;
                 return raw;
             }
 
@@ -72,7 +74,9 @@ public:
                     m_sampleInterval = m_timeSinceLastNewSample;
                     m_hasSecondSample = true;
                 } else {
-                    m_sampleInterval += (m_timeSinceLastNewSample - m_sampleInterval) * kIntervalBlend;
+                    const float gap = m_timeSinceLastNewSample < m_sampleInterval * kMaxIntervalGrowth
+                                          ? m_timeSinceLastNewSample : m_sampleInterval * kMaxIntervalGrowth;
+                    m_sampleInterval += (gap - m_sampleInterval) * kIntervalBlend;
                 }
                 if (m_sampleInterval < kMinSampleInterval) m_sampleInterval = kMinSampleInterval;
                 if (m_sampleInterval > kMaxSampleInterval) m_sampleInterval = kMaxSampleInterval;
@@ -89,6 +93,12 @@ public:
             m_lastTimestampUs = raw.timestamp_us;
             m_progress = 0.0f;
             m_timeSinceLastNewSample = 0.0f;
+
+            // See PoseInterpolator: after a frame past the extrapolation cap, start from the sample.
+            if (m_longFrame) {
+                m_fromX = m_toX;  m_fromY = m_toY;  m_fromZ = m_toZ;
+                m_longFrame = false;
+            }
         }
 
         if (!m_hasFirstSample) {
@@ -118,6 +128,7 @@ public:
         m_timeSinceLastNewSample = 0.0f;
         m_hasFirstSample = false;
         m_hasSecondSample = false;
+        m_longFrame = false;
     }
 
 private:
@@ -129,6 +140,8 @@ private:
     static constexpr float kDefaultSampleInterval = 1.0f / 30.0f;
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;
+    // See PoseInterpolator::kMaxIntervalGrowth.
+    static constexpr float kMaxIntervalGrowth = 2.0f;
 
     float m_maxExtrapolationFraction = 0.5f;
 
@@ -143,6 +156,7 @@ private:
 
     bool m_hasFirstSample = false;
     bool m_hasSecondSample = false;
+    bool m_longFrame = false;
 };
 
 }  // namespace cameraunlock

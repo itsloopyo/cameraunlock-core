@@ -185,5 +185,32 @@ namespace CameraUnlock.Core.Tests.Processing
 
             Assert.Equal(x, result.X, precision: 5);
         }
+
+        [Fact]
+        public void AfterAGameFreeze_TheViewLandsOnTheNewestSampleAndDoesNotSwingPastIt()
+        {
+            // A 30 Hz tracker leaning 1 cm a sample, a 60 fps game, then one 500 ms frame.
+            var interp = new PositionInterpolator();
+            long ticks = 1;
+            float x = 0f;
+            for (int i = 0; i < 60; i++)
+            {
+                bool fresh = i % 2 == 0;
+                if (fresh) { x += 0.01f; ticks++; }
+                interp.Update(MakePos(x, 0f, 0f, ticks), fresh, 1f / 60f);
+            }
+
+            x += 0.15f;
+            ticks++;
+            Assert.Equal(x, interp.Update(MakePos(x, 0f, 0f, ticks), true, 0.5f).X, precision: 4);
+
+            for (int i = 0; i < 30; i++)
+            {
+                bool fresh = i % 2 == 1;
+                if (fresh) { x += 0.01f; ticks++; }
+                float drawn = interp.Update(MakePos(x, 0f, 0f, ticks), fresh, 1f / 60f).X;
+                Assert.True(drawn <= x + 1e-4f, $"frame {i} after the freeze drew {drawn}, past the newest sample {x}");
+            }
+        }
     }
 }

@@ -10,6 +10,9 @@ position-interpolator-fills-frames-between-samples
 position-interpolator-extrapolation-expires-on-stall
 position-interpolator-resists-packet-jitter
 position-interpolator-default-sample-interval-is-one-thirtieth
+a-long-frame-lands-on-the-newest-sample
+position-interpolator-a-long-frame-lands-on-the-newest-sample
+a-long-frame-lands-on-the-newest-sample-a-frame-late
 position-clamp-before-smoothing
 position-clamp-is-asymmetric
 vertical-limits-are-independent

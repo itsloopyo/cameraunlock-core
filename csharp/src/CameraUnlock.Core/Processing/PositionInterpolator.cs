@@ -40,6 +40,7 @@ namespace CameraUnlock.Core.Processing
         private const float DefaultSampleInterval = PoseInterpolator.DefaultSampleInterval;
         private const float MinSampleInterval = PoseInterpolator.MinSampleInterval;
         private const float MaxSampleInterval = PoseInterpolator.MaxSampleInterval;
+        private const float MaxIntervalGrowth = PoseInterpolator.MaxIntervalGrowth;
 
         private float _fromX, _fromY, _fromZ;
         private float _toX, _toY, _toZ;
@@ -51,6 +52,7 @@ namespace CameraUnlock.Core.Processing
 
         private bool _hasFirstSample;
         private bool _hasSecondSample;
+        private bool _longFrame;
 
         /// <summary>
         /// Update with the latest raw position and frame delta time.
@@ -74,6 +76,7 @@ namespace CameraUnlock.Core.Processing
             }
 
             _timeSinceLastNewSample += deltaTime;
+            if (deltaTime > _sampleInterval * (1f + MaxExtrapolationFraction)) _longFrame = true;
 
             if (isNewSample)
             {
@@ -89,6 +92,7 @@ namespace CameraUnlock.Core.Processing
                     _progress = 1f;
                     _timeSinceLastNewSample = 0f;
                     _hasFirstSample = true;
+                    _longFrame = false;
                     return rawPosition;
                 }
 
@@ -102,7 +106,8 @@ namespace CameraUnlock.Core.Processing
                     }
                     else
                     {
-                        _sampleInterval += (_timeSinceLastNewSample - _sampleInterval) * IntervalBlend;
+                        float gap = System.Math.Min(_timeSinceLastNewSample, _sampleInterval * MaxIntervalGrowth);
+                        _sampleInterval += (gap - _sampleInterval) * IntervalBlend;
                     }
 
                     if (_sampleInterval < MinSampleInterval) _sampleInterval = MinSampleInterval;
@@ -121,6 +126,15 @@ namespace CameraUnlock.Core.Processing
 
                 _progress = 0f;
                 _timeSinceLastNewSample = 0f;
+
+                // See PoseInterpolator: after a frame past the extrapolation cap, start from the sample.
+                if (_longFrame)
+                {
+                    _fromX = _toX;
+                    _fromY = _toY;
+                    _fromZ = _toZ;
+                    _longFrame = false;
+                }
             }
 
             _progress += deltaTime / _sampleInterval;
@@ -153,6 +167,7 @@ namespace CameraUnlock.Core.Processing
             _timeSinceLastNewSample = 0f;
             _hasFirstSample = false;
             _hasSecondSample = false;
+            _longFrame = false;
         }
     }
 }
