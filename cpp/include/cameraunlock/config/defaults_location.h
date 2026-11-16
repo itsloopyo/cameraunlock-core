@@ -26,8 +26,8 @@ enum class DefaultsPlatform {
     kWindows,
     // A Windows program under Wine or Proton: ntdll exports wine_get_version.
     kWine,
-    // Linux or macOS with a native runtime. Only a C# mod runs there; the resolver takes it so both
-    // languages run every case.
+    // Linux or macOS with a native runtime: a C# mod, or core's jar on Linux (PosixHost). The
+    // resolver takes it in both languages so both run every case.
     kNative,
 };
 

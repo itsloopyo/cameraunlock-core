@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Holds the WebAssembly modules' imports of "cameraunlock_win32" to the host functions
-// java/src/com/cameraunlock/core/Win32Host.java registers, both ways:
+// Holds the WebAssembly modules' imports of "cameraunlock_win32" to the host functions each of
+// their two hosts registers, both ways: java/src/com/cameraunlock/core/Win32Host.java, which
+// answers them on Windows, and PosixHost.java, which answers them on Linux.
 //
 //   node scripts/check-win32-imports.mjs <module.wasm> ...
 //
@@ -10,13 +11,13 @@
 // over every module the host serves.
 
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CORE_ROOT } from './lib/repos.mjs';
 
 const MODULE = 'cameraunlock_win32';
 const repoRoot = CORE_ROOT;
-const hostSource = join(repoRoot, 'java', 'src', 'com', 'cameraunlock', 'core', 'Win32Host.java');
+const hostSources = ['Win32Host', 'PosixHost'].map((host) => join(repoRoot, 'java', 'src', 'com', 'cameraunlock', 'core', `${host}.java`));
 
 const VALTYPES = { 0x7f: 'i32', 0x7e: 'i64', 0x7d: 'f32', 0x7c: 'f64' };
 
@@ -113,14 +114,14 @@ function importsOf(wasm) {
     return imports;
 }
 
-/** Each function Win32Host registers: name -> "(i32,...)->i32", or ->void for a procedure. */
-function hostFunctions(source = readFileSync(hostSource, 'utf8')) {
+/** Each function a host registers: name -> "(i32,...)->i32", or ->void for a procedure. */
+function hostFunctions(hostSource, source = readFileSync(hostSource, 'utf8')) {
     const functions = new Map();
     // Comments out first, in one pass so whichever starts first is taken: a registration commented
     // out is not one.
     const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     for (const [, kind, name, parameters] of code.matchAll(/\b(function|procedure)\(\s*"([^"]+)",\s*(\d+),/g)) {
-        if (functions.has(name)) throw new Error(`Win32Host registers ${name} twice`);
+        if (functions.has(name)) throw new Error(`${hostSource} registers ${name} twice`);
         const params = Array.from({ length: Number(parameters) }, () => 'i32').join(',');
         functions.set(name, `(${params})->${kind === 'function' ? 'i32' : 'void'}`);
     }
@@ -129,26 +130,29 @@ function hostFunctions(source = readFileSync(hostSource, 'utf8')) {
 }
 
 export function checkWin32Imports(wasms) {
-    const host = hostFunctions();
-    const imported = new Set();
+    const imports = wasms.map((wasm) => [wasm, importsOf(wasm)]);
+    const imported = new Set(imports.flatMap(([, found]) => [...found.keys()]));
     const problems = [];
-    for (const wasm of wasms) {
-        for (const [name, type] of importsOf(wasm)) {
-            imported.add(name);
-            const implemented = host.get(name);
-            if (implemented === undefined) problems.push(`${wasm} imports ${MODULE}.${name} ${type}, which Win32Host does not register`);
-            else if (implemented !== type) problems.push(`${wasm} imports ${MODULE}.${name} as ${type}; Win32Host registers it as ${implemented}`);
+    for (const hostSource of hostSources) {
+        const host = hostFunctions(hostSource);
+        const hostName = basename(hostSource, '.java');
+        for (const [wasm, found] of imports) {
+            for (const [name, type] of found) {
+                const implemented = host.get(name);
+                if (implemented === undefined) problems.push(`${wasm} imports ${MODULE}.${name} ${type}, which ${hostName} does not register`);
+                else if (implemented !== type) problems.push(`${wasm} imports ${MODULE}.${name} as ${type}; ${hostName} registers it as ${implemented}`);
+            }
+        }
+        for (const name of host.keys()) {
+            if (!imported.has(name)) problems.push(`${hostName} registers ${MODULE}.${name}, which none of ${wasms.join(', ')} imports`);
         }
     }
-    for (const name of host.keys()) {
-        if (!imported.has(name)) problems.push(`Win32Host registers ${MODULE}.${name}, which none of ${wasms.join(', ')} imports`);
-    }
-    if (problems.length > 0) throw new Error(`the modules' Win32 imports and Win32Host disagree:\n  ${problems.join('\n  ')}`);
+    if (problems.length > 0) throw new Error(`the modules' Win32 imports and their hosts disagree:\n  ${problems.join('\n  ')}`);
     return imported.size;
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
     const wasms = process.argv.slice(2);
     if (wasms.length === 0) throw new Error('usage: node scripts/check-win32-imports.mjs <module.wasm> ...');
-    console.log(`${checkWin32Imports(wasms)} imports of ${MODULE}, each registered by Win32Host with its signature`);
+    console.log(`${checkWin32Imports(wasms)} imports of ${MODULE}, each registered by Win32Host and PosixHost with its signature`);
 }

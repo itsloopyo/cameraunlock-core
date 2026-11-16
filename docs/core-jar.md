@@ -89,6 +89,44 @@ which code in WebAssembly cannot call through, so `ProbeDefaults` and `WineDosFi
 Win32Host answers with the same lookups. The file log writes through `CreateFileW` and `WriteFile`
 like the DLL.
 
+## On Linux
+
+The module is the same on Linux. `WasmCore` hands its imports to
+`java/src/com/cameraunlock/core/PosixHost.java` where `os.name` is `Linux`,
+and PosixHost answers each one in plain Java (`java.nio.file`, `DatagramChannel`,
+`System.nanoTime`) with no native call, giving the results and Win32 error codes the C++ reads.
+`check-win32-imports.mjs` holds both hosts to the modules' imports. `pixi run test-java-linux`
+runs `java/tests/.../LinuxTests.java` in a pinned Linux container with Temurin 25 (Docker with
+Linux containers is needed, so it is not part of `check`).
+
+What differs from Windows, and what a mod on Linux does about it:
+
+- Paths are POSIX. `PosixPaths` is an import that answers 1 there, and the config owner then takes
+  a path starting with `/` as fully qualified and compares two paths case-sensitively.
+- The ANSI code page is UTF-8. Text in a code page other than UTF-8 is refused.
+- There are no share modes, so nothing fails as in use by another program. A file is read-only
+  when this user may not write it, and the config owner's replace refuses it as Windows does.
+- A first save puts the new file in place with a hard link, which fails on a name another program
+  took in the meantime as Windows' move does. On a file system with no hard links (FAT, exFAT)
+  that save fails, and the log says why.
+- A file name has to be one the locale's encoding can hold: under `LANG=C`, a path with a letter
+  past ASCII cannot be opened, and the log names the encoding.
+- Defaults.ini is looked for at `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini`, or
+  `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, then at
+  `~/Library/Application Support/CameraUnlock/Defaults.ini`, and is never created there.
+- Core cannot read the keys. The mod gives it a key source before `hotkeysStart`:
+  `CameraUnlock.keySource(IntPredicate)`, asked with a Windows virtual-key code on core's tick
+  thread whether that key is down in the game's window, with `VK_SHIFT`, `VK_CONTROL` and
+  `VK_MENU` answered for either key of the pair. It runs inside a call into the module, under its
+  lock, so it only reads a state the game's own thread keeps: it takes no lock and calls nothing of
+  `CameraUnlock`. `hotkeysStart` throws without one, and `keySource` throws on Windows, where core
+  reads the keys itself.
+- There is no window to centre: `windowCenter` throws `UnsupportedOperationException` before it
+  calls the module.
+- A datagram longer than a pose is read whole and reported as Windows reports it
+  (`WSAEMSGSIZE`), and an ICMP port unreachable is never reported on the unconnected socket, so
+  `SIO_UDP_CONNRESET` has nothing to turn off.
+
 ## Threads
 
 The module runs on one thread at a time and has none of its own. `java/src/com/cameraunlock/core/WasmCore.java`
@@ -155,7 +193,7 @@ it:
 
 ## What it does not do
 
-- It is Windows only, as the DLL is: the imports are Win32.
+- It runs on Windows and Linux only: on another system `loadBundled` throws.
 - No legacy import and the rest of what [c-interface.md](c-interface.md) lists under "What it
   does not do".
 - The window finding and the one-shot raise (`os::FindGameWindow`, `os::CenterGameWindowOnce`)

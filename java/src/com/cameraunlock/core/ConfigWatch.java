@@ -35,16 +35,20 @@ final class ConfigWatch {
     private static final int ERROR_FILE_NOT_FOUND = 2, ERROR_PATH_NOT_FOUND = 3, ERROR_NOT_READY = 21;
     /** ftLastWriteTime in WIN32_FILE_ATTRIBUTE_DATA, and the struct's size. */
     private static final long LAST_WRITE_AT = 20, ATTRIBUTE_DATA = 36;
-    private static final StructLayout CAPTURE = Linker.Option.captureStateLayout();
-    private static final VarHandle LAST_ERROR = CAPTURE.varHandle(PathElement.groupElement("GetLastError"));
-    private static final MethodHandle GET_FILE_ATTRIBUTES_EX_W = getFileAttributesExW();
 
-    @SuppressWarnings("restricted")
-    private static MethodHandle getFileAttributesExW() {
-        SymbolLookup kernel32 = SymbolLookup.libraryLookup("kernel32", Arena.global());
-        return Linker.nativeLinker().downcallHandle(kernel32.find("GetFileAttributesExW").orElseThrow(),
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
-                Linker.Option.captureCallState("GetLastError"));
+    /** kernel32's function, looked up the first time lastWriteTime runs: Linux has none, and PosixHost reads the times there. */
+    private static final class Kernel32 {
+        static final StructLayout CAPTURE = Linker.Option.captureStateLayout();
+        static final VarHandle LAST_ERROR = CAPTURE.varHandle(PathElement.groupElement("GetLastError"));
+        static final MethodHandle GET_FILE_ATTRIBUTES_EX_W = getFileAttributesExW();
+
+        @SuppressWarnings("restricted")
+        private static MethodHandle getFileAttributesExW() {
+            SymbolLookup kernel32 = SymbolLookup.libraryLookup("kernel32", Arena.global());
+            return Linker.nativeLinker().downcallHandle(kernel32.find("GetFileAttributesExW").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+                    Linker.Option.captureCallState("GetLastError"));
+        }
     }
 
     private ConfigWatch() {}
@@ -72,12 +76,12 @@ final class ConfigWatch {
         }
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment data = arena.allocate(ATTRIBUTE_DATA);
-            MemorySegment capture = arena.allocate(CAPTURE);
-            int found = (int) GET_FILE_ATTRIBUTES_EX_W.invokeExact(capture, arena.allocateFrom(path, StandardCharsets.UTF_16LE), 0, data);
+            MemorySegment capture = arena.allocate(Kernel32.CAPTURE);
+            int found = (int) Kernel32.GET_FILE_ATTRIBUTES_EX_W.invokeExact(capture, arena.allocateFrom(path, StandardCharsets.UTF_16LE), 0, data);
             if (found != 0) {
                 return OptionalLong.of(data.get(ValueLayout.JAVA_LONG_UNALIGNED, LAST_WRITE_AT));
             }
-            int error = (int) LAST_ERROR.get(capture, 0L);
+            int error = (int) Kernel32.LAST_ERROR.get(capture, 0L);
             return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_NOT_READY
                     ? OptionalLong.of(0) : OptionalLong.empty();
         } catch (RuntimeException | Error failure) {

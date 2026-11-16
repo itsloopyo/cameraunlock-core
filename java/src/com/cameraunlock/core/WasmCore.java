@@ -35,7 +35,8 @@ import run.endive.wasm.types.Value;
  * each MemorySegment argument into the module's memory before the call and back out after it, so
  * the binding's segments work here as they do with the DLL. The module has no threads of its own:
  * a thread here calls cameraunlock_host_tick every 16 ms, which polls the hotkeys and steps the
- * receivers' supervisors, and Win32Host receives on the sockets.
+ * receivers' supervisors, and the host (Win32Host on Windows, PosixHost on Linux) receives on the
+ * sockets.
  *
  * With no threads in the module its one thread_local is one string for the whole JVM, so the reason
  * of a failed call is read in the same call and kept for the thread that made it, and
@@ -65,7 +66,7 @@ final class WasmCore implements CameraUnlock.Backend {
     }
 
     private final Instance instance;
-    private final Win32Host host;
+    private final ModuleHost host;
     private final Memory memory;
     // Looked up once the binding has checked the module's ABI: a module of another one need not have them.
     private ExportFunction malloc, free, lastError, tick, received, receiveFailed;
@@ -77,7 +78,14 @@ final class WasmCore implements CameraUnlock.Backend {
     private volatile Throwable dead;
 
     WasmCore(WasmModule module, Function<Instance, Machine> machine) {
-        host = new Win32Host(this);
+        String system = System.getProperty("os.name");
+        if (system.startsWith("Windows")) {
+            host = new Win32Host(this);
+        } else if (system.equals("Linux")) {
+            host = new PosixHost(this);
+        } else {
+            throw new UnsupportedOperationException("cameraunlock-core's jar runs on Windows and Linux, and this is " + system);
+        }
         WasiPreview1 wasi = WasiPreview1.builder()
                 .withOptions(WasiOptions.builder().withStdout(System.out).withStderr(System.err).build()).build();
         Store store = new Store().addFunction(wasi.toHostFunctions()).addFunction(host.functions());
@@ -110,6 +118,26 @@ final class WasmCore implements CameraUnlock.Backend {
                 : MethodHandles.insertArguments(CALL, 0, this, name, function, descriptor)
                         .asCollector(Object[].class, descriptor.argumentLayouts().size());
         return handle.asType(descriptor.toMethodType());
+    }
+
+    @Override
+    public ConfigWatch.Times writeTimes() {
+        return host.writeTimes();
+    }
+
+    @Override
+    public void keySource(java.util.function.IntPredicate virtualKeyDown) {
+        host.keySource(virtualKeyDown);
+    }
+
+    @Override
+    public void requireKeySource() {
+        host.requireKeySource();
+    }
+
+    @Override
+    public void requireWindowCalls() {
+        host.requireWindowCalls();
     }
 
     @Override

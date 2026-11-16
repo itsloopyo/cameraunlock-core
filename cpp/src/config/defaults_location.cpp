@@ -475,7 +475,8 @@ DefaultsProbe ProbeDefaults() {
 // cannot call through. Its Java host makes the same lookups and calls (Win32Host.probeDefaults,
 // Win32Host.wineDosFileName) and hands the answers over as lines of key=value in UTF-8, one per
 // member that has a value. Under Wine, which folder to convert is worked out here, between the
-// two, as it is above.
+// two, as it is above. On Linux, PosixHost answers platform=native with HOME and
+// XDG_CONFIG_HOME, as the C# probe reads them there.
 extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("ProbeDefaults"))) std::int32_t
 cameraunlock_win32_ProbeDefaults(char* buffer, std::int32_t capacity);
 extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("WineDosFileName"))) std::int32_t
@@ -544,8 +545,12 @@ void ReadProbeAnswer(const std::string& answer, std::int32_t length, DefaultsPro
         if (equals == std::string::npos) throw std::runtime_error("ProbeDefaults: the host sent a line with no '=': " + line);
         const std::string key = line.substr(0, equals), value = FromHex(line.substr(equals + 1));
         if (key == "platform") {
-            if (value != "windows" && value != "wine") throw std::runtime_error("ProbeDefaults: unknown platform " + value);
-            probe.platform = value == "wine" ? DefaultsPlatform::kWine : DefaultsPlatform::kWindows;
+            if (value != "windows" && value != "wine" && value != "native") {
+                throw std::runtime_error("ProbeDefaults: unknown platform " + value);
+            }
+            probe.platform = value == "wine"     ? DefaultsPlatform::kWine
+                             : value == "native" ? DefaultsPlatform::kNative
+                                                 : DefaultsPlatform::kWindows;
         } else if (key == "known_folder") {
             probe.known_folder = WideFromUtf8(value);
         } else if (key == "package_result") {
@@ -566,6 +571,8 @@ void ReadProbeAnswer(const std::string& answer, std::int32_t length, DefaultsPro
             probe.wine_host_xdg_config_home = WideFromUtf8(value);
         } else if (key == "xdg_config_home") {
             probe.xdg_config_home = WideFromUtf8(value);
+        } else if (key == "home") {
+            probe.home = WideFromUtf8(value);
         } else if (key == "code_page_failed") {
             probe.code_page_failed = value == "1";
         } else if (key == "dos_file_name") {

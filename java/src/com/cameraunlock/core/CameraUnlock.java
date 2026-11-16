@@ -344,6 +344,22 @@ public final class CameraUnlock {
 
         /** Called once the library's ABI and structs have been checked. */
         default void started() {}
+
+        /** The write times configChanged compares: Windows' own, but for the module on Linux. */
+        default ConfigWatch.Times writeTimes() {
+            return ConfigWatch::lastWriteTime;
+        }
+
+        /** See CameraUnlock.keySource. */
+        default void keySource(java.util.function.IntPredicate virtualKeyDown) {
+            throw new UnsupportedOperationException("core reads the keys itself on Windows: there is no key source to give it");
+        }
+
+        /** Throws where the hotkeys have nothing to read the keys from. */
+        default void requireKeySource() {}
+
+        /** Throws where the game's window cannot be reached. */
+        default void requireWindowCalls() {}
     }
 
     private final Path library;
@@ -411,7 +427,8 @@ public final class CameraUnlock {
     /**
      * cameraunlock-core compiled to WebAssembly and carried in this jar as JVM classes
      * (com.cameraunlock.core.wasm.CoreModule), for a host where no native file can ship. It reaches
-     * Windows through the same calls the DLL makes (Win32Host). library() is the jar.
+     * Windows through the same calls the DLL makes (Win32Host), and on Linux the same calls are
+     * answered with Java's own files, sockets and clocks (PosixHost). library() is the jar.
      */
     public static synchronized CameraUnlock loadBundled() {
         // One per process, as the DLL is: a second would poll the same keys and listen on the same port.
@@ -832,7 +849,7 @@ public final class CameraUnlock {
      * reload as RELOAD_UNCHANGED. Not from the thread that draws.
      */
     public boolean configChanged() {
-        return !ConfigWatch.unchanged(configWatched(WATCHED_FILE), configWatched(WATCHED_DEFAULTS), ConfigWatch::lastWriteTime);
+        return !ConfigWatch.unchanged(configWatched(WATCHED_FILE), configWatched(WATCHED_DEFAULTS), backend.writeTimes());
     }
 
     /** cameraunlock_config_watched: a file configReload looks at, and the write time the library recorded for it. */
@@ -1017,7 +1034,21 @@ public final class CameraUnlock {
 
     // ---- Hotkeys -----------------------------------------------------------------------------
 
+    /**
+     * Where the hotkeys read the keys on Linux, where core cannot read them itself: answers whether
+     * the key of a Windows virtual-key code is down in the game's window, with VK_SHIFT, VK_CONTROL
+     * and VK_MENU down for either key of the pair. It is asked on core's tick thread, every 16 ms
+     * while the hotkeys run, inside a call into core and under its lock, so it only looks: it reads
+     * a state the game's own thread keeps, takes no lock and calls nothing of this class. It is
+     * given before hotkeysStart, which throws without one. Only loadBundled on Linux takes one: on
+     * Windows core reads the keys itself, and this throws.
+     */
+    public void keySource(java.util.function.IntPredicate virtualKeyDown) {
+        backend.keySource(virtualKeyDown);
+    }
+
     public void hotkeysStart() {
+        backend.requireKeySource();
         check(status(hotkeysStart));
     }
 
@@ -1050,6 +1081,8 @@ public final class CameraUnlock {
 
     /** @return true when the window is at the centred origin on return, false when it was left alone */
     public boolean windowCenter(long window) {
+        // On Linux this throws here, before the module, whose window imports would throw from inside it and stop it.
+        backend.requireWindowCalls();
         return check(status(windowCenter, window)) == 1;
     }
 

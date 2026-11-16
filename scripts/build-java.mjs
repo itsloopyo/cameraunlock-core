@@ -14,7 +14,7 @@
 // construct from a later release fails here and not in a mod on an older runtime.
 //
 // First, check-win32-imports.mjs holds the modules' imports of "cameraunlock_win32" to the
-// functions Win32Host registers.
+// functions Win32Host and PosixHost register.
 //
 // The DLLs and the modules are built by the tasks this depends on (pixi.toml, build-java). javac,
 // jar and node come from the pixi environment.

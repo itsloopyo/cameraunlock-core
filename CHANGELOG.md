@@ -9,6 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - core's jar runs on Linux
+
+`CameraUnlock.loadBundled()` used to fail on Linux as its classes loaded, on a call state that
+has `errno` only there. The module now has a second host, `PosixHost`, that answers its Win32
+calls in plain Java on Linux: the config owner, Defaults.ini, the file log,
+the receiver and the hotkeys work there (docs/core-jar.md, "On Linux"). Windows is unchanged.
+
+- A mod on Linux gives core the keys with `CameraUnlock.keySource(IntPredicate)` before
+  `hotkeysStart`, since core cannot read them there.
+- `windowCenter` throws `UnsupportedOperationException` on Linux.
+- `pixi run test-java-linux` runs the module's Linux checks in a container.
+
 ### Added - isolated input drives DirectInput 7 devices from `dinput.dll`
 
 A game that loads `dinput.dll` has its keyboard and mouse device methods detoured as a

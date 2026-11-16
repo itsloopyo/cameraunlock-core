@@ -3,9 +3,10 @@
 // The Win32 API as the WebAssembly build of core sees it (CAMERAUNLOCK_WIN32_HOST). There are no
 // Windows headers in that build, so this declares the types, constants and functions core's
 // Win32 code uses, and nothing else. Each function is an import of module "cameraunlock_win32";
-// the Java host behind core's jar implements it with the same call into Windows' own DLLs
-// (java/src/com/cameraunlock/core/Win32Host.java), so core's file, window and key code
-// behaves as it does in CameraUnlockCore.dll. docs/core-jar.md says how it is built.
+// on Windows the Java host behind core's jar implements it with the same call into Windows' own
+// DLLs (java/src/com/cameraunlock/core/Win32Host.java), so core's file, window and key code
+// behaves as it does in CameraUnlockCore.dll, and on Linux PosixHost.java answers it in plain
+// Java with the same results. docs/core-jar.md says how it is built.
 //
 // Differences from <windows.h> a reader of core's code meets:
 //  - wchar_t is 32 bits here, so a W function's text is UTF-32. The host converts at the call.
@@ -43,6 +44,10 @@ static_assert(sizeof(u_long) == 4, "Win32Host copies ioctlsocket's 4 bytes");
 #define CAMERAUNLOCK_WIN32_IMPORT(name) __attribute__((import_module("cameraunlock_win32"), import_name(#name)))
 
 extern "C" {
+
+// 1 where the host answers these calls on a POSIX system (Linux) and 0 on Windows: see
+// cameraunlock::os::PosixPaths in win32.h.
+CAMERAUNLOCK_WIN32_IMPORT(PosixPaths) int cameraunlock_win32_PosixPaths();
 
 CAMERAUNLOCK_WIN32_IMPORT(GetLastError) DWORD GetLastError();
 CAMERAUNLOCK_WIN32_IMPORT(SetLastError) void SetLastError(DWORD error);

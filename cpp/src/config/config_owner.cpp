@@ -55,6 +55,7 @@ namespace {
 bool IsPathSeparator(wchar_t c) { return c == L'\\' || c == L'/'; }
 
 bool IsFullyQualified(const std::wstring& path) {
+    if (os::PosixPaths()) return !path.empty() && path[0] == L'/';
     const bool drive = path.size() >= 3 && ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
                        path[1] == L':' && IsPathSeparator(path[2]);
     const bool unc = path.size() >= 2 && IsPathSeparator(path[0]) && IsPathSeparator(path[1]);
@@ -245,6 +246,7 @@ std::wstring OwnerFullPath(const std::wstring& path, const char* option) {
 }
 
 bool OwnerSamePath(const std::wstring& a, const std::wstring& b) {
+    if (os::PosixPaths()) return a == b;
     const int compared =
         CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE);
     if (compared == 0) {
@@ -405,7 +407,9 @@ std::string OwnerConflict(CheckedWriteStatus status) {
 }
 
 std::string OwnerErrorText(std::uint32_t error) {
-    std::string text = "Windows error " + std::to_string(error);
+    // The codes are Win32's in both builds, which is what core branches on; on Linux the host made
+    // them from what Linux said, so they are not called Windows'.
+    std::string text = (os::PosixPaths() ? "error " : "Windows error ") + std::to_string(error);
     wchar_t* message = nullptr;
     const DWORD length = FormatMessageW(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error,

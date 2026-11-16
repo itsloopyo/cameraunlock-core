@@ -83,7 +83,7 @@ vectors-c = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scr
 # jar, and the boot class of a Java agent mod. build-java compiles it for Java 22, the first
 # release where java.lang.foreign is final, and puts the three libraries its tests load beside the
 # class folders. They come out of the C harness's build tree, which build-vectors-c configures.
-# Windows only, as the DLL is, so none of it runs in a container.
+# The DLL is Windows only; test-java-linux runs the module on Linux in a container.
 # The C interface as WebAssembly modules and their JVM classes (docs/core-jar.md), under cpp/build-wasm.
 # The toolchain is fetched once per user and checked against its pins (scripts/wasm-toolchain.mjs).
 build-wasm = "node scripts/build-wasm.mjs"
@@ -91,6 +91,9 @@ build-java = { cmd = "cmake --build scripts/pipeline-vectors/harness/c/build --c
 # The binding against docs/c-interface.md's layout table and through CameraUnlockCoreTesting.dll,
 # a library of another ABI refused at load, and the boot class run as a game's launcher runs it.
 test-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests", depends-on = ["build-java"] }
+# The module on Linux, where PosixHost answers its Win32 calls, in a pinned Linux container.
+# Needs Docker with Linux containers, so it is not part of check.
+test-java-linux = { cmd = "node scripts/test-java-linux.mjs", depends-on = ["build-java"] }
 # What a load, a frame and a settings save cost on each backend: docs/core-jar.md quotes it.
 bench-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Bench && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Bench", depends-on = ["build-java"] }
 # The vectors the C harness runs, through the Java binding: what they hold is Java's declaration

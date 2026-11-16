@@ -7,8 +7,8 @@
 #include <system_error>
 
 #if defined(CAMERAUNLOCK_WIN32_HOST)
-// The host's half of the receiver in the WebAssembly build (Win32Host.java): it waits on the
-// socket with select and recvfrom on a thread of its own, hands each result to the receiver's
+// The host's half of the receiver in the WebAssembly build (Win32Host.java, PosixHost.java): it
+// waits on the socket on a thread of its own, hands each result to the receiver's
 // Received, and drops what arrives after StopReceiving.
 extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("ReceiveOn"))) void
 cameraunlock_win32_ReceiveOn(SOCKET socket, cameraunlock::UdpReceiver* receiver);

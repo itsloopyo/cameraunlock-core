@@ -23,3 +23,21 @@
 #endif
 #include <windows.h>
 #endif
+
+namespace cameraunlock::os {
+
+// Whether paths are the POSIX kind: absolute from '/', and two that differ only in case are two
+// files. In the WebAssembly build the host says, once: the jar's PosixHost answers the Win32
+// calls on Linux with Linux paths, and Win32Host on Windows. The DLL is on Windows.
+inline bool PosixPaths() {
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+    static const bool posix = cameraunlock_win32_PosixPaths() != 0;
+    return posix;
+#elif defined(_WIN32)
+    return false;
+#else
+    return true;
+#endif
+}
+
+}  // namespace cameraunlock::os
