@@ -26,6 +26,8 @@ $script:CoverageFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'data\isolat
 $script:CommandFileName = 'CameraUnlockInput.txt'
 $script:HostDllName = 'CameraUnlockIsolatedInput.dll'
 $script:HostDllBuild = Join-Path (Split-Path -Parent $PSScriptRoot) "cpp\tools\isolated_input_host\build\Release\$script:HostDllName"
+# The guard and the shim of a background launch (cpp/tools/rig_guard), as `pixi run build-rig-guard` leaves them.
+$script:RigGuardTools = Join-Path (Split-Path -Parent $PSScriptRoot) 'cpp\tools\rig_guard\build\out'
 # How long a game that has been ended is given to go (Stop-GameProcess).
 $script:GameExitSeconds = 120
 
@@ -516,17 +518,171 @@ function Test-IsolatedInputProcess {
     $true
 }
 
+function New-RigGuardFolder {
+    # A folder of its own for one run's guard, beside the rig locks and outside every repo.
+    param([Parameter(Mandatory)][string]$ProcessName)
+    Join-Path (Get-GameRigRoot) "_guard\$(Get-Date -Format yyyyMMdd-HHmmss-fff)-$ProcessName-$PID"
+}
+
+function Start-RigGuard {
+    <#
+    .SYNOPSIS
+    Starts the guard of a background test's game (cpp/tools/rig_guard) and returns once it is
+    watching. Start-IsolatedGame calls this before it launches anything; call it yourself only for a
+    run that does not go through Start-IsolatedGame.
+    .DESCRIPTION
+    The guard ends every process of the run, and says why in one line in <Folder>\guard.verdict and
+    guard.log, on the first of: a window of one of those processes is the foreground window, the
+    display mode of any screen changes, -LimitSeconds are up, or one of them cannot be given the
+    shim. The run's processes are the one it starts itself (-Launch), every process started after
+    the guard whose executable is named in -Names, and everything those start.
+
+    With -Launch the guard starts that executable suspended and puts the shim in before its first
+    instruction, so its first window is already made without taking the foreground. A process it
+    finds by name was started by someone else (Steam, a launcher's service): it is held still and
+    given the shim as soon as it is seen, which the guard's log times.
+
+    -NoShim leaves the shim out: the guard still watches and ends the game. For a game the shim
+    breaks, and only then.
+
+    Returns Folder, ProcessId (the guard's) and LaunchedId (what -Launch started, or 0). Throws,
+    with nothing left running, when the tools are not built, the guard does not come up, or the
+    launch fails.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Folder,
+        [string[]]$Names = @(),
+        [int]$LimitSeconds = 1800,
+        [string]$Launch = '',
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = '',
+        [switch]$NoShim,
+        [string]$ToolFolder = $script:RigGuardTools
+    )
+    foreach ($built in 'CameraUnlockRig.x64.exe', 'CameraUnlockRig.x86.exe', 'CameraUnlockRigShim.x64.dll', 'CameraUnlockRigShim.x86.dll') {
+        if (-not (Test-Path (Join-Path $ToolFolder $built) -PathType Leaf)) {
+            throw "The rig guard is not built: $(Join-Path $ToolFolder $built) is missing. Build it in cameraunlock-core with: pixi run build-rig-guard. No game is started without it."
+        }
+    }
+    if (Test-Path (Join-Path $Folder 'guard.txt')) { throw "$Folder already holds a guard's files: every run has a folder of its own" }
+    New-Item -ItemType Directory -Force $Folder | Out-Null
+    $lines = @("limit=$LimitSeconds") + @($Names | Where-Object { $_ } | ForEach-Object { "name=$_" })
+    if ($NoShim) { $lines += 'shim=0' }
+    if ($Launch) {
+        $lines += "launch=$Launch"
+        if ($Arguments.Count -gt 0) { $lines += "arguments=$($Arguments -join ' ')" }
+        if ($WorkingDirectory) { $lines += "directory=$WorkingDirectory" }
+    }
+    Set-Content -Path (Join-Path $Folder 'guard.txt') -Value $lines -Encoding Unicode
+    $guard = Start-Process (Join-Path $ToolFolder 'CameraUnlockRig.x64.exe') -ArgumentList 'guard', "`"$Folder`"" -PassThru
+    $failed = Join-Path $Folder 'guard.failed'
+    $waitFor = {
+        param([string]$File, [int]$Seconds, [string]$What)
+        $deadline = (Get-Date).AddSeconds($Seconds)
+        while (-not (Test-Path (Join-Path $Folder $File))) {
+            if (Test-Path $failed) { throw "the rig guard $What`: $((Get-Content $failed -Raw -Encoding UTF8).Trim())" }
+            if ($guard.HasExited) { throw "the rig guard $What`: it exited with code $($guard.ExitCode). Its folder is $Folder" }
+            if ((Get-Date) -ge $deadline) {
+                Stop-Process -Id $guard.Id -Force
+                throw "the rig guard $What within $Seconds seconds and was stopped, which ends whatever it had started. Its folder is $Folder"
+            }
+            Start-Sleep -Milliseconds 20
+        }
+    }
+    & $waitFor 'guard.ready' 15 'did not come up'
+    $launched = 0
+    if ($Launch) {
+        & $waitFor 'guard.launched' 60 "could not start $Launch"
+        $launched = [int](Get-Content (Join-Path $Folder 'guard.launched') -TotalCount 1)
+    }
+    [pscustomobject]@{ Folder = $Folder; ProcessId = $guard.Id; LaunchedId = $launched }
+}
+
+function Get-RigGuardVerdict {
+    <#
+    .SYNOPSIS
+    The line the guard wrote when it ended the game, or nothing while it has not: the time, why
+    (FOREGROUND with the window's title and class, DISPLAY, LIMIT or UNGUARDED), and how many
+    processes it ended.
+    #>
+    param([Parameter(Mandatory)][string]$Folder)
+    $file = Join-Path $Folder 'guard.verdict'
+    if (Test-Path $file) { (Get-Content $file -Raw -Encoding UTF8).Trim() }
+}
+
+function Stop-RigGuard {
+    <#
+    .SYNOPSIS
+    Tells a guard its run is over and waits for it to go. The guard ends whatever of the run is
+    still up first: a launcher, a child the game started. Does nothing for a folder no guard came
+    up in, or whose guard has gone. A guard that has not gone after -WaitSeconds (it does not read
+    the stop while it is putting the shim into a process) is ended, which ends the run with it,
+    and this throws: nothing of the run is left up when it returns or throws.
+    #>
+    param([Parameter(Mandatory)][string]$Folder, [int]$WaitSeconds = 30)
+    $ready = Join-Path $Folder 'guard.ready'
+    if (-not (Test-Path $ready)) { return }
+    Set-Content -Path (Join-Path $Folder 'guard.stop') -Value ''
+    $guard = Get-Process -Id ([int](Get-Content $ready -TotalCount 1)) -ErrorAction SilentlyContinue
+    # The id may have gone to another process since, another session's guard included: this folder's
+    # guard was running before it wrote guard.ready.
+    if (-not $guard -or $guard.ProcessName -notlike 'CameraUnlockRig*' -or $guard.StartTime -gt (Get-Item $ready).LastWriteTime) { return }
+    if (-not $guard.WaitForExit($WaitSeconds * 1000)) {
+        Stop-Process -Id $guard.Id -Force
+        [void]$guard.WaitForExit(10000)
+        throw "the rig guard (pid $($guard.Id)) was asked to stop, had not gone $WaitSeconds seconds later and was ended, which ends every process of its run. Its folder is $Folder"
+    }
+}
+
+function Stop-LeftRigGuard {
+    # A guard whose session never stopped it (its script was ended, or the game was stopped by
+    # process id alone) takes in the next process of the same name, and so would this run's guard.
+    # The game is not running when this is called, so a guard still up for it has nothing left to watch.
+    param([Parameter(Mandatory)][string]$ProcessName)
+    $guards = Join-Path (Get-GameRigRoot) '_guard'
+    if (-not (Test-Path $guards)) { return }
+    foreach ($folder in Get-ChildItem $guards -Directory) {
+        if (-not (Test-Path (Join-Path $folder.FullName 'guard.ready')) -or (Test-Path (Join-Path $folder.FullName 'guard.stop'))) { continue }
+        if (@(Get-Content (Join-Path $folder.FullName 'guard.txt')) -notcontains "name=$ProcessName") { continue }
+        Stop-RigGuard -Folder $folder.FullName
+    }
+}
+
+function Get-SessionGuardVerdict {
+    # A session written before the guard existed has no GuardFolder.
+    param($Session)
+    if ($Session.PSObject.Properties['GuardFolder'] -and $Session.GuardFolder) { Get-RigGuardVerdict -Folder $Session.GuardFolder }
+}
+
 function Start-IsolatedGame {
     <#
     .SYNOPSIS
-    Starts a game for a background test and hands the foreground back to whatever had it.
+    Starts a game for a background test, under a guard that ends it the moment it takes the
+    foreground or changes the display mode.
     .DESCRIPTION
     Writes the command file beside the mod (its presence is what switches a dev build's isolated
-    input on), launches, waits for the process, and for -SettleSeconds returns the foreground to the
-    window that last held it before each time a window of the game takes it: a foreground moved
-    anywhere else is left where it went, and becomes the window given back to. A window of another
-    process running isolated input (Test-IsolatedInputProcess) is never given it. Returns the session the other
-    functions take. Refuses to start while the game is already running: that one is someone else's.
+    input on), starts the guard (Start-RigGuard), launches, waits for the process and then for
+    -SettleSeconds. Returns the session the other functions take. Refuses to start while the game
+    is already running: that one is someone else's.
+
+    An executable -Launch is started by the guard itself, suspended, with the rig shim in before
+    its first instruction: its windows are made without being activated, and it cannot take the
+    foreground, clip or move the cursor, or change the display mode. Anything else (a steam:// URI,
+    a shell:AppsFolder path) is started as before, and the guard puts the shim into the game as
+    soon as a process named -ProcessName or one of -Processes appears. Name every launcher the
+    game comes up through in -Processes, or its windows are nobody's.
+
+    A name is taken from any process started after the guard, whoever started it: a launcher the
+    person at the machine opens for a game of their own during the run is taken in and ended with
+    the run. So name only launchers that are the game's own. Start-RigGuard -Names also takes
+    the whole path of an executable, and then only that file is the run's; -Processes here takes
+    names only, since the rig lock reads them as process names.
+
+    Nothing here hands the foreground back any more. A game that takes it is ended by the guard,
+    and this throws with the guard's line; so does every Invoke-GameInput after it. The guard also
+    ends the game after -GuardMinutes, whatever the test is doing: raise it for a longer session.
+    Stop-IsolatedGame stops the guard, which ends what is left of the run.
+
     -Started is handed the process the moment it appears, before the settling.
     With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
     Stop-IsolatedGame removes that copy. A copy an earlier run left there, still loaded in some
@@ -546,54 +702,59 @@ function Start-IsolatedGame {
         [string]$HostDll = $script:HostDllBuild,
         [scriptblock]$Started,
         # Command-line arguments for an executable -Launch, joined with spaces: quote one that holds a space.
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        # Other executables of the run, by name: the launchers the game comes up through. The guard takes them in too.
+        [string[]]$Processes = @(),
+        # The guard ends the game this long after it came up, whatever the test is doing.
+        [int]$GuardMinutes = 30,
+        # Where the guard keeps its log and verdict. One of its own under the rig root when left out.
+        [string]$GuardFolder = '',
+        # Watch and end only, without the shim: for a game the shim breaks.
+        [switch]$NoShim
     )
     if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
         throw "$ProcessName is already running and this session did not start it. Not launching over it."
     }
+    if (-not $GuardFolder) { $GuardFolder = New-RigGuardFolder -ProcessName $ProcessName }
+    Stop-LeftRigGuard -ProcessName $ProcessName
     $deployedHost = $(if ($ModHost -eq 'managed') { Copy-IsolatedInputHost -ModFolder $ModFolder -HostDll $HostDll } else { $null })
     $commandFile = Join-Path $ModFolder $script:CommandFileName
     Set-Content -Path $commandFile -Value '0' -Encoding ASCII
     Remove-Item "$commandFile.done" -ErrorAction SilentlyContinue
 
-    $foreground = [CameraUnlockIsolatedTest.Native]::GetForegroundWindow()
-    $owner = [uint32]0
-    [void][CameraUnlockIsolatedTest.Native]::GetWindowThreadProcessId($foreground, [ref]$owner)
-    if (Test-IsolatedInputProcess -ProcessId $owner) { $foreground = [IntPtr]::Zero }
-    if ($Arguments.Count -gt 0) { Start-Process $Launch -ArgumentList $Arguments } else { Start-Process $Launch }
-    $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
-    $process = $null
-    while ((Get-Date) -lt $deadline -and -not $process) {
-        $process = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $process) { Start-Sleep -Milliseconds 500 }
-    }
-    if (-not $process) { throw "$ProcessName did not start within $StartTimeoutSeconds seconds of launching $Launch" }
-    if ($Started) { & $Started $process | Out-Null }
+    # An executable is the guard's to start, suspended. A URI or a shell path starts in someone else's process.
+    $direct = $Launch -match '\.exe$' -and (Test-Path $Launch -PathType Leaf)
+    $guarded = @{ Folder = $GuardFolder; Names = @($ProcessName) + $Processes; LimitSeconds = $GuardMinutes * 60; NoShim = $NoShim }
+    if ($direct) { $guarded += @{ Launch = (Resolve-Path $Launch).ProviderPath; Arguments = $Arguments; WorkingDirectory = (Get-Location).ProviderPath } }
+    [void](Start-RigGuard @guarded)
+    try {
+        if (-not $direct) {
+            if ($Arguments.Count -gt 0) { Start-Process $Launch -ArgumentList $Arguments } else { Start-Process $Launch }
+        }
+        $ended = { $verdict = Get-RigGuardVerdict -Folder $GuardFolder; if ($verdict) { throw "the guard ended the game as it started: $verdict" } }
+        $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
+        $process = $null
+        while ((Get-Date) -lt $deadline -and -not $process) {
+            & $ended
+            $process = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $process) { Start-Sleep -Milliseconds 500 }
+        }
+        if (-not $process) { throw "$ProcessName did not start within $StartTimeoutSeconds seconds of launching $Launch" }
+        if ($Started) { & $Started $process | Out-Null }
 
-    # Only a window of the game is moved off, and it goes to the window that last held the foreground
-    # before it: the person at the machine, and other sessions' launches, move the foreground while
-    # this game starts, and the window this launch began over may be long left behind.
-    $settled = (Get-Date).AddSeconds($SettleSeconds)
-    while ((Get-Date) -lt $settled) {
-        Start-Sleep -Milliseconds 500
-        $now = [CameraUnlockIsolatedTest.Native]::GetForegroundWindow()
-        if ($now -eq [IntPtr]::Zero) { continue }
-        $owner = [uint32]0
-        [void][CameraUnlockIsolatedTest.Native]::GetWindowThreadProcessId($now, [ref]$owner)
-        $gameIds = @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | ForEach-Object Id)
-        if ($gameIds -notcontains [int]$owner) {
-            if (-not (Test-IsolatedInputProcess -ProcessId $owner)) { $foreground = $now }
-            continue
+        $settled = (Get-Date).AddSeconds($SettleSeconds)
+        while ((Get-Date) -lt $settled) {
+            Start-Sleep -Milliseconds 500
+            & $ended
         }
-        if ([CameraUnlockIsolatedTest.Native]::IsWindow($foreground) -and $foreground -ne $now) {
-            $previous = [uint32]0
-            [void][CameraUnlockIsolatedTest.Native]::GetWindowThreadProcessId($foreground, [ref]$previous)
-            if (-not (Test-IsolatedInputProcess -ProcessId $previous)) {
-                [void][CameraUnlockIsolatedTest.Native]::SetForegroundWindow($foreground)
-            }
-        }
+        & $ended
+    } catch {
+        # The guard ends whatever of the run came up. The first error is the one to report.
+        $failure = $_
+        try { Stop-RigGuard -Folder $GuardFolder } catch { Write-RigWarning "and the rig guard could not be stopped: $_" }
+        throw $failure
     }
-    [pscustomobject]@{ ProcessId = $process.Id; ProcessName = $ProcessName; CommandFile = $commandFile; Sequence = 0; HostDll = $deployedHost }
+    [pscustomobject]@{ ProcessId = $process.Id; ProcessName = $ProcessName; CommandFile = $commandFile; Sequence = 0; HostDll = $deployedHost; GuardFolder = $GuardFolder }
 }
 
 function Invoke-GameInput {
@@ -614,7 +775,10 @@ function Invoke-GameInput {
     )
     # Process id 0 is what a session holds between stopping its game and starting it again, and it is also the system's idle process.
     if (-not $Session.ProcessId) { throw 'the session has no game running: it was stopped and not started again' }
-    if (-not (Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue)) { throw "the game (pid $($Session.ProcessId)) is no longer running" }
+    if (-not (Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue)) {
+        $verdict = Get-SessionGuardVerdict $Session
+        throw "the game (pid $($Session.ProcessId)) is no longer running$(if ($verdict) { ": the guard ended it. $verdict" })"
+    }
     $Session.Sequence++
     # A session with a file of its own (Start-IsolatedGameSession -SessionFile) is one a later
     # process picks up. The number is written before the script is handed over: one that is never
@@ -635,6 +799,8 @@ function Invoke-GameInput {
         if ([CameraUnlockIsolatedTest.Native]::ForegroundPid() -eq $Session.ProcessId) { $heldForeground = $true }
         $done = Get-Content "$($Session.CommandFile).done" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($done -and $done -match "^$sequence(\D|$)") { break }
+        $verdict = Get-SessionGuardVerdict $Session
+        if ($verdict) { throw "the guard ended the game while script $sequence was playing. $verdict" }
         Start-Sleep -Milliseconds 50
     }
     if (-not ($done -and $done -match "^$sequence(\D|$)")) {
@@ -739,6 +905,7 @@ function Stop-IsolatedGame {
     param([Parameter(Mandatory)]$Session)
     $process = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
     if ($process -and $process.ProcessName -eq $Session.ProcessName) { Stop-GameProcess -Process $process }
+    if ($Session.PSObject.Properties['GuardFolder'] -and $Session.GuardFolder) { Stop-RigGuard -Folder $Session.GuardFolder }
     Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
     if ($Session.HostDll) {
         $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
@@ -1748,7 +1915,8 @@ function Start-IsolatedGameSession {
     with -Files. -PoseFile starts the pose sender on -Port.
 
     The session carries Port, PoseFile, Sender (the pose sender's process id), ModFolder,
-    StateFolder, Owner, RigToken and SessionFile beside what Start-IsolatedGame returns. With
+    StateFolder, Owner, RigToken, SessionFile and GuardFolder beside what Start-IsolatedGame
+    returns. GuardFolder holds the guard's log and, when it ended the game, guard.verdict. With
     -SessionFile it is written there as soon as the game's process appears, and the rig's record
     names the file, so a session whose own process is killed can still be stopped by another:
     Stop-IsolatedGameSession -SessionFile.
@@ -1785,7 +1953,8 @@ function Start-IsolatedGameSession {
         [int]$SettleSeconds = 60,
         [ValidateSet('native', 'managed')][string]$ModHost = 'native',
         [string]$HostDll = $script:HostDllBuild,
-        # Other process names that mean the game is still up, for the rig.
+        # Other process names that mean the game is still up, for the rig. The guard takes them in as
+        # part of the run (Start-IsolatedGame -Processes): name the launchers the game comes up through.
         [string[]]$Processes = @(),
         [switch]$WholeGpu,
         [int]$WaitSeconds = 3600,
@@ -1793,7 +1962,11 @@ function Start-IsolatedGameSession {
         [scriptblock]$Waiting,
         [string]$SessionFile = '',
         # Command-line arguments for the launch (Start-IsolatedGame -Arguments).
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        # The guard ends the game this long after the launch (Start-IsolatedGame -GuardMinutes).
+        [int]$GuardMinutes = 30,
+        # Watch and end only, without the shim (Start-IsolatedGame -NoShim).
+        [switch]$NoShim
     )
     # Every way the session can run, each checked before anything is taken: one game, or each slot
     # with its own values over the ones passed here.
@@ -1838,6 +2011,7 @@ function Start-IsolatedGameSession {
         ModFolder = $ModFolder; Port = $Port; PoseFile = $PoseFile; Sender = 0
         StateFolder = $(if ($saves) { $StateFolder } else { '' }); Owner = $Owner; RigToken = $rig.Token; SessionFile = $SessionFile
         Slot = $plan.Slot
+        GuardFolder = (New-RigGuardFolder -ProcessName $ProcessName)
     }
     try {
         if ($Enter) { & $Enter $session | Out-RigHost }
@@ -1857,7 +2031,8 @@ function Start-IsolatedGameSession {
         try {
             # Written before the settling: a session killed in it has left a game someone has to stop.
             [void](Start-IsolatedGame -ProcessName $ProcessName -Launch $Launch -ModFolder $ModFolder -StartTimeoutSeconds $StartTimeoutSeconds `
-                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll -Arguments $Arguments -Started {
+                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll -Arguments $Arguments -Processes $Processes `
+                -GuardMinutes $GuardMinutes -GuardFolder $session.GuardFolder -NoShim:$NoShim -Started {
                     param($process)
                     $session.ProcessId = $process.Id
                     if ($SessionFile) { Save-IsolatedGameSession -Session $session }
@@ -1891,6 +2066,11 @@ function Complete-IsolatedGameSession {
     if ($process -and $process.ProcessName -eq $Session.ProcessName) {
         try { Stop-GameProcess -Process $process }
         catch { throw "the game (pid $($Session.ProcessId)) has not stopped, so nothing was put back under it and the rig is still held: $_" }
+    }
+    # What is left of the run goes before any file is put back: a launcher that outlives the game
+    # writes the game's files again. A guard that will not stop still ends the run at its limit.
+    if ($Session.PSObject.Properties['GuardFolder'] -and $Session.GuardFolder) {
+        try { Stop-RigGuard -Folder $Session.GuardFolder } catch { $failures.Add($_) }
     }
     # With no game started as well: Start-IsolatedGame puts it beside the mod before the launch.
     Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
@@ -2031,7 +2211,9 @@ function Invoke-IsolatedGameSession {
         [scriptblock]$Waiting,
         [string]$SessionFile = '',
         [int]$RestoreRetrySeconds = 30,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        [int]$GuardMinutes = 30,
+        [switch]$NoShim
     )
     $start = @{} + $PSBoundParameters
     'Run', 'Collect', 'RestoreRetrySeconds' | ForEach-Object { $start.Remove($_) }
@@ -2052,7 +2234,7 @@ function Invoke-IsolatedGameSession {
 }
 
 Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
-    Get-ModTestPort, Copy-IsolatedInputHost, Test-IsolatedInputProcess, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
+    Get-ModTestPort, Copy-IsolatedInputHost, Test-IsolatedInputProcess, Start-RigGuard, Stop-RigGuard, Get-RigGuardVerdict, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
     Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose,
     Set-ModTestPort, Get-GameRig, Set-GameRigLimit, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
     Start-IsolatedGameSession, Stop-IsolatedGameSession, Invoke-IsolatedGameSession, Get-IsolatedGameSession, Save-IsolatedGameSession

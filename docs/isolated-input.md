@@ -764,15 +764,10 @@ process in an AppContainer makes its `Local\` objects in a namespace of its own,
 where this check cannot see them. Without the check, two isolated games handed
 the foreground to each other over and over (2026-11-03).
 
-Before the game's isolated input has started, `Start-IsolatedGame` covers the
-launch: for its settle time, whenever a window of a process with the game's
-process name holds the foreground, it calls `SetForegroundWindow` on the window
-that held it last before (Windows may refuse a process that is not in front), and
-leaves any other change alone. `Test-IsolatedInputProcess` reads the
-same event, and a window of an isolated process is never the one it gives back to.
-Before 2026-11-03 it put the window the launch began over back in front of
-whatever had taken the foreground, the person at the machine or another
-session's launch included, every half second for a minute.
+Before the game's isolated input has started, the launch is covered by the guard
+and the shim: see [The guarded launch](#the-guarded-launch). Until 2026-11-16
+`Start-IsolatedGame` instead handed the foreground back every half second of its
+settle time, after the game had already taken it, and nothing watched after that.
 
 For a game that reads DirectInput 8 (`dinput8.dll` loaded in the process): the
 methods of the keyboard and mouse devices are detoured in the device vtable,
@@ -867,14 +862,112 @@ wheel command, so the wheel is always 0. A game that waits on
 `SetEventNotification` is not signalled. The log names, once for each device,
 which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 
+## The guarded launch
+
+`Start-IsolatedGame` starts every game under a guard, and refuses to start one
+without it. The tools are in `cpp/tools/rig_guard`; `pixi run build-rig-guard`
+builds them for x64 and Win32 into `cpp/tools/rig_guard/build/out`.
+
+**The guard** (`CameraUnlockRig.x64.exe guard <folder>`) is up before anything is
+launched. It ends every process of the run on the first of:
+
+- a window of one of them is the foreground window (looked at every 2 ms, and on
+  the system's own foreground event; not while it is putting the shim into a
+  process it has just found, which takes it tens of milliseconds and up to half
+  a second when that process is stopped inside the loader),
+- the display mode of any screen changes, whoever changed it. It sets no mode
+  itself: if the display is still changed 1.5 s after it ended the run, the log
+  says so,
+- `-GuardMinutes` are up (30 unless the session says otherwise),
+- one of them cannot be given the shim or cannot be opened (an elevated or
+  protected process).
+
+It writes one line saying which, with the window's title and class, to
+`guard.verdict` and `guard.log` in the session's `GuardFolder`
+(`<rig root>\_guard\<stamp>-<process>-<pid>`). `Start-IsolatedGame` and
+`Invoke-GameInput` throw with that line. The guard only ends processes: the
+session's own way out still puts the saves back, as after any game that died.
+`Stop-IsolatedGame` and `Complete-IsolatedGameSession` stop the guard, which ends
+what is left of the run (a launcher, a crash reporter) before any file goes back.
+A guard that does not stop in 30 seconds is ended, and the run goes with it: the
+run's processes are in a job that ends them when the guard does, however it ends.
+
+A guard nobody stops (its script was ended) goes by itself two minutes after
+the last process of its run has gone, and `Start-IsolatedGame` stops any guard an
+earlier run left up for the same process name before it starts its own: two
+guards that both know a process by name both try to take it in.
+
+The limit holds for a game a script leaves running too (`Exit-GameRig -KeptIn`):
+give `-GuardMinutes` the time it may stay up.
+
+The run is the process the guard started, every process started after the guard
+whose executable is named `-ProcessName` or one of `-Processes`, and everything
+those start. **Name every launcher the game comes up through in `-Processes`**:
+a launcher nobody named is not watched. The other side of that: a process with
+one of those names that the person at the machine starts during the run is
+taken in and ended with it, so name only launchers that are the game's own.
+`Start-RigGuard -Names` also takes the whole path of an executable.
+
+**The shim** (`CameraUnlockRigShim.<arch>.dll`) is what keeps a game from tripping
+the guard. Inside the game:
+
+| What the game does | What happens |
+| --- | --- |
+| makes or shows a top-level window | it is made `WS_EX_NOACTIVATE` and shown without activating, never topmost, not raised by the game's own calls. Each window without an owner that is not a tool window is put at the bottom of the window order the first time it is shown; an owned window (a dialog) or a tool window stays where Windows put it, which can be on top, without being activated. A window shown on its own thread is activated inside the game's own input queue, so the game is sent `WM_ACTIVATE`, `WM_ACTIVATEAPP` and `WM_SETFOCUS` as if it were in front |
+| `SetForegroundWindow`, `SwitchToThisWindow`, `BringWindowToTop`, `FlashWindowEx`, `LockSetForegroundWindow`, `AllowSetForegroundWindow`, `SendInput`, `AttachThreadInput` to another process's thread | nothing, answered as done |
+| `ChangeDisplaySettings(Ex)`, `SetDisplayConfig` | nothing, answered as done. A test of a mode (`CDS_TEST`) is passed on |
+| `ClipCursor`, `SetCursorPos`, `SetPhysicalCursorPos` | nothing, answered as done |
+| registers raw input with `RIDEV_INPUTSINK`, `RIDEV_EXINPUTSINK` or `RIDEV_CAPTUREMOUSE` | registered without them |
+| Direct3D 9 `CreateDevice(Ex)`, `Reset(Ex)` asking for fullscreen | made windowed, the game told it got fullscreen, the window put bottom right at 1280x720 at most |
+| DXGI `CreateSwapChain`, `CreateSwapChainForHwnd`, `D3D11CreateDeviceAndSwapChain` asking for fullscreen; `SetFullscreenState` | made windowed; `GetFullscreenState` answers what the game asked for |
+| DirectInput 8 `SetCooperativeLevel` asking for exclusive | made non-exclusive. Foreground or background is left as asked |
+| starts another process | started suspended and given the shim, of either bitness, before it runs. One the shim cannot be put into is ended and the game's `CreateProcess` fails with access denied; the shim's log in the guard folder names it |
+
+The detours are on win32u's system call stubs, below user32, so they also cover
+what user32 does from inside itself. A 32-bit stub whose shape is not the one the
+shim was written against stops the shim from starting, and the guard ends the
+run as one it cannot cover.
+
+How early the shim is in depends on who starts the game:
+
+- **`-Launch` is the game's executable**: the guard starts it suspended and the
+  shim is in before its first instruction.
+- **`-Launch` is anything else** (a `steam://` URI):
+  Steam or the shell starts the game, and the guard holds it still and puts the
+  shim in when it sees the name in the process list, which it reads every 15 ms.
+  `guard.log` says how long the process had been running, and says so when it
+  already had a visible window. A window or a Direct3D
+  device made before that is not covered. Launch the executable itself wherever
+  the game allows it.
+
+`-NoShim` leaves the shim out and keeps the guard, for a game the shim breaks.
+Such a game is ended if its window takes the foreground: that is the guard
+doing its job, and the game is then one the rig cannot run in the background.
+
+What the shim does not touch: DirectDraw, DirectInput 7 and older, Direct3D 10's
+own create-with-swap-chain calls, a DirectInput made through `CoCreateInstance`,
+a borderless window the size of the screen (it is not activated and sits at the
+bottom, but it is not made smaller), low-level keyboard and mouse hooks, and
+`RegisterHotKey`. For the first four the guard is what is left. A console window
+is not the game's own (it belongs to the console host), so neither the shim nor
+the guard sees one a game opens. A packaged app (`shell:AppsFolder`) cannot read
+what the injector leaves for the shim, so it is ended as one that cannot be
+given the shim; `-NoShim` is the only way to run one.
+
+`pixi run test-rig-guard` proves the two together with no game: see
+`powershell/tests/RigGuard.Tests.ps1`. It cannot show the guard ending a run for
+taking the foreground without taking the foreground from whoever is at the
+machine, so it shows the ending on a time limit instead, which is the same code
+from the verdict on.
+
 ## Limits
 
-- A game window takes the real foreground when it appears, and some take it
-  again later. The dev build hands it back within its 50 ms poll each time, so
-  the window that had it loses it for that long.
-- Someone who clicks into the game window gets the same treatment: the game
-  gives the foreground straight back. A run in which `Invoke-GameInput` saw the
-  game hold it is still flagged and repeated.
+- A game the shim is in from its first instruction has not been seen to take the
+  foreground in the test program; no real game has been run under it yet. One the
+  guard took in by name can have taken it before the shim was in: the guard ends
+  that run. Nothing hands the foreground back from outside the game any more.
+- Someone who clicks into the game window: not tried with the shim in. If the
+  click makes it the foreground window, the guard ends the run.
 - A launcher can start a stub that hands over to the game's own process (Far Cry
   6 does). `Start-IsolatedGame` returns the first process it sees, so take the
   process id again once the game is up.
