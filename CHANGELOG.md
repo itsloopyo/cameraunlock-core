@@ -9,6 +9,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `FirstPersonKey` counts taps through the C interface, and a mod can leave out a key another mod took (ABI 13)
+
+`cameraunlock_config_concept_hotkey_taps(name, flags, comment, default_keys, tap_bits, taps,
+held_bit)` describes a key list concept with no `CAMERAUNLOCK_HOTKEY_*` bit of its own, today
+`FirstPersonKey`, and puts it on the poller as a row of `cameraunlock_config_local_hotkey_taps` is.
+A game-local row cannot use that key, so a C or Java host had no way to bind it with taps.
+`cameraunlock_config_get_concept_keys` and `_save_concept_keys` take `FirstPersonKey` by its name.
+
+`cameraunlock_hotkeys_leave_out(keys)` stops every row listening for the entries whose key is one
+of `keys`, with any modifiers, until the next call; the file is not changed. Project Zomboid leaves
+out Delete while Project Viewpoint, which opens its settings on Delete, runs.
+
+- `CAMERAUNLOCK_ABI` is 13. Java: `configConceptHotkeyTaps` and `hotkeysLeaveOut`.
+- `data/config-format.json`: Project Zomboid's `FirstPersonKey` is `per_game`, holding
+  `Delete, ScrollLock, Ctrl+Shift+B` (owner ruling of 2026-11-16).
+
+Consuming repos: a mod that loads core through the C interface or the jar is rebuilt against ABI
+13. Nothing else changes.
+
 ### Added - core's jar runs on Linux
 
 `CameraUnlock.loadBundled()` used to fail on Linux as its classes loaded, on a call state that

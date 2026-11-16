@@ -604,6 +604,11 @@ struct ConceptRow {
     std::uint32_t flags = 0;
     std::optional<std::string> comment;
     std::optional<std::string> start;
+    // For a key list row of cameraunlock_config_concept_hotkey_taps, its bits as LocalRow's, and 0
+    // and empty for every other: one of the fleet's four answers its CAMERAUNLOCK_HOTKEY_*.
+    std::int32_t hotkey_bit = 0;
+    std::int32_t held_bit = 0;
+    std::vector<std::int32_t> more_tap_bits;
     // The poller's ids for a key list row's keys, as LocalRow's.
     std::vector<int> hotkey_ids;
 };
@@ -619,6 +624,8 @@ struct ConfigState {
     HostConfig loaded;
     // Written under the mutex, and read without it by cameraunlock_hotkeys_drop.
     std::atomic<input::HotkeyPoller*> poller{nullptr};
+    // The keys of cameraunlock_hotkeys_leave_out: no row's entry with one of them as its key is on the poller.
+    std::vector<int> left_out;
 #if defined(CAMERAUNLOCK_WIN32_HOST)
     // Where the DLL starts the poller's thread: a start that threw first leaves it unpolled.
     bool polled = false;
@@ -777,27 +784,57 @@ void RequireHotkeyBit(std::int32_t bit, const char* otherwise) {
     Require(bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (bit & (bit - 1)) == 0, otherwise);
 }
 
+// Under the config's mutex. Whether a row of the description, a local one or a key list concept,
+// already answers `bit`.
+bool BitTaken(const ConfigState& c, std::int32_t bit) {
+    const auto answers = [bit](std::int32_t hotkey_bit, std::int32_t held_bit, const std::vector<std::int32_t>& taps) {
+        return hotkey_bit == bit || held_bit == bit || std::find(taps.begin(), taps.end(), bit) != taps.end();
+    };
+    for (const LocalRow& other : c.locals) {
+        if (answers(other.hotkey_bit, other.held_bit, other.more_tap_bits)) return true;
+    }
+    for (const ConceptRow& other : c.concepts) {
+        if (other.hotkey_bit != 0 && answers(other.hotkey_bit, other.held_bit, other.more_tap_bits)) return true;
+    }
+    return false;
+}
+
+// Under the config's mutex. Refuses bits another row answers.
+void RequireBitsFree(const ConfigState& c, std::int32_t hotkey_bit, std::int32_t held_bit,
+                     const std::vector<std::int32_t>& more_tap_bits) {
+    if (BitTaken(c, hotkey_bit)) {
+        throw std::invalid_argument(more_tap_bits.empty() ? "hotkey_bit is another row's" : "a bit of tap_bits is another row's");
+    }
+    for (const std::int32_t tap : more_tap_bits) {
+        if (BitTaken(c, tap)) throw std::invalid_argument("a bit of tap_bits is another row's");
+    }
+    if (held_bit != 0 && BitTaken(c, held_bit)) throw std::invalid_argument("held_bit is another row's");
+}
+
+// The tap and held bits a row of cameraunlock_config_*hotkey_taps is given, checked.
+std::vector<std::int32_t> TapBits(const std::int32_t* tap_bits, std::int32_t taps, std::int32_t held_bit,
+                                  const char* one_tap_call) {
+    Require(tap_bits != nullptr, "tap_bits is NULL");
+    if (taps < 2 || taps > CAMERAUNLOCK_MOST_TAPS) {
+        throw std::invalid_argument(std::string("taps is not 2 to CAMERAUNLOCK_MOST_TAPS: one tap and a hold is ") + one_tap_call);
+    }
+    std::int32_t all = 0;
+    for (std::int32_t i = 0; i < taps; ++i) {
+        RequireHotkeyBit(tap_bits[i], "a bit of tap_bits is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        Require((all & tap_bits[i]) == 0, "two of tap_bits are one bit, and each number of taps has to be told apart");
+        all |= tap_bits[i];
+    }
+    RequireHotkeyBit(held_bit, "held_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+    Require((all & held_bit) == 0, "held_bit is one of tap_bits, and taps and a hold have to be told apart");
+    return std::vector<std::int32_t>(tap_bits, tap_bits + taps);
+}
+
 // Under the config's mutex. `held_bit` is 0 for a row that has none, and `more_tap_bits` empty
 // for one that counts no taps.
 std::int32_t AddHotkeyRow(ConfigState& c, const char* key, const char* comment, std::uint32_t flags,
                           const char* default_keys, std::int32_t hotkey_bit, std::int32_t held_bit,
                           std::vector<std::int32_t> more_tap_bits) {
-    const auto taken = [&c](std::int32_t bit) {
-        for (const LocalRow& other : c.locals) {
-            if (other.hotkey_bit == bit || other.held_bit == bit) return true;
-            for (const std::int32_t tap : other.more_tap_bits) {
-                if (tap == bit) return true;
-            }
-        }
-        return false;
-    };
-    if (taken(hotkey_bit)) {
-        throw std::invalid_argument(more_tap_bits.empty() ? "hotkey_bit is another row's" : "a bit of tap_bits is another row's");
-    }
-    for (const std::int32_t tap : more_tap_bits) {
-        if (taken(tap)) throw std::invalid_argument("a bit of tap_bits is another row's");
-    }
-    if (held_bit != 0 && taken(held_bit)) throw std::invalid_argument("held_bit is another row's");
+    RequireBitsFree(c, hotkey_bit, held_bit, more_tap_bits);
     const cfg::CodecParseResult<std::string> parsed = cfg::HotkeyCodec().Parse(default_keys);
     if (!parsed.ok()) throw std::invalid_argument(std::string(default_keys) + ": " + parsed.error);
     LocalRow row{LocalKind::Hotkey};
@@ -808,7 +845,9 @@ std::int32_t AddHotkeyRow(ConfigState& c, const char* key, const char* comment, 
     return AddLocal(c, "Hotkeys", key, comment, flags, std::move(row));
 }
 
-// The fleet's four key list rows: each one's keys in the config, and the bit they answer as a key goes down.
+// The key list concepts: each one's keys in the config, and the bit they answer as a key goes down,
+// 0 for one with no bit of the fleet's, which is on the poller only as a row of
+// cameraunlock_config_concept_hotkey_taps.
 struct FleetKeyRow {
     cfg::schema::Concept id;
     std::string HeadTrackingConfig::*keys;
@@ -821,6 +860,7 @@ const FleetKeyRow kFleetKeys[] = {
      CAMERAUNLOCK_HOTKEY_CYCLE_TRACKING_MODE},
     {cfg::schema::Concept::YawModeKey, &HeadTrackingConfig::yaw_mode_key_name, CAMERAUNLOCK_HOTKEY_YAW_MODE},
     {cfg::schema::Concept::TrueFreeLookKey, &HeadTrackingConfig::true_free_look_key_name, CAMERAUNLOCK_HOTKEY_AIM_MODE},
+    {cfg::schema::Concept::FirstPersonKey, &HeadTrackingConfig::first_person_key_name, 0},
 };
 
 const FleetKeyRow* FleetKeyOf(cfg::schema::Concept id) {
@@ -843,18 +883,30 @@ ConceptRow& DescribedConcept(ConfigState& c, const char* name) {
     return *described;
 }
 
-// One of the fleet's four key rows, which answer their bit as a key goes down.
-LocalRow FleetKey(const FleetKeyRow& fleet) {
+// A key list concept row as the poller takes it: one of the fleet's four answers its bit as a key
+// goes down, and one of cameraunlock_config_concept_hotkey_taps the bits it was given. Its
+// hotkey_bit is 0 for a row that is not on the poller.
+LocalRow FleetKey(const FleetKeyRow& fleet, const ConceptRow& described) {
     LocalRow row{LocalKind::Hotkey};
     row.key = ConceptName(fleet.id);
-    row.hotkey_bit = fleet.bit;
+    row.hotkey_bit = described.hotkey_bit != 0 ? described.hotkey_bit : fleet.bit;
+    row.held_bit = described.held_bit;
+    row.more_tap_bits = described.more_tap_bits;
     return row;
 }
 
-// A row's key list on the poller, as the kind of row its bits make it. Answers the poller's ids for it.
+// A row's key list on the poller, as the kind of row its bits make it, less the entries
+// cameraunlock_hotkeys_leave_out left out. Answers the poller's ids for it.
 std::vector<int> Register(ConfigState& c, input::HotkeyPoller& poller, const LocalRow& row, const std::string& keys) {
-    const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
+    if (row.hotkey_bit == 0) return {};
+    input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
     if (!parsed.ok()) throw std::runtime_error(row.key + "=" + keys + ": " + parsed.error);
+    parsed.bindings.erase(std::remove_if(parsed.bindings.begin(), parsed.bindings.end(),
+                                         [&c](const input::KeyBinding& binding) {
+                                             return std::find(c.left_out.begin(), c.left_out.end(), binding.vk) !=
+                                                    c.left_out.end();
+                                         }),
+                          parsed.bindings.end());
     std::atomic<std::int32_t>* pressed = &c.pressed;
     const auto answer = [pressed](std::int32_t bit) { return [pressed, bit] { pressed->fetch_or(bit); }; };
     if (!row.more_tap_bits.empty()) {
@@ -1070,34 +1122,74 @@ std::int32_t cameraunlock_config_describe(const char* display_name) {
     });
 }
 
+namespace {
+
+// Under the config's mutex. `row` is the concept as named, with its flags, comment and start set
+// from these.
+void AddConcept(ConfigState& c, const char* name, std::uint32_t flags, const char* comment, const char* default_text,
+                ConceptRow row) {
+    RequireDescribing(c);
+    Require(name != nullptr, "name is NULL");
+    Require((flags & ~(CAMERAUNLOCK_ROW_WRITABLE | CAMERAUNLOCK_ROW_PER_GAME)) == 0,
+            "a concept row takes CAMERAUNLOCK_ROW_WRITABLE and CAMERAUNLOCK_ROW_PER_GAME only");
+    bool found = false;
+    for (const cfg::schema::ConceptInfo& info : cfg::schema::kConcepts) {
+        if (std::strcmp(info.name, name) == 0) {
+            row.id = info.id;
+            found = true;
+        }
+    }
+    if (!found) throw std::invalid_argument(std::string(name) + " is not a canonical concept of data/config-schema.json");
+    row.flags = flags;
+    if (comment != nullptr) row.comment = comment;
+    if (default_text != nullptr) row.start = default_text;
+    c.concepts.push_back(std::move(row));
+    try {
+        BuildTable(c);
+    } catch (...) {
+        c.concepts.pop_back();
+        throw;
+    }
+}
+
+}  // namespace
+
 std::int32_t cameraunlock_config_concept(const char* name, std::uint32_t flags, const char* comment,
                                          const char* default_text) {
     return Guarded("cameraunlock_config_concept", [&] {
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
+        AddConcept(c, name, flags, comment, default_text, ConceptRow{});
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_concept_hotkey_taps(const char* name, std::uint32_t flags, const char* comment,
+                                                     const char* default_keys, const std::int32_t* tap_bits,
+                                                     std::int32_t taps, std::int32_t held_bit) {
+    return Guarded("cameraunlock_config_concept_hotkey_taps", [&] {
+        std::vector<std::int32_t> bits = TapBits(tap_bits, taps, held_bit, "not offered for a concept");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
         RequireDescribing(c);
         Require(name != nullptr, "name is NULL");
-        Require((flags & ~(CAMERAUNLOCK_ROW_WRITABLE | CAMERAUNLOCK_ROW_PER_GAME)) == 0,
-                "a concept row takes CAMERAUNLOCK_ROW_WRITABLE and CAMERAUNLOCK_ROW_PER_GAME only");
+        const FleetKeyRow* fleet = nullptr;
+        for (const FleetKeyRow& row : kFleetKeys) {
+            if (std::strcmp(ConceptName(row.id), name) == 0) fleet = &row;
+        }
+        if (fleet == nullptr) throw std::invalid_argument(std::string(name) + " is not a key list concept");
+        if (fleet->bit != 0) {
+            throw std::invalid_argument(std::string(name) + " answers its CAMERAUNLOCK_HOTKEY_* bit, so it is described with "
+                                        "cameraunlock_config_concept");
+        }
         ConceptRow row;
-        bool found = false;
-        for (const cfg::schema::ConceptInfo& info : cfg::schema::kConcepts) {
-            if (std::strcmp(info.name, name) == 0) {
-                row.id = info.id;
-                found = true;
-            }
-        }
-        if (!found) throw std::invalid_argument(std::string(name) + " is not a canonical concept of data/config-schema.json");
-        row.flags = flags;
-        if (comment != nullptr) row.comment = comment;
-        if (default_text != nullptr) row.start = default_text;
-        c.concepts.push_back(std::move(row));
-        try {
-            BuildTable(c);
-        } catch (...) {
-            c.concepts.pop_back();
-            throw;
-        }
+        row.hotkey_bit = bits[0];
+        row.held_bit = held_bit;
+        row.more_tap_bits.assign(bits.begin() + 1, bits.end());
+        RequireBitsFree(c, row.hotkey_bit, row.held_bit, row.more_tap_bits);
+        std::string start;
+        if (default_keys != nullptr) start = CanonicalKeys(name, default_keys);
+        AddConcept(c, name, flags, comment, default_keys != nullptr ? start.c_str() : nullptr, std::move(row));
         return CAMERAUNLOCK_OK;
     });
 }
@@ -1209,21 +1301,11 @@ std::int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* 
                                                    std::int32_t taps, std::int32_t held_bit) {
     return Guarded("cameraunlock_config_local_hotkey_taps", [&] {
         Require(default_keys != nullptr, "default_keys is NULL");
-        Require(tap_bits != nullptr, "tap_bits is NULL");
-        Require(taps >= 2 && taps <= CAMERAUNLOCK_MOST_TAPS,
-                "taps is not 2 to CAMERAUNLOCK_MOST_TAPS: one tap and a hold is cameraunlock_config_local_hotkey_held");
-        std::int32_t all = 0;
-        for (std::int32_t i = 0; i < taps; ++i) {
-            RequireHotkeyBit(tap_bits[i], "a bit of tap_bits is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
-            Require((all & tap_bits[i]) == 0, "two of tap_bits are one bit, and each number of taps has to be told apart");
-            all |= tap_bits[i];
-        }
-        RequireHotkeyBit(held_bit, "held_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
-        Require((all & held_bit) == 0, "held_bit is one of tap_bits, and taps and a hold have to be told apart");
+        const std::vector<std::int32_t> bits = TapBits(tap_bits, taps, held_bit, "cameraunlock_config_local_hotkey_held");
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
-        return AddHotkeyRow(c, key, comment, flags, default_keys, tap_bits[0], held_bit,
-                            std::vector<std::int32_t>(tap_bits + 1, tap_bits + taps));
+        return AddHotkeyRow(c, key, comment, flags, default_keys, bits[0], held_bit,
+                            std::vector<std::int32_t>(bits.begin() + 1, bits.end()));
     });
 }
 
@@ -1494,7 +1576,7 @@ std::int32_t cameraunlock_config_save_concept_keys(const char* name, const char*
         }
         const std::string text = CanonicalKeys(name, keys);
         const std::int32_t status = Save(c, [&](HostConfig& config) { config.*fleet->keys = text; });
-        Reregister(c, FleetKey(*fleet), described.hotkey_ids, text);
+        Reregister(c, FleetKey(*fleet, described), described.hotkey_ids, text);
         return status;
     });
 }
@@ -1698,7 +1780,7 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         std::vector<std::vector<int>> concept_ids(c.concepts.size());
         for (std::size_t i = 0; i < c.concepts.size(); ++i) {
             if (const FleetKeyRow* fleet = FleetKeyOf(c.concepts[i].id)) {
-                concept_ids[i] = Register(c, *poller, FleetKey(*fleet), c.loaded.*fleet->keys);
+                concept_ids[i] = Register(c, *poller, FleetKey(*fleet, c.concepts[i]), c.loaded.*fleet->keys);
             }
         }
         std::vector<std::vector<int>> local_ids(c.locals.size());
@@ -1717,6 +1799,43 @@ std::int32_t cameraunlock_hotkeys_start(void) {
 #if defined(CAMERAUNLOCK_WIN32_HOST)
         c.polled = true;
 #endif
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_hotkeys_leave_out(const char* keys) {
+    return Guarded("cameraunlock_hotkeys_leave_out", [&] {
+        Require(keys != nullptr, "keys is NULL");
+        const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
+        if (!parsed.ok()) throw std::invalid_argument(std::string(keys) + ": " + parsed.error);
+        std::vector<int> left_out;
+        for (const input::KeyBinding& binding : parsed.bindings) {
+            if (binding.modifiers != input::KeyModifiers::kNone) {
+                throw std::invalid_argument(std::string(keys) + ": a key is left out with every modifier, so the list names "
+                                            "keys alone");
+            }
+            left_out.push_back(binding.vk);
+        }
+        const std::string text = CanonicalKeys("keys", keys);
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        c.left_out = std::move(left_out);
+        if (input::HotkeyPoller* poller = c.poller.load()) {
+            for (ConceptRow& row : c.concepts) {
+                if (const FleetKeyRow* fleet = FleetKeyOf(row.id)) {
+                    for (const int id : row.hotkey_ids) poller->RemoveHotkey(id);
+                    row.hotkey_ids = Register(c, *poller, FleetKey(*fleet, row), c.loaded.*fleet->keys);
+                }
+            }
+            for (std::size_t i = 0; i < c.locals.size(); ++i) {
+                if (c.locals[i].kind != LocalKind::Hotkey) continue;
+                for (const int id : c.locals[i].hotkey_ids) poller->RemoveHotkey(id);
+                c.locals[i].hotkey_ids = Register(c, *poller, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+            }
+            poller->DisarmPresses();
+        }
+        LogLine(text.empty() ? "hotkeys: every key of every key list is listened for"
+                             : "hotkeys: " + text + " left out of every key list, with any modifiers");
         return CAMERAUNLOCK_OK;
     });
 }

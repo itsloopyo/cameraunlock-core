@@ -113,6 +113,8 @@ public final class LinuxTests {
         int key = core.configLocalHotkey("GraphicsKey", "Goes to the next graphics mode.", CameraUnlock.ROW_WRITABLE | CameraUnlock.ROW_LIVE,
                 "F9", CameraUnlock.HOTKEY_LOCAL);
         check(trees == 0 && key == 1, "local rows are numbered as they are added");
+        core.configConceptHotkeyTaps("FirstPersonKey", CameraUnlock.ROW_PER_GAME | CameraUnlock.ROW_WRITABLE, null,
+                "Delete, ScrollLock, Ctrl+Shift+B", new int[] {FIRST_PERSON_ONCE, FIRST_PERSON_TWICE}, FIRST_PERSON_HELD);
 
         CameraUnlock.Config config = core.configLoad(file, defaults);
         check(config.status == CameraUnlock.LOAD_CREATED && log(file).contains("\r\nTrees=12\r\n"), "a first load creates the file");
@@ -169,6 +171,38 @@ public final class LinuxTests {
         int taken = core.hotkeysTake();
         check((taken & CameraUnlock.HOTKEY_LOCAL) != 0, "F9 held and let go fires its row: " + Integer.toHexString(taken));
         check(core.hotkeysTake() == 0, "once");
+
+        tap(held, 0x91);
+        tap(held, 0x91);
+        int twice = core.hotkeysTake();
+        check(twice == FIRST_PERSON_TWICE, "Scroll Lock tapped twice is FirstPersonKey's second tap: " + Integer.toHexString(twice));
+        tap(held, 0x2E);
+        Thread.sleep(CameraUnlock.TAP_GAP_MS + 200);
+        int once = core.hotkeysTake();
+        check(once == FIRST_PERSON_ONCE, "and Delete tapped once its first, once the gap has passed: " + Integer.toHexString(once));
+        core.hotkeysLeaveOut("Delete");
+        tap(held, 0x2E);
+        Thread.sleep(CameraUnlock.TAP_GAP_MS + 200);
+        check(core.hotkeysTake() == 0, "with Delete left out it fires nothing");
+        tap(held, 0x91);
+        Thread.sleep(CameraUnlock.TAP_GAP_MS + 200);
+        check(core.hotkeysTake() == FIRST_PERSON_ONCE, "while Scroll Lock still does");
+        core.hotkeysLeaveOut("");
+        tap(held, 0x2E);
+        Thread.sleep(CameraUnlock.TAP_GAP_MS + 200);
+        check(core.hotkeysTake() == FIRST_PERSON_ONCE && core.configGetConceptKeys("FirstPersonKey").equals("Delete, ScrollLock, Ctrl+Shift+B"),
+                "and Delete listened for again fires it, with the row's keys never changed");
+    }
+
+    private static final int FIRST_PERSON_ONCE = CameraUnlock.HOTKEY_LOCAL << 1, FIRST_PERSON_TWICE = CameraUnlock.HOTKEY_LOCAL << 2,
+            FIRST_PERSON_HELD = CameraUnlock.HOTKEY_LOCAL << 3;
+
+    /** A key down for 80 ms and let go for 80 ms: five looks of the tick's 16 ms each way, well inside a tap and its gap. */
+    private static void tap(AtomicInteger held, int virtualKey) throws InterruptedException {
+        held.set(virtualKey);
+        Thread.sleep(80);
+        held.set(0);
+        Thread.sleep(80);
     }
 
     /** Whether the tick asks the key source more than `past` times within two seconds: it runs on a thread of its own. */

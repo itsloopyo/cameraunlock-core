@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 12
+#define CAMERAUNLOCK_ABI 13
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -327,6 +327,17 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_held(const char* key, co
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* comment, uint32_t flags,
                                                              const char* default_keys, const int32_t* tap_bits,
                                                              int32_t taps, int32_t held_bit);
+/* A key list of the fleet's vocabulary that has no CAMERAUNLOCK_HOTKEY_* bit of its own
+ * ("FirstPersonKey"), on the poller as a row of cameraunlock_config_local_hotkey_taps is: its bits
+ * are those of that call, and no other row's. `comment` and `default_keys` are as
+ * cameraunlock_config_concept's `comment` and `default_text`, so a global concept takes
+ * `default_keys` only with CAMERAUNLOCK_ROW_PER_GAME. cameraunlock_config_get_concept_keys and
+ * cameraunlock_config_save_concept_keys take it by its name. An error for a concept that is not a
+ * key list, and for one of the fleet's four. Such a row described with cameraunlock_config_concept
+ * instead is in the file and on no poller. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_concept_hotkey_taps(const char* name, uint32_t flags, const char* comment,
+                                                               const char* default_keys, const int32_t* tap_bits,
+                                                               int32_t taps, int32_t held_bit);
 
 /* The file the description renders for a first start, written to `path`: the committed
  * config/CameraUnlock.ini a mod's build keeps in step with its rows. */
@@ -387,9 +398,10 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_get_float(int32_t row, float* out);
  * bytes and copies it, with its NUL, when `capacity` holds length + 1. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_text(int32_t row, char* buffer, int32_t capacity);
 /* The keys of one of the fleet's key list rows, by its name in data/config-schema.json
- * ("CycleTrackingModeKey"): the keys the load gave the row, which cameraunlock_hotkeys_start
- * listens for. Answers their length in bytes and copies them, with a NUL, when `capacity` holds
- * length + 1. An error for a row the description has not added, and for one that is not a key list. */
+ * ("CycleTrackingModeKey", "FirstPersonKey"): the keys the load gave the row, as the file holds
+ * them. The poller listens for them less any cameraunlock_hotkeys_leave_out left out. Answers
+ * their length in bytes and copies them, with a NUL, when `capacity` holds length + 1. An error
+ * for a row the description has not added, and for one that is not a key list. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_concept_keys(const char* name, char* buffer, int32_t capacity);
 
 /* Each writes rows of the file and answers a CAMERAUNLOCK_SAVE_*. Synchronous: from a thread
@@ -397,7 +409,7 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_get_concept_keys(const char* name, ch
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_int(int32_t row, int32_t value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_float(int32_t row, float value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_text(int32_t row, const char* value);
-/* A key list row's keys: a local row by its number, or one of the fleet's four by its name in
+/* A key list row's keys: a local row by its number, or one of the fleet's by its name in
  * data/config-schema.json ("CycleTrackingModeKey"). `keys` is a list as the file holds one ("F6,
  * Ctrl+Shift+G", or empty for none), kept as its canonical text. Where cameraunlock_hotkeys_start has
  * run, the poller listens for the new keys from the next poll and no longer for the old ones, and a
@@ -494,6 +506,13 @@ CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_start(void);
 CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_take(void);
 /* Forgets them without answering: for presses made where the host does not act on them. */
 CAMERAUNLOCK_C void cameraunlock_hotkeys_drop(void);
+/* Keys another mod or the game has taken: from the next poll no row listens for an entry whose key
+ * is one of them, with any modifiers, and every other entry works as it did ("Delete" leaves
+ * "Delete, ScrollLock" listening for Scroll Lock only). `keys` names keys alone, as a key list
+ * does ("Delete, F9"), and each call replaces the last: empty listens for every entry again. Before
+ * cameraunlock_hotkeys_start it holds for the start. The file is not changed, and a key down as the
+ * keys change runs nothing for that press. */
+CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_leave_out(const char* keys);
 
 /* ---- The game's window ---------------------------------------------------------------------- */
 

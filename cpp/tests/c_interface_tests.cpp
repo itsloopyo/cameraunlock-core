@@ -929,6 +929,38 @@ void TestConfig(const fs::path& scratch) {
           "with no keys at all it is told that first");
     Check(taps("home", {0x800, 0x1000, 0x10000}, 0x2000) == 6,
           "it is a row like any other key row, numbered after them: " + LastError());
+    const auto conceptTaps = [](const char* name, std::uint32_t flags, const char* keys, std::vector<std::int32_t> bits,
+                                std::int32_t held) {
+        return cameraunlock_config_concept_hotkey_taps(name, flags, nullptr, keys, bits.data(),
+                                                       static_cast<std::int32_t>(bits.size()), held);
+    };
+    const std::uint32_t perGame = CAMERAUNLOCK_ROW_PER_GAME | CAMERAUNLOCK_ROW_WRITABLE;
+    Check(conceptTaps("CycleTrackingModeKey", 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("answers its CAMERAUNLOCK_HOTKEY_* bit") != std::string::npos,
+          "a fleet key row that answers a bit of its own is not one of the concept key rows that count taps: " + LastError());
+    Check(conceptTaps("LocalSmoothing", 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a key list concept") != std::string::npos &&
+              conceptTaps("FirstPersonView", 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              conceptTaps(nullptr, 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR,
+          "nor is a concept that is no key list, or none: " + LastError());
+    Check(conceptTaps("FirstPersonKey", CAMERAUNLOCK_ROW_WRITABLE, "Delete", {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR,
+          "a global key row takes keys of the game's own only with CAMERAUNLOCK_ROW_PER_GAME, as any global concept does");
+    Check(conceptTaps("FirstPersonKey", perGame, "Delete", {0x800, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("a bit of tap_bits is another row's") != std::string::npos &&
+              conceptTaps("FirstPersonKey", perGame, "Delete", {0x40000, 0x80000}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is another row's") != std::string::npos &&
+              conceptTaps("FirstPersonKey", perGame, "Delete", {0x40000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              conceptTaps("FirstPersonKey", perGame, "Delete, Banana", {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR,
+          "its bits follow a local tap row's rules, and its keys are keys: " + LastError());
+    Check(conceptTaps("FirstPersonKey", perGame, "delete, ScrollLock, ctrl+shift+b", {0x40000, 0x80000}, 0x100000) ==
+              CAMERAUNLOCK_OK,
+          "FirstPersonKey counts taps with the game's own keys: " + LastError());
+    Check(conceptTaps("FirstPersonKey", perGame, "Delete", {0x200000, 0x400000}, 0x800000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_concept("FirstPersonKey", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR,
+          "once");
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x40000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x200000, 0x100000) == CAMERAUNLOCK_ERROR,
+          "and a local row cannot take its bits either");
     Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x1000) == CAMERAUNLOCK_ERROR &&
               cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x10000) == CAMERAUNLOCK_ERROR &&
               cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x4000, 0x1000) == CAMERAUNLOCK_ERROR &&
@@ -956,6 +988,7 @@ void TestConfig(const fs::path& scratch) {
     const std::string fresh = ReadFile(scratch / "rendered.ini");
     Check(fresh.find("[CameraUnlock]") != std::string::npos && fresh.find("FieldOfView=65") != std::string::npos &&
               fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos && fresh.find("SeatKey=Delete") != std::string::npos && fresh.find("TurnKey=Home") != std::string::npos &&
+              fresh.find("\r\nFirstPersonKey=Delete, ScrollLock, Ctrl+Shift+B\r\n") != std::string::npos &&
               fresh.find("CollisionMargin=0.12") != std::string::npos && fresh.find("LocalSmoothing=default") != std::string::npos &&
               fresh.find("[Voice]") != std::string::npos && fresh.find("Microphone=Default") != std::string::npos,
           "the render holds the stamp, the local rows at their defaults and the global concepts as default");
@@ -1148,6 +1181,11 @@ void TestConfig(const fs::path& scratch) {
               conceptKeysOf("TrueFreeLookKey") == "F6" &&
               ReadFile(scratch / "CameraUnlock.ini").find("\r\nTrueFreeLookKey=F6\r\n") != std::string::npos,
           "and so does one of the fleet's, by its name: " + LastError());
+    Check(conceptKeysOf("FirstPersonKey") == "Delete, ScrollLock, Ctrl+Shift+B" &&
+              cameraunlock_config_save_concept_keys("FirstPersonKey", "delete, scrolllock, ctrl+shift+b, f12") == CAMERAUNLOCK_SAVE_SAVED &&
+              conceptKeysOf("FirstPersonKey") == "Delete, ScrollLock, Ctrl+Shift+B, F12" &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nFirstPersonKey=Delete, ScrollLock, Ctrl+Shift+B, F12\r\n") != std::string::npos,
+          "a concept key row that counts taps is read and saved by its name: " + LastError());
     const std::string beforeRefusals = ReadFile(scratch / "CameraUnlock.ini");
     Check(cameraunlock_config_save_keys(5, "Home") == CAMERAUNLOCK_ERROR && LastError().find("not marked Writable") != std::string::npos,
           "a key row not marked writable does not: " + LastError());
@@ -1169,7 +1207,16 @@ void TestConfig(const fs::path& scratch) {
     Check(ReadFile(scratch / "CameraUnlock.ini") == beforeRefusals && keysOf(key) == "F8, Ctrl+Shift+G" && conceptKeysOf("TrueFreeLookKey") == "F6",
           "each refusal writes nothing and changes no keys");
 
+    Check(cameraunlock_hotkeys_leave_out("Ctrl+Delete") == CAMERAUNLOCK_ERROR && LastError().find("keys alone") != std::string::npos &&
+              cameraunlock_hotkeys_leave_out("Banana") == CAMERAUNLOCK_ERROR && cameraunlock_hotkeys_leave_out(nullptr) == CAMERAUNLOCK_ERROR,
+          "keys are left out by the key alone, and only keys are: " + LastError());
+    TakeLog();
+    Check(cameraunlock_hotkeys_leave_out("delete") == CAMERAUNLOCK_OK && TakeLog().find("Delete left out of every key list") != std::string::npos,
+          "before the poller starts a key is left out for its start, and the log says so: " + LastError());
     Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_OK, "the key lists go on the poller: " + LastError());
+    Check(cameraunlock_hotkeys_leave_out("") == CAMERAUNLOCK_OK && cameraunlock_hotkeys_leave_out("Delete, F9") == CAMERAUNLOCK_OK &&
+              conceptKeysOf("FirstPersonKey") == "Delete, ScrollLock, Ctrl+Shift+B, F12" && keysOf(key) == "F8, Ctrl+Shift+G",
+          "with the poller running keys are left out and listened for again, and the rows' keys are as they were: " + LastError());
     Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_ERROR, "once");
     Check(cameraunlock_config_save_keys(key, "F9") == CAMERAUNLOCK_SAVE_SAVED && keysOf(key) == "F9" &&
               cameraunlock_config_save_concept_keys("TrueFreeLookKey", "") == CAMERAUNLOCK_SAVE_SAVED && conceptKeysOf("TrueFreeLookKey").empty() &&

@@ -703,6 +703,11 @@
         "row": "TrueFreeLookKey",
         "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds TrueFreeLookKey=Insert.",
         "approved": "2026-10-09"
+      },
+      {
+        "row": "FirstPersonKey",
+        "reason": "Project Zomboid shipped its first person key on Delete, tapped once to four times for players 1 to 4 and held for every player, with Scroll Lock in its place while Project Viewpoint, another mod, runs, since Viewpoint opens its settings window on Delete. The owner ruled on 2026-11-16: \"use both - Delete + Scrlck (and whatever the chord was) and just disable del when viewpoint is detected - everybody's happy, nobody has to learn special new things\". So the row holds Delete before the fleet's list, the mod binds it with cameraunlock_config_concept_hotkey_taps, and leaves Delete out with cameraunlock_hotkeys_leave_out while Viewpoint runs. The committed file holds FirstPersonKey=Delete, ScrollLock, Ctrl+Shift+B.",
+        "approved": "2026-11-16"
       }
     ],
     "red-eclipse-headtracking": [

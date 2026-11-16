@@ -28,7 +28,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 12;
+    public static final int ABI = 13;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -369,11 +369,11 @@ public final class CameraUnlock {
             sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, viewStart,
             viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalText, configLocalHotkey,
-            configLocalHotkeyHeld, configLocalHotkeyTaps, configRender,
+            configLocalHotkeyHeld, configLocalHotkeyTaps, configConceptHotkeyTaps, configRender,
             configLoad, configReload, configWatched, configGetInt, configGetFloat, configGetText, configGetConceptKeys, configSaveInt, configSaveFloat, configSaveText, configSaveKeys, configSaveConceptKeys, configSaveRows,
             configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
-            configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
+            configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, hotkeysLeaveOut, windowCenter;
 
     private final MemorySegment frameInput = sized(FRAME_INPUT), frameOut = sized(FRAME), obstruction = sized(OBSTRUCTION),
             leanOut = sized(LEAN);
@@ -505,6 +505,8 @@ public final class CameraUnlock {
                 FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT));
         configLocalHotkeyTaps = bind("cameraunlock_config_local_hotkey_taps",
                 FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, POINTER, INT, INT));
+        configConceptHotkeyTaps = bind("cameraunlock_config_concept_hotkey_taps",
+                FunctionDescriptor.of(INT, POINTER, INT, POINTER, POINTER, POINTER, INT, INT));
         configRender = bind("cameraunlock_config_render", FunctionDescriptor.of(INT, POINTER));
         configLoad = bind("cameraunlock_config_load", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER));
         configReload = bind("cameraunlock_config_reload", FunctionDescriptor.of(INT));
@@ -530,6 +532,7 @@ public final class CameraUnlock {
         hotkeysStart = bind("cameraunlock_hotkeys_start", FunctionDescriptor.of(INT));
         hotkeysTake = bind("cameraunlock_hotkeys_take", FunctionDescriptor.of(INT));
         hotkeysDrop = bind("cameraunlock_hotkeys_drop", FunctionDescriptor.ofVoid());
+        hotkeysLeaveOut = bind("cameraunlock_hotkeys_leave_out", FunctionDescriptor.of(INT, POINTER));
         windowCenter = bind("cameraunlock_window_center", FunctionDescriptor.of(INT, LONG));
         backend.started();
     }
@@ -807,6 +810,23 @@ public final class CameraUnlock {
         }
     }
 
+    /**
+     * A key list of the fleet's vocabulary with no HOTKEY_* bit of its own ("FirstPersonKey"),
+     * tapped and held as a row of configLocalHotkeyTaps is. configGetConceptKeys and
+     * configSaveConceptKeys take it by its name.
+     *
+     * @param comment     replaces the schema's comment above the key, or null to keep it
+     * @param defaultKeys the game's own keys, or null for the schema's: a global concept takes them
+     *                    only with ROW_PER_GAME
+     * @param tapBits     and heldBit, as configLocalHotkeyTaps' and no other row's
+     */
+    public void configConceptHotkeyTaps(String name, int flags, String comment, String defaultKeys, int[] tapBits, int heldBit) {
+        try (Arena arena = Arena.ofConfined()) {
+            check(status(configConceptHotkeyTaps, text(arena, name), flags, optional(arena, comment), optional(arena, defaultKeys),
+                    arena.allocateFrom(INT, tapBits), tapBits.length, heldBit));
+        }
+    }
+
     /** Writes the file the description renders for a first start. */
     public void configRender(Path file) {
         try (Arena arena = Arena.ofConfined()) {
@@ -1074,6 +1094,17 @@ public final class CameraUnlock {
             throw failure;
         } catch (Throwable failure) {
             throw new IllegalStateException(failure);
+        }
+    }
+
+    /**
+     * Keys another mod or the game has taken: from the next poll no row listens for an entry whose
+     * key is one of them, with any modifiers. Keys alone ("Delete"), and each call replaces the
+     * last: empty listens for every entry again. The file is not changed.
+     */
+    public void hotkeysLeaveOut(String keys) {
+        try (Arena arena = Arena.ofConfined()) {
+            check(status(hotkeysLeaveOut, text(arena, keys)));
         }
     }
 

@@ -232,12 +232,12 @@ the library's while Windows answers. The path is UTF-16, the one text here that 
 because the host hands it to Windows and an unpaired surrogate has to come through as it is.
 
 `cameraunlock_config_get_int`, `_get_float` and `_get_text` read a local row.
-`cameraunlock_config_get_concept_keys(name, buffer, capacity)` reads one of the fleet's four key
-lists by its name, such as `CycleTrackingModeKey`: the keys the load gave the row, which
-`cameraunlock_hotkeys_start` listens for and a reload leaves as they are.
+`cameraunlock_config_get_concept_keys(name, buffer, capacity)` reads one of the fleet's key lists
+by its name, such as `CycleTrackingModeKey` or `FirstPersonKey`: the keys the load gave the row,
+which `cameraunlock_hotkeys_start` listens for and a reload leaves as they are.
 `cameraunlock_config_save_int`, `_save_float` and `_save_text` write one.
 `cameraunlock_config_save_keys(row, keys)` writes a local key list row, and
-`cameraunlock_config_save_concept_keys(name, keys)` one of the fleet's four by its name. Each row has
+`cameraunlock_config_save_concept_keys(name, keys)` one of the fleet's by its name. Each row has
 to be marked `CAMERAUNLOCK_ROW_WRITABLE`, and the keys are kept as their canonical text. Once
 `cameraunlock_hotkeys_start` has run, the poller listens for the new keys from its next look and no
 longer for the old ones, and a key down as the list changes does nothing for that press: it is most
@@ -345,6 +345,24 @@ held_bit)`. `tap_bits` holds `taps` bits, the first for one tap, the second for 
   is down.
 - After more than 100 ms between two looks at the keys, a waiting run is dropped and a key still
   down is a first press begun at the second look.
+
+A key list of the fleet's vocabulary that has no `CAMERAUNLOCK_HOTKEY_*` bit of its own, which
+today is `FirstPersonKey`, goes on the poller as a row of
+`cameraunlock_config_concept_hotkey_taps(name, flags, comment, default_keys, tap_bits, taps,
+held_bit)`. It is tapped and held as a row of `cameraunlock_config_local_hotkey_taps` is, and
+its bits follow the same rules. It is a concept row in the file: `comment` and `default_keys` are
+`cameraunlock_config_concept`'s `comment` and `default_text`, so a global concept takes
+`default_keys` only with `CAMERAUNLOCK_ROW_PER_GAME`, and the get and save calls take it by its
+name. The fleet's four answer their own bits and are refused here. Described with
+`cameraunlock_config_concept` instead, such a row is in the file and on no poller.
+
+`cameraunlock_hotkeys_leave_out(keys)` is for keys another mod or the game has taken while the
+game runs. From the next look no row listens for an entry whose key is one of `keys`, with any
+modifiers, and every other entry of the row works as before: with `Delete` left out,
+`FirstPersonKey=Delete, ScrollLock, Ctrl+Shift+B` answers Scroll Lock and the chord. `keys` names
+keys alone, each call replaces the last, and an empty list listens for every entry again. Called
+before `cameraunlock_hotkeys_start`, it holds for the start. The file is not changed, and a key
+down as the keys change does nothing for that press.
 
 A background test taps such a key any number of times, and holds it, through isolated input's `tap <key> <ms>`
 and `wait <ms>` ([isolated-input.md](isolated-input.md), The command file).
