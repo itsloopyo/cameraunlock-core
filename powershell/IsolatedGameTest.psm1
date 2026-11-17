@@ -683,6 +683,28 @@ function Start-IsolatedGame {
     ends the game after -GuardMinutes, whatever the test is doing: raise it for a longer session.
     Stop-IsolatedGame stops the guard, which ends what is left of the run.
 
+    What to know before calling it (docs/isolated-input.md, "The guarded launch", has the rest):
+    - The game is ended 30 minutes after the launch unless -GuardMinutes says otherwise. That
+      holds for a game left running with Exit-GameRig -KeptIn too.
+    - A launch that is not an executable (a steam:// URI) gets the shim only once the game's
+      process is seen. A window or a Direct3D device it made before that is not covered, and the
+      guard ends the run if that window takes the foreground. Launch the executable itself
+      wherever the game allows it.
+    - The shim covers Direct3D 9, DXGI swap chains made through a factory's CreateSwapChain or
+      CreateSwapChainForHwnd or by D3D11CreateDeviceAndSwapChain, and DirectInput 8. Of those, the
+      test runs Direct3D 9, Direct3D 11 and DirectInput 8. It does not cover DirectDraw, DirectInput 7
+      and older, Direct3D 10's own create-with-swap-chain calls, a DirectInput made through
+      CoCreateInstance, a borderless window the size of the screen (not activated, but not made
+      smaller), low-level keyboard and mouse hooks, RegisterHotKey, or a console window the game
+      opens. For the first four the guard ending the game is all there is.
+    - A process the shim cannot be put into ends the run: one that is elevated or protected, or
+      a packaged app. -NoShim runs such a game with the guard alone.
+    - The guard ends the run on a change of display mode whoever made it, the person at the
+      machine included, and it does not look at the foreground for the tens of milliseconds it
+      takes to put the shim into a process it has just found.
+    - No real game had been run under the guard when this was written (2026-11-17): what it does
+      to a given game is found by trying that game.
+
     -Started is handed the process the moment it appears, before the settling.
     With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
     Stop-IsolatedGame removes that copy. A copy an earlier run left there, still loaded in some
@@ -703,9 +725,13 @@ function Start-IsolatedGame {
         [scriptblock]$Started,
         # Command-line arguments for an executable -Launch, joined with spaces: quote one that holds a space.
         [string[]]$Arguments = @(),
-        # Other executables of the run, by name: the launchers the game comes up through. The guard takes them in too.
+        # Other executables of the run, by name: the launchers the game comes up through. The guard takes
+        # them in too. A name matches any process of that name started after the guard, one the person
+        # at the machine starts for themselves included, and that one is ended with the run: name only
+        # launchers that are this game's own.
         [string[]]$Processes = @(),
-        # The guard ends the game this long after it came up, whatever the test is doing.
+        # The guard ends the game this long after the launch, whatever the test is doing. A session that
+        # runs longer than half an hour has to say so here.
         [int]$GuardMinutes = 30,
         # Where the guard keeps its log and verdict. One of its own under the rig root when left out.
         [string]$GuardFolder = '',
@@ -1895,6 +1921,12 @@ function Start-IsolatedGameSession {
     processes: start, look at a capture, decide what to play next, stop. The rig stays held in
     between, by the running game.
 
+    The game runs under the guard of Start-IsolatedGame, whose help lists what that means for a
+    rig: the game is ended 30 minutes after the launch unless -GuardMinutes says otherwise, on its
+    first foreground window, and on any change of display mode; a steam:// launch is covered
+    later than an executable; and every name in -Processes is ended with the run, whoever
+    started it.
+
     -Enter runs with the rig held and nothing saved yet, and is handed the session: take a
     second lock the game's other users still go by, wait for one of them to finish putting the
     game's files back. -Leave is its other half, run once the files are back and before the rig is
@@ -1954,7 +1986,9 @@ function Start-IsolatedGameSession {
         [ValidateSet('native', 'managed')][string]$ModHost = 'native',
         [string]$HostDll = $script:HostDllBuild,
         # Other process names that mean the game is still up, for the rig. The guard takes them in as
-        # part of the run (Start-IsolatedGame -Processes): name the launchers the game comes up through.
+        # part of the run (Start-IsolatedGame -Processes): name the launchers the game comes up through,
+        # and only ones that are this game's own. A process of one of these names that the person at
+        # the machine starts during the run is ended with it.
         [string[]]$Processes = @(),
         [switch]$WholeGpu,
         [int]$WaitSeconds = 3600,
@@ -1963,7 +1997,8 @@ function Start-IsolatedGameSession {
         [string]$SessionFile = '',
         # Command-line arguments for the launch (Start-IsolatedGame -Arguments).
         [string[]]$Arguments = @(),
-        # The guard ends the game this long after the launch (Start-IsolatedGame -GuardMinutes).
+        # The guard ends the game this long after the launch, whatever the test is doing
+        # (Start-IsolatedGame -GuardMinutes). A session longer than half an hour has to say so here.
         [int]$GuardMinutes = 30,
         # Watch and end only, without the shim (Start-IsolatedGame -NoShim).
         [switch]$NoShim
