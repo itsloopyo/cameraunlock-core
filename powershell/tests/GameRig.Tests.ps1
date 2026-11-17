@@ -66,23 +66,33 @@ function Stop-StandIn {
 
 # A taker in a process of its own. When a gate file is named it says it is ready ("<gate>.<owner>")
 # and waits for the gate, so several ask at the same moment. It logs "in <owner>" and "out <owner>" round its hold, and writes
-# "<log>.<owner>" when it is refused. Given a -Pool (names joined by commas) it asks for any of them
-# and writes the one it got to "<log>.<owner>.game".
+# "<log>.<owner>" when it is refused. With -Release it holds until that file is there: a hold the
+# test must still find held is ended by the test, never by a clock, because the next taker is a new
+# process that needs a second or more to load the module before it asks. Given a -Pool (names joined by commas) it asks for any of them
+# and writes the one it got to "<log>.<owner>.game". A file the test waits for appears with its
+# content in it, by a rename: the test reads it the moment it is there.
 $taker = Join-Path $root 'taker.ps1'
 Set-Content $taker -Encoding ASCII -Value @'
 param([string]$Module, [string]$Game, [string]$Owner, [string]$Log, [int]$HoldMs = 0, [string]$Gate = '', [int]$WaitSeconds = 3600,
-      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '', [switch]$WholeGpu, [string]$Pool = '')
+      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '', [switch]$WholeGpu, [string]$Pool = '',
+      [string]$Release = '')
 $ErrorActionPreference = 'Stop'
+function Trace { param([string]$Step) Add-Content "$Log-trace.$Owner" "$(Get-Date -Format HH:mm:ss.fff) $Owner $Step, $([int]((Get-Date) - (Get-Process -Id $PID).StartTime).TotalMilliseconds) ms after its process started" }
+Trace 'running'
 Import-Module $Module
+Trace 'has the module'
 if ($Gate) { Set-Content "$Gate.$Owner" ''; while (-not (Test-Path $Gate)) { Start-Sleep -Milliseconds 10 } }
 $which = $(if ($Pool) { @{ Pool = $Pool -split ',' } } else { @{ Game = $Game } })
 try { $rig = Enter-GameRig @which -Owner $Owner -WaitSeconds $WaitSeconds -StateFolder $StateFolder -WholeGpu:$WholeGpu 6>$null }
-catch { Set-Content "$Log.$Owner" "$_"; exit 3 }
+catch { Trace 'was refused'; Set-Content "$Log.$Owner" "$_"; exit 3 }
+Trace 'has the rig'
 Add-Content $Log "in $Owner"
-if ($Pool) { Set-Content "$Log.$Owner.game" $rig.Game }
-if ($TokenFile) { Set-Content $TokenFile $rig.Token }
+function Tell { param([string]$Path, [string]$Text) Set-Content "$Path.part" $Text; Move-Item "$Path.part" $Path }
+if ($Pool) { Tell "$Log.$Owner.game" $rig.Game }
+if ($TokenFile) { Tell $TokenFile $rig.Token }
 if ($SaveFile) { Save-GameTestState -Files $SaveFile -Folder $StateFolder }
 Start-Sleep -Milliseconds $HoldMs
+if ($Release) { while (-not (Test-Path $Release)) { Start-Sleep -Milliseconds 20 } }
 Add-Content $Log "out $Owner"
 if (-not $Abandon) { Exit-GameRig -Rig $rig }
 '@
@@ -97,10 +107,32 @@ function Start-Taker {
     $started.Add($process)
     $process
 }
-function Wait-All { param($Processes, [int]$Seconds = 90) foreach ($p in $Processes) { if (-not $p.WaitForExit($Seconds * 1000)) { throw "taker $($p.Id) did not end in $Seconds s" } } }
-function Wait-Until { param([scriptblock]$Condition, [int]$Seconds = 30)
+# The waits are bounds on a failure, not on a pass: a taker is a new PowerShell process, and on a busy
+# machine one took 22 seconds to reach its first line and 3 more to load the module.
+function Wait-All { param($Processes, [int]$Seconds = 240) foreach ($p in $Processes) { if (-not $p.WaitForExit($Seconds * 1000)) { throw "taker $($p.Id) did not end in $Seconds s" } } }
+function Get-RigPicture {
+    $rigRoot = $env:CAMERAUNLOCK_RIG_ROOT
+    $held = @(Get-ChildItem $rigRoot -Recurse -Filter 'owner.json' -ErrorAction SilentlyContinue | ForEach-Object {
+        $owner = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+        if ($owner) { "$($owner.Key) by $($owner.Owner) (pid $($owner.ProcessId))" }
+    })
+    $waiting = @(Get-ChildItem (Join-Path $rigRoot '_queue') -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+        $ticket = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+        if ($ticket) { "$($ticket.Owner) (pid $($ticket.ProcessId)) for $(@($ticket.Keys) -join '/')$(if ($ticket.WholeGpu) { ' and the whole card' })" }
+    })
+    $trace = @(Get-ChildItem $root -Filter '*-trace.*' | ForEach-Object { Get-Content $_.FullName } | Sort-Object | Select-Object -Last 8)
+    "held: $($held -join '; '). waiting, oldest first: $($waiting -join '; '). the takers' last steps: $($trace -join '; ')"
+}
+function Wait-Until { param([scriptblock]$Condition, [int]$Seconds = 120)
     $deadline = (Get-Date).AddSeconds($Seconds)
-    while (-not (& $Condition)) { if ((Get-Date) -gt $deadline) { throw 'waited too long' }; Start-Sleep -Milliseconds 100 }
+    while (-not (& $Condition)) {
+        if ((Get-Date) -gt $deadline) { throw "waited $Seconds seconds for {$("$Condition".Trim())} and it never held. $(Get-RigPicture)" }
+        Start-Sleep -Milliseconds 100
+    }
+}
+function Test-Waiting { param([string]$Game, [string]$Owner)
+    $state = $(if ($Game) { Get-GameRig -Game $Game } else { Get-GameRig })
+    [bool]($state -and $state.Waiting -contains $Owner)
 }
 $absent = 'CuRigNoSuchGame'
 
@@ -109,12 +141,15 @@ try {
     # Six processes ask in the same moment and none of them waits: one gets the rig.
     $log = Join-Path $root 'race.log'
     $gate = Join-Path $root 'race.gate'
-    $takers = 1..6 | ForEach-Object { Start-Taker @{ Game = 'race'; Owner = "t$_"; Log = $log; HoldMs = 6000; Gate = $gate; WaitSeconds = 0 } }
+    $takers = 1..6 | ForEach-Object { Start-Taker @{ Game = 'race'; Owner = "t$_"; Log = $log; Release = "$log.release"; Gate = $gate; WaitSeconds = 0 } }
     Wait-Until { @(Get-ChildItem $root -Filter 'race.gate.t*').Count -eq 6 }
     Set-Content $gate ''
+    # Whoever got the rig keeps it until all six have had their answer.
+    Wait-Until { @(Get-Content $log -ErrorAction SilentlyContinue | Where-Object { $_ -like 'in *' }).Count + @(Get-ChildItem $root -Filter 'race.log.t*').Count -eq 6 }
+    Set-Content "$log.release" ''
     Wait-All $takers
     $in = @(Get-Content $log | Where-Object { $_ -like 'in *' })
-    $refused = @(Get-ChildItem $root -Filter 'race.log.t*')
+    $refused = @(Get-ChildItem $root -Filter 'race.log.t?')
     Check 'of six takers at once, one gets the rig' ($in.Count -eq 1) "$($in.Count) got it"
     # Told who has it, or, for one whose turn came before the winner's, who was ahead of it.
     Check 'and the other five are refused, told who has it' ($refused.Count -eq 5 -and @($refused | Where-Object { (Get-Content $_.FullName -Raw) -match 'the rig is in use: t\d \(pid \d+, since |waiting behind t\d \(pid \d+\)' }).Count -eq 5) `
@@ -138,7 +173,7 @@ try {
     $mine = Enter-GameRig -Game 'queue' -Owner 'first' -WaitSeconds 0
     $takers = foreach ($name in 'w1', 'w2', 'w3') {
         Start-Taker @{ Game = 'queue'; Owner = $name; Log = $log; HoldMs = 200 }
-        Wait-Until { (Get-GameRig -Game 'queue').Waiting -contains $name }
+        Wait-Until { Test-Waiting 'queue' $name }
     }
     $state = Get-GameRig -Game 'queue'
     Check 'the rig says who holds it and who waits, in the order they asked' `
@@ -159,10 +194,11 @@ try {
 
     # The block a waiter passes is handed what it waits on.
     $tokenFile = Join-Path $root 'told.token'
-    $holder = Start-Taker @{ Game = 'told'; Owner = 'holder'; Log = $log; HoldMs = 3000; TokenFile = $tokenFile }
+    $toldRelease = Join-Path $root 'told.release'
+    $holder = Start-Taker @{ Game = 'told'; Owner = 'holder'; Log = $log; Release = $toldRelease; TokenFile = $tokenFile }
     Wait-Until { Test-Path $tokenFile }
     $told = New-Object System.Collections.Generic.List[string]
-    $mine = Enter-GameRig -Game 'told' -Owner 'waiter' -Waiting { param($line) $told.Add($line) } 6>$null
+    $mine = Enter-GameRig -Game 'told' -Owner 'waiter' -WaitSeconds 120 -Waiting { param($line) $told.Add($line); Set-Content $toldRelease '' } 6>$null
     Check 'the waiting block is handed each line the wait says, and the rig then comes' ($told.Count -ge 1 -and $told[0] -match '^the rig is in use: holder \(pid \d+' -and (Get-GameRig -Game 'told').Holder.Owner -eq 'waiter') ($told -join ' | ')
     Exit-GameRig -Rig $mine
     Wait-All @($holder)
@@ -175,11 +211,16 @@ try {
     Set-Content $keeper -Encoding ASCII -Value @'
 param([string]$Module, [string]$Game, [string]$Exe, [string]$KeptIn, [string]$Done)
 $ErrorActionPreference = 'Stop'
+function Trace { param([string]$Step) Add-Content "$Done-trace.keeper" "$(Get-Date -Format HH:mm:ss.fff) keeper $Step" }
 Import-Module $Module
+Trace 'has the module'
 $rig = Enter-GameRig -Game $Game -Owner 'keeper' -KeptIn $KeptIn -WaitSeconds 0
+Trace 'has the rig'
 Start-Process $Exe
 while (-not (Get-Process -Name $Game -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 50 }
+Trace 'sees the game up'
 Exit-GameRig -Rig $rig -KeptIn $KeptIn
+Trace 'left the rig with the game'
 Set-Content $Done ''
 Start-Sleep 600
 '@
@@ -221,7 +262,7 @@ Start-Sleep 600
     $heldAhead = Enter-GameRig -Game 'leftahead' -Owner 'holder' -WaitSeconds 0
     $log = Join-Path $root 'leftcard.log'
     $aheadTaker = Start-Taker @{ Game = 'leftahead'; Owner = 'ahead'; Log = $log; HoldMs = 200 }
-    Wait-Until { (Get-GameRig -Game 'leftahead').Waiting -contains 'ahead' }
+    Wait-Until { Test-Waiting 'leftahead' 'ahead' }
     Check 'but behind a session that asked first it waits for the game left running, holding nobody off yet' `
         (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0 } '^the graphics card is in use by a game left running: .*, and 1 asked before this session$')
     Exit-GameRig -Rig $heldAhead
@@ -290,7 +331,7 @@ Start-Sleep 600
     # --- a live owner's lock ------------------------------------------------
     $log = Join-Path $root 'live.log'
     $tokenFile = Join-Path $root 'live.token'
-    $holder = Start-Taker @{ Game = $absent; Owner = 'holder'; Log = $log; HoldMs = 12000; TokenFile = $tokenFile }
+    $holder = Start-Taker @{ Game = $absent; Owner = 'holder'; Log = $log; Release = "$log.release"; TokenFile = $tokenFile }
     Wait-Until { Test-Path $tokenFile }
     $token = (Get-Content $tokenFile -Raw).Trim()
     Check 'a live owner''s lock is never taken' (Throws { Enter-GameRig -Game $absent -Owner 'thief' -WaitSeconds 0 } 'the rig is in use: holder')
@@ -300,6 +341,7 @@ Start-Sleep 600
     Check 'nor released from another process, token or no token' (Throws { Exit-GameRig -Rig $forged } "taken by pid $($holder.Id), not by this process")
     Check 'nor taken back by token while its taker is running' (Throws { Enter-GameRig -Game $absent -Owner 'thief' -Token $token } 'still running')
     Check 'and it is still the holder''s after all of that' ((Get-GameRig -Game $absent).Holder.Owner -eq 'holder')
+    Set-Content "$log.release" ''
     Wait-All @($holder)
 
     # --- the game holds the rig for a taker that has gone -------------------
@@ -309,9 +351,11 @@ Start-Sleep 600
     Check 'a game running with no lock on it is someone''s, and is waited for' (Throws { Enter-GameRig -Game $gameName -Owner 'next' -WaitSeconds 0 } 'is running and no session holds its rig')
     Stop-StandIn
     # The taker's own process ends, and the game it would have started goes on running.
-    $holder = Start-Taker @{ Game = $gameName; Owner = 'starter'; Log = $log; Abandon = $true; TokenFile = $tokenFile; HoldMs = 3000 }
+    $holder = Start-Taker @{ Game = $gameName; Owner = 'starter'; Log = $log; Abandon = $true; TokenFile = $tokenFile; Release = "$log.release" }
     Wait-Until { Test-Path $tokenFile }
     Start-StandIn | Out-Null
+    Wait-Until { [bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) }
+    Set-Content "$log.release" ''
     Wait-All @($holder)
     Check 'a lock whose taker has gone is live while its game runs' ((Get-GameRig -Game $gameName).Live)
     Check 'and is not taken over' (Throws { Enter-GameRig -Game $gameName -Owner 'next' -WaitSeconds 0 } 'the rig is in use: starter')
@@ -356,10 +400,10 @@ Start-Sleep 600
     # Two sessions ask for a pool of two at the same moment, neither willing to wait: both get a copy, each its own.
     $log = Join-Path $root 'pool.log'
     $gate = Join-Path $root 'pool.gate'
-    $takers = 'p1', 'p2' | ForEach-Object { Start-Taker @{ Pool = 'poola,poolb'; Owner = $_; Log = $log; HoldMs = 4000; Gate = $gate; WaitSeconds = 0 } }
+    $takers = 'p1', 'p2' | ForEach-Object { Start-Taker @{ Pool = 'poola,poolb'; Owner = $_; Log = $log; Release = "$log.release.$_"; Gate = $gate; WaitSeconds = 0 } }
     Wait-Until { @(Get-ChildItem $root -Filter 'pool.gate.p*').Count -eq 2 }
     Set-Content $gate ''
-    Wait-Until { @(Get-ChildItem $root -Filter 'pool.log.p?.game').Count -eq 2 -or @(Get-ChildItem $root -Filter 'pool.log.p?').Count -gt 0 }
+    Wait-Until { @(Get-ChildItem $root -Filter 'pool.log.p?.game').Count + @(Get-ChildItem $root -Filter 'pool.log.p?').Count -eq 2 }
     $games = @('p1', 'p2' | ForEach-Object { if (Test-Path "$log.$_.game") { (Get-Content "$log.$_.game" -Raw).Trim() } })
     Check 'two sessions asking for a pool of two at once both get a copy' ($games.Count -eq 2 -and @(Get-ChildItem $root -Filter 'pool.log.p?').Count -eq 0) `
         "$($games -join ', ') / $((Get-ChildItem $root -Filter 'pool.log.p?' | ForEach-Object { Get-Content $_.FullName -Raw }) -join ' | ')"
@@ -367,16 +411,20 @@ Start-Sleep 600
     $state = Get-GameRig -Game 'poola'
     Check 'each copy is a lock of its own, seen by its own name' ($state.Live -and @('p1', 'p2') -contains $state.Holder.Owner -and (Get-GameRig -Game 'poolb').Live)
     # A third asks while both are held: it is refused at once, or waits and gets the copy let go first.
+    # Both stay held until the test lets them go, one at a time.
     Check 'a third, unwilling to wait, is told every copy is in use and by whom' `
         (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'p3' -WaitSeconds 0 } '^every game of the pool poola, poolb is in use: poola by p\d \(.*\); poolb by p\d \(')
     $third = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'p3'; Log = $log; HoldMs = 200 }
-    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'p3' }
-    Check 'a waiter for a pool is seen waiting on every copy of it' ((Get-GameRig -Game 'poolb').Waiting -contains 'p3')
-    Wait-All ($takers + $third)
+    Wait-Until { Test-Waiting 'poola' 'p3' }
+    Check 'a waiter for a pool is seen waiting on every copy of it' (Test-Waiting 'poolb' 'p3')
+    Set-Content "$log.release.p1" ''
+    Wait-All @($third)
     $lines = @(Get-Content $log)
-    $firstOut = (@($lines | Where-Object { $_ -like 'out *' })[0] -split ' ')[1]
-    Check 'it gets the copy let go first, once it is let go' ((($lines | Select-Object -Last 2) -join ',') -eq 'in p3,out p3' -and (Get-Content "$log.p3.game" -Raw).Trim() -eq (Get-Content "$log.$firstOut.game" -Raw).Trim()) `
+    Check 'it gets the copy let go first, once it is let go' `
+        ($lines -contains 'out p1' -and [array]::IndexOf($lines, 'in p3') -gt [array]::IndexOf($lines, 'out p1') -and $lines -notcontains 'out p2' -and (Get-Content "$log.p3.game" -Raw).Trim() -eq (Get-Content "$log.p1.game" -Raw).Trim()) `
         "$($lines -join ', '), p3 got $((Get-Content "$log.p3.game" -Raw).Trim())"
+    Set-Content "$log.release.p2" ''
+    Wait-All $takers
     Check 'a released pool leaves nothing behind' ($null -eq (Get-GameRig -Game 'poola') -and $null -eq (Get-GameRig -Game 'poolb'))
 
     # Queue order holds across pools and single games. Both copies are held here, a pool waiter asks
@@ -385,15 +433,16 @@ Start-Sleep 600
     $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
     $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
     Check 'a rig taken by -Game says which game it is' ($heldA.Game -eq 'poola' -and $heldA.Key -eq 'poola')
-    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 3000 }
-    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'pooled' }
+    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; Release = "$log.release" }
+    Wait-Until { Test-Waiting 'poola' 'pooled' }
     $single = Start-Taker @{ Game = 'poola'; Owner = 'single'; Log = $log; HoldMs = 200 }
-    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'single' }
+    Wait-Until { Test-Waiting 'poola' 'single' }
     Exit-GameRig -Rig $heldA
     Wait-Until { Test-Path "$log.pooled.game" }
     Check 'a pool waiter that asked first takes the first copy let go, ahead of a waiter for that copy' `
-        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Get-GameRig -Game 'poola').Waiting -contains 'single')
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Test-Waiting 'poola' 'single'))
     Exit-GameRig -Rig $heldB
+    Set-Content "$log.release" ''
     Wait-All @($pooled, $single)
     Check 'and the waiter for that copy is served once it is let go, not given the other' ((@(Get-Content $log | Where-Object { $_ -like 'in *' }) -join ',') -eq 'in pooled,in single') ((Get-Content $log) -join ', ')
 
@@ -402,14 +451,14 @@ Start-Sleep 600
     $log = Join-Path $root 'mixed2.log'
     $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
     $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
-    $single = Start-Taker @{ Game = 'poolb'; Owner = 'single'; Log = $log; HoldMs = 3000 }
-    Wait-Until { (Get-GameRig -Game 'poolb').Waiting -contains 'single' }
-    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 3000 }
-    Wait-Until { (Get-GameRig -Game 'poolb').Waiting -contains 'pooled' }
+    $single = Start-Taker @{ Game = 'poolb'; Owner = 'single'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poolb' 'single' }
+    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poolb' 'pooled' }
     Exit-GameRig -Rig $heldA
     Wait-Until { Test-Path "$log.pooled.game" }
     Check 'a pool waiter takes a copy the waiter ahead of it cannot have' `
-        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Get-GameRig -Game 'poolb').Waiting -contains 'single')
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Test-Waiting 'poolb' 'single'))
     Exit-GameRig -Rig $heldB
     Wait-All @($pooled, $single)
     Check 'and the waiter ahead of it still gets its own copy when it is let go' `
@@ -421,22 +470,26 @@ Start-Sleep 600
     $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
     $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
     $heldC = Enter-GameRig -Game 'poolc' -Owner 'holder' -WaitSeconds 0
-    $part = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'part'; Log = $log; HoldMs = 3000 }
-    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'part' }
-    $whole = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'whole'; Log = $log; HoldMs = 3000 }
-    Wait-Until { (Get-GameRig -Game 'poolc').Waiting -contains 'whole' }
+    $part = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'part'; Log = $log; Release = "$log.release.part" }
+    Wait-Until { Test-Waiting 'poola' 'part' }
+    $whole = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'whole'; Log = $log; Release = "$log.release.whole" }
+    Wait-Until { Test-Waiting 'poolc' 'whole' }
     Exit-GameRig -Rig $heldC
     Wait-Until { Test-Path "$log.whole.game" }
     Check 'a waiter for the whole pool takes the copy a waiter for part of it ahead cannot have' `
-        ((Get-Content "$log.whole.game" -Raw).Trim() -eq 'poolc' -and (Get-GameRig -Game 'poola').Waiting -contains 'part')
+        ((Get-Content "$log.whole.game" -Raw).Trim() -eq 'poolc' -and (Test-Waiting 'poola' 'part'))
+    # Both keep their copies from here on, so the only copy that comes free is the one let go below.
     $late = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'late'; Log = $log; HoldMs = 200 }
-    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'late' }
+    Wait-Until { Test-Waiting 'poola' 'late' }
     Exit-GameRig -Rig $heldA
     Wait-Until { Test-Path "$log.part.game" }
     Check 'and a copy of the part comes free to the waiter for the part, who asked first' `
         ((Get-Content "$log.part.game" -Raw).Trim() -eq 'poola' -and -not (Test-Path "$log.late.game"))
     Exit-GameRig -Rig $heldB
-    Wait-All @($part, $whole, $late)
+    Set-Content "$log.release.part" ''
+    Wait-All @($part)
+    Set-Content "$log.release.whole" ''
+    Wait-All @($whole, $late)
 
     # The whole card still waits for every copy, and holds them off.
     $copy = Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0
@@ -449,10 +502,10 @@ Start-Sleep 600
     # A whole-card waiter holds off new rigs only once nobody who asked before it still waits.
     $log = Join-Path $root 'cardqueue.log'
     $long = Enter-GameRig -Game 'poola' -Owner 'long' -WaitSeconds 0
-    $ahead = Start-Taker @{ Game = 'poola'; Owner = 'ahead'; Log = $log; HoldMs = 8000 }
-    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'ahead' }
+    $ahead = Start-Taker @{ Game = 'poola'; Owner = 'ahead'; Log = $log; Release = "$log.release" }
+    Wait-Until { Test-Waiting 'poola' 'ahead' }
     $carder = Start-Taker @{ Owner = 'card'; Log = $log; HoldMs = 200; WholeGpu = $true }
-    Wait-Until { $state = Get-GameRig; $state -and $state.Waiting -contains 'card' }
+    Wait-Until { Test-Waiting '' 'card' }
     $beside = try { Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0 } catch { "$_" }
     Check 'while a session ahead of a whole-card waiter still waits, one that asked after it takes a free copy' `
         ($beside -isnot [string] -and (Get-GameRig -Game 'poolb').Holder.Owner -eq 'later') "$beside"
@@ -461,6 +514,7 @@ Start-Sleep 600
     Wait-Until { (Get-Content $log -ErrorAction SilentlyContinue) -contains 'in ahead' }
     Check 'once the waiter is first, no rig is given out though that copy is free' `
         (Throws { Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0 } '^waiting behind card \(pid \d+\), who asked first, for the whole graphics card$')
+    Set-Content "$log.release" ''
     Wait-All @($ahead, $carder)
     Check 'and the waiter has the card as soon as the rig held ahead of it comes back' `
         ((@(Get-Content $log) -join ',') -eq 'in ahead,out ahead,in card,out card' -and -not (Test-Path "$log.card")) (@(Get-Content $log) -join ',')
@@ -468,14 +522,15 @@ Start-Sleep 600
     # A pool session that needs the whole card takes a copy, once every copy and every other rig is free.
     $log = Join-Path $root 'poolcard.log'
     $tokenFile = Join-Path $root 'poolcard.token'
-    $copy = Start-Taker @{ Game = 'poola'; Owner = 'player'; Log = $log; HoldMs = 8000; TokenFile = $tokenFile }
+    $copy = Start-Taker @{ Game = 'poola'; Owner = 'player'; Log = $log; Release = "$log.release.player"; TokenFile = $tokenFile }
     Wait-Until { Test-Path $tokenFile }
     Check 'a pool session wanting the whole card does not take a free copy beside a held one' `
         (Throws { Enter-GameRig -Pool 'poola', 'poolb' -WholeGpu -Owner 'pictures' -WaitSeconds 0 } '^the graphics card is in use: poola is held by player')
-    $carder = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pictures'; Log = $log; HoldMs = 5000; WholeGpu = $true }
-    Wait-Until { $state = Get-GameRig -Game 'poolb'; $state -and $state.Waiting -contains 'pictures' }
-    Start-Sleep -Milliseconds 1000
+    $carder = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pictures'; Log = $log; Release = "$log.release.pictures"; WholeGpu = $true }
+    Wait-Until { Test-Waiting 'poolb' 'pictures' }
+    Start-Sleep -Milliseconds 1500
     Check 'and waits while that copy is held' (-not (Test-Path "$log.pictures.game") -and $null -eq (Get-GameRig -Game 'poolb').Holder)
+    Set-Content "$log.release.player" ''
     Wait-All @($copy)
     Wait-Until { Test-Path "$log.pictures.game" }
     $taken = (Get-Content "$log.pictures.game" -Raw).Trim()
@@ -486,6 +541,7 @@ Start-Sleep 600
     Check 'and so does one asking for that other copy by name' (Throws { Enter-GameRig -Game $other -Owner 'player' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
     Check 'and one asking for a game outside the pool' (Throws { Enter-GameRig -Game 'cardgame' -Owner 'player' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
     Check 'and one wanting the whole card itself' (Throws { Enter-GameRig -WholeGpu -Owner 'more' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Set-Content "$log.release.pictures" ''
     Wait-All @($carder)
     Check 'and once it lets go the pool is free' ($null -eq (Get-GameRig -Game 'poola') -and $null -eq (Get-GameRig -Game 'poolb'))
 
@@ -509,7 +565,7 @@ Start-Sleep 600
     Check 'past the machine''s limit a rig of another game is not given out' `
         (Throws { Enter-GameRig -Game 'limc' -Owner 'x' -WaitSeconds 0 } '^this machine runs 2 rigs at once and 2 are held: lima by ha; limb by hb')
     $log = Join-Path $root 'limit.log'
-    $c = Start-Taker @{ Game = 'limc'; Owner = 'tc'; Log = $log; HoldMs = 4000 }
+    $c = Start-Taker @{ Game = 'limc'; Owner = 'tc'; Log = $log; Release = "$log.release" }
     Wait-Until { @(Get-GameRig -Game 'limc').Count -eq 1 }
     $d = Start-Taker @{ Pool = 'limd,lime'; Owner = 'td'; Log = $log; HoldMs = 200 }
     Wait-Until { @(Get-GameRig -Game 'limd').Count -eq 1 }
@@ -518,7 +574,9 @@ Start-Sleep 600
     Start-Sleep -Milliseconds 1500
     Check 'a freed place goes to whoever asked first, for any game' (@(Get-Content $log) -notcontains 'in td') (@(Get-Content $log) -join ', ')
     Exit-GameRig -Rig $b
-    Wait-All @($c, $d)
+    Wait-All @($d)
+    Set-Content "$log.release" ''
+    Wait-All @($c)
     Check 'and the next to whoever asked next' ((@(Get-Content $log) -join ',') -eq 'in tc,in td,out td,out tc') (@(Get-Content $log) -join ', ')
     $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
     $log = Join-Path $root 'limit2.log'
@@ -534,7 +592,7 @@ Start-Sleep 600
     $x = Start-Taker @{ Game = 'lima'; Owner = 'tx'; Log = $log; HoldMs = 200 }
     Wait-Until { @((Get-GameRig -Game 'lima').Waiting).Count -eq 1 }
     $w = Start-Taker @{ Owner = 'tw'; Log = $log; HoldMs = 200; WholeGpu = $true }
-    Wait-Until { $r = Get-GameRig; $r -and $r.Waiting -contains 'tw' }
+    Wait-Until { Test-Waiting '' 'tw' }
     $e = try { Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0 } catch { "$_" }
     Check 'nor does a whole-card waiter that is not yet first' ($e -isnot [string] -and $e.Game -eq 'lime') "$e"
     if ($e -isnot [string]) { Exit-GameRig -Rig $e }
@@ -689,7 +747,7 @@ Start-Sleep 600
     })
     $log = Join-Path $root 'slots.log'
     $tokenFile = Join-Path $root 'slots.token'
-    $holder = Start-Taker @{ Game = $slotNames[0]; Owner = 'first copy'; Log = $log; HoldMs = 60000; TokenFile = $tokenFile }
+    $holder = Start-Taker @{ Game = $slotNames[0]; Owner = 'first copy'; Log = $log; Release = "$log.release"; TokenFile = $tokenFile }
     Wait-Until { Test-Path $tokenFile }
     $seen = @{}
     $result = Invoke-IsolatedGameSession -Slots $slots -Owner 'slot test' -SettleSeconds 0 -Prepare { param($s) $seen.Prepared = $s.Slot.ProcessName } -Run {
