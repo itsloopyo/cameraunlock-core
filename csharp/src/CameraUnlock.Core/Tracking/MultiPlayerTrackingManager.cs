@@ -60,7 +60,8 @@ namespace CameraUnlock.Core.Tracking
             {
                 for (int b = a + 1; b < ports.Length; b++)
                 {
-                    if (ports[a] == ports[b])
+                    // Port 0 asks the OS for a port, so two of them are two different ports.
+                    if (ports[a] != 0 && ports[a] == ports[b])
                     {
                         throw new ArgumentException(
                             "Duplicate UDP port " + ports[a] + " (players " + (a + 1) + " and " + (b + 1) +
@@ -117,6 +118,11 @@ namespace CameraUnlock.Core.Tracking
             return _sessions[playerIndex];
         }
 
+        internal OpenTrackReceiver GetReceiver(int playerIndex)
+        {
+            return _receivers[playerIndex];
+        }
+
         /// <summary>Whether the player's receiver is currently bound and receiving data.</summary>
         public bool IsReceiving(int playerIndex)
         {
@@ -162,7 +168,7 @@ namespace CameraUnlock.Core.Tracking
                 // contradicts the failure message the receiver itself just logged.
                 if (_receivers[i].Start(_ports[i]))
                 {
-                    Log?.Invoke("Player " + (i + 1) + " receiver listening on port " + _ports[i]);
+                    Log?.Invoke("Player " + (i + 1) + " receiver listening on port " + _receivers[i].BoundPort);
                 }
                 else
                 {

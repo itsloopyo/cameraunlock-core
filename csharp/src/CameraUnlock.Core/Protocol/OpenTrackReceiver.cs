@@ -141,6 +141,17 @@ namespace CameraUnlock.Core.Protocol
         public bool HasTransformer => _transformer != null;
 
         public bool IsReceiving => _isConnected;
+
+        // The port the socket holds, which is the one the OS chose when Start was given 0.
+        internal int BoundPort
+        {
+            get
+            {
+                var client = _udpClient;
+                return client == null ? 0 : ((IPEndPoint)client.Client.LocalEndPoint).Port;
+            }
+        }
+
         public bool IsFailed { get; private set; }
         public bool IsRemoteConnection => _isRemoteConnection;
 

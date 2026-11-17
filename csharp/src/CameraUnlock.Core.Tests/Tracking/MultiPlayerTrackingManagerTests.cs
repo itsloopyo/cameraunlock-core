@@ -44,6 +44,12 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         [Fact]
+        public void Constructor_DuplicatePort_Throws()
+        {
+            Assert.Throws<ArgumentException>(() => new MultiPlayerTrackingManager(new[] { 4242, 0, 4242 }));
+        }
+
+        [Fact]
         public void PlayerCount_MatchesPorts()
         {
             Assert.Equal(2, _manager.PlayerCount);
@@ -93,6 +99,21 @@ namespace CameraUnlock.Core.Tests.Tracking
         public void GetConnectionStatus_NoData_ReportsNoPlayers()
         {
             Assert.Equal("No players connected", _manager.GetConnectionStatus());
+        }
+
+        [Fact]
+        public void Start_PortZeroForEveryPlayer_BindsEachPlayerAPortOfItsOwn()
+        {
+            using (var manager = new MultiPlayerTrackingManager(new[] { 0, 0 }))
+            {
+                manager.Start();
+
+                int first = manager.GetReceiver(0).BoundPort;
+                int second = manager.GetReceiver(1).BoundPort;
+                Assert.NotEqual(0, first);
+                Assert.NotEqual(0, second);
+                Assert.NotEqual(first, second);
+            }
         }
 
         [Fact]
