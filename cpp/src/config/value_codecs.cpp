@@ -342,6 +342,18 @@ bool FloatingCodec<F>::Equal(F a, F b) const {
     return BitsOf(a) == BitsOf(b);
 }
 
+template <class F>
+double FloatingCodec<F>::AsWritten(F value) const {
+    if (!std::isfinite(value)) throw std::invalid_argument(std::string(TypeName<F>()) + " value is not finite");
+    const std::string text = RenderFinite(value);
+    double read = 0.0;
+    const std::from_chars_result result = std::from_chars(text.data(), text.data() + text.size(), read, std::chars_format::general);
+    if (result.ec != std::errc() || result.ptr != text.data() + text.size()) {
+        throw std::logic_error("std::from_chars could not read a double from the text " + text + " Render writes");
+    }
+    return read;
+}
+
 template class FloatingCodec<float>;
 template class FloatingCodec<double>;
 

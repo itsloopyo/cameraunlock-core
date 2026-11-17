@@ -983,6 +983,25 @@ void TestOptions() {
     Check(Contains(Thrown([&] { table.OptionValue(values, 9); }), "no option 9"), "and an option the table has not");
     Check(values.trees == 40 && values.fov == 90.5f, "a refused value changes nothing");
 
+    struct Speed {
+        float look = 0.3f;
+    };
+    ConfigTable<Speed> speeds;
+    speeds.Local("General", "LookSpeed", &Speed::look, FloatCodec(0.1f, 3.0f), "How fast.").Writable();
+    const std::vector<ConfigOption> speed = speeds.Options();
+    Speed look;
+    Check(speed.size() == 1 && speed[0].min == 0.1 && speed[0].max == 3.0 && speed[0].step == 0.1 &&
+              speeds.OptionValue(look, 0) == 0.3,
+          "a float row's range and value are the numbers the file writes, not the float widened (0.10000000149011612)");
+    speeds.SetOption(look, 0, 0.1);
+    Check(look.look == 0.1f, "and the bound as written is taken as the row's own bound");
+    Check(Contains(Thrown([&] { speeds.SetOption(look, 0, 0.0999); }), "outside the row's range"), "and past it is still refused");
+    ConfigTable<Speed> under;
+    under.Local("General", "LookSpeed", &Speed::look, FloatCodec(0.1f, 0.7f), "How fast.").Writable();
+    under.SetOption(look, 0, 0.7);
+    Check(under.Options()[0].max == 0.7 && look.look == 0.7f,
+          "a top bound written above the float (0.7 over 0.699999988) is the row's top too");
+
     struct Wide {
         long long count = 0;
     };

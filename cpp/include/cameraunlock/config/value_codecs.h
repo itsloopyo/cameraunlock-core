@@ -216,6 +216,11 @@ public:
     /// Bitwise, so -0.0 and 0.0 differ.
     bool Equal(F a, F b) const;
 
+    /// The double that the text Render writes for a finite value names: 0.1f is 0.1, where
+    /// widening it gives 0.10000000149011612, which an options screen would show as it is.
+    /// Throws std::invalid_argument for a value that is not finite.
+    double AsWritten(F value) const;
+
 private:
     std::string RangeExpectation() const;
 

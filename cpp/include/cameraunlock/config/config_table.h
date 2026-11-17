@@ -6,6 +6,7 @@
 #include <cameraunlock/config/player_list_codec.h>
 #include <cameraunlock/config/value_codecs.h>
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <limits>
@@ -375,8 +376,8 @@ public:
                 shape.max = static_cast<double>(codec_.max());
             } else if constexpr (IsFloatingCodec<Codec>::value) {
                 shape.kind = OptionKind::kFloat;
-                shape.min = static_cast<double>(codec_.min());
-                shape.max = static_cast<double>(codec_.max());
+                shape.min = codec_.AsWritten(codec_.min());
+                shape.max = codec_.AsWritten(codec_.max());
                 shape.ranged = codec_.min() != std::numeric_limits<Value>::lowest() &&
                                codec_.max() != std::numeric_limits<Value>::max();
             } else {
@@ -391,8 +392,10 @@ public:
     double Number(const Config& config) const override {
         if constexpr (std::is_same_v<Codec, BoolCodec>) {
             return get_(config) ? 1.0 : 0.0;
-        } else if constexpr (IsIntCodec<Codec>::value || IsFloatingCodec<Codec>::value) {
+        } else if constexpr (IsIntCodec<Codec>::value) {
             return static_cast<double>(get_(config));
+        } else if constexpr (IsFloatingCodec<Codec>::value) {
+            return codec_.AsWritten(get_(config));
         } else if constexpr (IsEnumCodec<Codec>::value) {
             const Value held = get_(config);
             const auto& tokens = codec_.tokens();
@@ -418,10 +421,12 @@ public:
             }
             set_(config, static_cast<Value>(static_cast<long long>(number)));
         } else if constexpr (IsFloatingCodec<Codec>::value) {
-            if (!(number >= static_cast<double>(codec_.min()) && number <= static_cast<double>(codec_.max()))) {
+            // A screen is handed the bounds as written (0.1, not 0.10000000149011612 for 0.1f), so either form is in range.
+            const double min = static_cast<double>(codec_.min()), max = static_cast<double>(codec_.max());
+            if (!(number >= (std::min)(min, codec_.AsWritten(codec_.min())) && number <= (std::max)(max, codec_.AsWritten(codec_.max())))) {
                 RefuseOptionValue(number, "it is outside the row's range");
             }
-            set_(config, static_cast<Value>(number));
+            set_(config, static_cast<Value>(std::clamp(number, min, max)));
         } else if constexpr (IsEnumCodec<Codec>::value) {
             const auto& tokens = codec_.tokens();
             if (!(number >= 0.0 && number < static_cast<double>(tokens.size())) ||
