@@ -23,7 +23,9 @@ out Delete while Project Viewpoint, which opens its settings on Delete, runs.
 
 - `CAMERAUNLOCK_ABI` is 13. Java: `configConceptHotkeyTaps` and `hotkeysLeaveOut`.
 - `data/config-format.json`: Project Zomboid's `FirstPersonKey` is `per_game`, holding
-  `Delete, ScrollLock, Ctrl+Shift+B` (owner ruling of 2026-11-16).
+  `Delete, ScrollLock` (owner rulings of 2026-11-16 and 2026-11-17: the game acts on its own
+  binding of a key whatever else is held, so Ctrl+Shift+B also opened its crafting window, and
+  every spare letter is bound in that game).
 
 Consuming repos: a mod that loads core through the C interface or the jar is rebuilt against ABI
 13. Nothing else changes.
