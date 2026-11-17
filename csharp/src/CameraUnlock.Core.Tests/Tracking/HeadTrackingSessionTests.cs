@@ -4,7 +4,6 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading;
 using Xunit;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Processing;
@@ -18,7 +17,6 @@ namespace CameraUnlock.Core.Tests.Tracking
         // One sender for every packet, as a tracker app sends: the receiver follows one source.
         private static readonly UdpClient Sender = new UdpClient();
 
-        private const int TestPort = 14245;
         private const float FrameTime = 1f / 60f;
 
         private readonly OpenTrackReceiver _receiver;
@@ -151,8 +149,8 @@ namespace CameraUnlock.Core.Tests.Tracking
             }
             var heldYaw = _session.Rotation.Yaw;
 
-            // Simulate tracking loss by waiting out the 500ms freshness window.
-            Thread.Sleep(600);
+            // Tracking loss: no packet arrives for longer than the freshness window.
+            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the last packet");
 
             bool result = _session.Update(FrameTime);
 
@@ -213,9 +211,9 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             // The receiver holds a jump this size until the packet after it differs
             // (PoseJumpGate), which a tracker's next sample does.
-            SendTestPacket(TestPort, 0.0, 0.0, 0.0);
-            SendTestPacket(TestPort, 0.05, 0.0, 0.0);
-            WaitForRotation(0.05f, 0f, 0f);
+            SendTestPacket(0.0, 0.0, 0.0);
+            SendTestPacket(0.05, 0.0, 0.0);
+            WaitForPose(0.05f, 0f, 0f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -244,8 +242,8 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             float uncentered = _session.PositionOffset.X;
 
-            SendTestPacket(TestPort, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-            WaitForRotation(0f, 0f, 0f);
+            SendTestPacket(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            WaitForPose(0f, 0f, 0f);
             for (int i = 0; i < 120; i++)
             {
                 _session.Update(FrameTime);
@@ -290,9 +288,9 @@ namespace CameraUnlock.Core.Tests.Tracking
             // Pin the captured centre itself, not just "output happens to be zero":
             // a further 20 degrees of yaw must read as 20, not 60.
             // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
-            SendTestPacket(TestPort, 59.95, 0.0, 0.0, 10.0, 5.0, -8.0);
-            SendTestPacket(TestPort, 60.0, 0.0, 0.0, 10.0, 5.0, -8.0);
-            WaitForRotation(60f, 0f, 0f);
+            SendTestPacket(59.95, 0.0, 0.0, 10.0, 5.0, -8.0);
+            SendTestPacket(60.0, 0.0, 0.0, 10.0, 5.0, -8.0);
+            WaitForPose(60f, 0f, 0f, 0.10f, 0.05f, -0.08f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -320,9 +318,9 @@ namespace CameraUnlock.Core.Tests.Tracking
             _session.Recenter();
 
             // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
-            SendTestPacket(TestPort, 39.95, 0.0, 0.0);
-            SendTestPacket(TestPort, 40.0, 0.0, 0.0);
-            WaitForRotation(40f, 0f, 0f);
+            SendTestPacket(39.95, 0.0, 0.0);
+            SendTestPacket(40.0, 0.0, 0.0);
+            WaitForPose(40f, 0f, 0f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -456,7 +454,7 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             _session.Reset();
             // Wait out freshness so Update has neither fresh data nor a held pose.
-            Thread.Sleep(600);
+            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the last packet");
 
             bool result = _session.Update(FrameTime);
 
@@ -466,50 +464,44 @@ namespace CameraUnlock.Core.Tests.Tracking
         private void StartReceiverAndSend(double yaw, double pitch, double roll,
             double x = 0.0, double y = 0.0, double z = 0.0)
         {
-            Assert.True(_receiver.Start(TestPort), $"Failed to bind test UDP port {TestPort}");
-            SendTestPacket(TestPort, yaw, pitch, roll, x, y, z);
-            WaitForData();
-        }
-
-        private void WaitForData()
-        {
-            for (int i = 0; i < 50; i++)
-            {
-                if (_receiver.IsDataFresh()) return;
-                Thread.Sleep(10);
-            }
-            Assert.Fail("Receiver never reported fresh data");
+            Assert.True(_receiver.Start(0), "Failed to bind a UDP port");
+            SendTestPacket(yaw, pitch, roll, x, y, z);
+            Eventually.True(() => _receiver.GetRawPose().TimestampTicks != 0, "the first packet sent was never published");
         }
 
         /// <summary>
-        /// Waits until the receiver actually reports the sent rotation, rather than
-        /// merely reporting that some data is fresh. A test that sends a second
-        /// packet cannot use freshness: the first packet's data is still fresh,
-        /// because the Update loop between them costs microseconds of wall time,
-        /// so WaitForData returns before the new datagram has landed and the
-        /// assertions then run against the previous pose.
+        /// Waits until the receiver reports the pose that was sent, rotation in degrees and
+        /// position in metres (the packet carries centimetres).
+        /// A test that sends a second packet cannot wait on freshness: the first packet's
+        /// data is still fresh, so the wait would return before the new datagram has
+        /// landed and the assertions then run against the previous pose.
         /// </summary>
-        private void WaitForRotation(float expectedYaw, float expectedPitch, float expectedRoll)
+        private void WaitForPose(float expectedYaw, float expectedPitch, float expectedRoll,
+            float expectedX = 0f, float expectedY = 0f, float expectedZ = 0f)
         {
-            for (int i = 0; i < 200; i++)
+            Eventually.True(() =>
             {
                 _receiver.GetRawRotation(out float yaw, out float pitch, out float roll);
-                if (System.Math.Abs(yaw - expectedYaw) < 0.01f &&
+                PositionData position = _receiver.GetLatestPosition();
+                return System.Math.Abs(yaw - expectedYaw) < 0.01f &&
                     System.Math.Abs(pitch - expectedPitch) < 0.01f &&
-                    System.Math.Abs(roll - expectedRoll) < 0.01f)
-                {
-                    return;
-                }
-                Thread.Sleep(5);
-            }
-            _receiver.GetRawRotation(out float lastYaw, out float lastPitch, out float lastRoll);
-            Assert.Fail($"Receiver never reported ({expectedYaw}, {expectedPitch}, {expectedRoll}); last saw ({lastYaw}, {lastPitch}, {lastRoll})");
+                    System.Math.Abs(roll - expectedRoll) < 0.01f &&
+                    System.Math.Abs(position.X - expectedX) < 0.01f &&
+                    System.Math.Abs(position.Y - expectedY) < 0.01f &&
+                    System.Math.Abs(position.Z - expectedZ) < 0.01f;
+            }, () =>
+            {
+                _receiver.GetRawRotation(out float yaw, out float pitch, out float roll);
+                PositionData position = _receiver.GetLatestPosition();
+                return $"the receiver never reported rotation ({expectedYaw}, {expectedPitch}, {expectedRoll}) and position ({expectedX}, {expectedY}, {expectedZ});"
+                    + $" last saw ({yaw}, {pitch}, {roll}) and ({position.X}, {position.Y}, {position.Z})";
+            });
         }
 
         /// <summary>
         /// Sends a test OpenTrack packet (48 bytes, 6 doubles: x, y, z, yaw, pitch, roll).
         /// </summary>
-        private static void SendTestPacket(int port, double yaw, double pitch, double roll,
+        private void SendTestPacket(double yaw, double pitch, double roll,
             double x = 0.0, double y = 0.0, double z = 0.0)
         {
             byte[] packet = new byte[48];
@@ -521,7 +513,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, port));
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver.BoundPort));
         }
     }
 }

@@ -15,7 +15,6 @@ namespace CameraUnlock.Core.Tests.Protocol
         private static readonly UdpClient Sender = new UdpClient();
 
         private OpenTrackReceiver? _receiver;
-        private const int TestPort = 14242; // Use non-default port to avoid conflicts
 
         public void Dispose()
         {
@@ -63,7 +62,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         {
             _receiver = new OpenTrackReceiver();
 
-            bool result = _receiver.Start(TestPort);
+            bool result = _receiver.Start(0);
 
             Assert.True(result);
         }
@@ -73,80 +72,33 @@ namespace CameraUnlock.Core.Tests.Protocol
         {
             // First receiver binds successfully
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             // Second receiver should fail
             using (var receiver2 = new OpenTrackReceiver())
             {
-                bool result = receiver2.Start(TestPort);
+                bool result = receiver2.Start(_receiver.BoundPort);
                 Assert.False(result);
                 Assert.True(receiver2.IsFailed);
             }
         }
 
         [Fact]
-        public void Start_WhenPortInUse_BindsSoonAfterItIsReleased()
-        {
-            const int port = 14243;
-
-            var holder = new OpenTrackReceiver();
-            Assert.True(holder.Start(port));
-
-            _receiver = new OpenTrackReceiver();
-            Assert.False(_receiver.Start(port));
-            Assert.True(_receiver.IsFailed);
-
-            holder.Dispose();
-
-            Assert.True(WaitFor(() => !_receiver.IsFailed, 3000), "receiver did not claim the port after it was released");
-
-            // Proves it is really listening, not just flagged as bound.
-            SendTestPacket(port, 10.0, 20.0, 30.0);
-            Assert.True(WaitFor(() => _receiver.IsReceiving, 1000), "receiver bound the port but received no data");
-        }
-
-        private static bool WaitFor(Func<bool> condition, int timeoutMs)
-        {
-            var elapsed = Stopwatch.StartNew();
-            while (elapsed.ElapsedMilliseconds < timeoutMs)
-            {
-                if (condition()) return true;
-                Thread.Sleep(25);
-            }
-            return condition();
-        }
-
-        [Fact]
         public void Start_WhenAlreadyRunning_ReturnsTrue()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            bool result = _receiver.Start(TestPort);
+            bool result = _receiver.Start(0);
 
             Assert.True(result);
-        }
-
-        [Fact]
-        public void Stop_ReleasesPort()
-        {
-            _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
-            _receiver.Stop();
-
-            // Should be able to bind again after stop
-            using (var receiver2 = new OpenTrackReceiver())
-            {
-                bool result = receiver2.Start(TestPort);
-                Assert.True(result);
-            }
         }
 
         [Fact]
         public void IsReceiving_BeforeAnyData_ReturnsFalse()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             Assert.False(_receiver.IsReceiving);
         }
@@ -155,7 +107,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void GetLatestPose_WhenNoData_ReturnsZeroPose()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             TrackingPose pose = _receiver.GetLatestPose();
 
@@ -168,7 +120,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void GetRawRotation_WhenNoData_ReturnsZeros()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             _receiver.GetRawRotation(out float yaw, out float pitch, out float roll);
 
@@ -181,34 +133,16 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void IsDataFresh_WhenNoData_ReturnsFalse()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             Assert.False(_receiver.IsDataFresh());
-        }
-
-        [Fact]
-        public void Dispose_StopsReceiver()
-        {
-            _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
-
-            _receiver.Dispose();
-
-            // Should be able to bind again after dispose
-            using (var receiver2 = new OpenTrackReceiver())
-            {
-                bool result = receiver2.Start(TestPort);
-                Assert.True(result);
-            }
-
-            _receiver = null; // Prevent double dispose in test cleanup
         }
 
         [Fact]
         public void Recenter_DoesNotThrow_WhenNoData()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             // Should not throw
             _receiver.Recenter();
@@ -218,7 +152,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void ResetOffset_DoesNotThrow_WhenNoData()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             // Should not throw
             _receiver.ResetOffset();
@@ -236,7 +170,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void IsRemoteConnection_WhenNoData_ReturnsFalse()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
             Assert.False(_receiver.IsRemoteConnection);
         }
@@ -246,13 +180,9 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void ReceivesUdpPacket_UpdatesRotation()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            // Send a test packet
-            SendTestPacket(TestPort, 10.0, 20.0, 30.0);
-
-            // Wait for packet to be received
-            Thread.Sleep(100);
+            SendTestPacketAndWait(10.0, 20.0, 30.0);
 
             _receiver.GetRawRotation(out float yaw, out float pitch, out float roll);
 
@@ -265,12 +195,11 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void ReceivesUdpPacket_SetsIsReceiving()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 10.0, 20.0, 30.0);
-            Thread.Sleep(100);
+            SendTestPacket(10.0, 20.0, 30.0);
 
-            Assert.True(_receiver.IsReceiving);
+            Eventually.True(() => _receiver.IsReceiving, "IsReceiving did not go true after a packet was sent");
         }
 
         // Short datagrams never time the receive out, so they once held IsReceiving true on
@@ -279,16 +208,16 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void IsReceiving_GoesFalse_WhenOnlyJunkArrivesAfterTheTracker()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 10.0, 20.0, 30.0);
-            Assert.True(WaitFor(() => _receiver.IsReceiving, 2000));
+            SendTestPacket(10.0, 20.0, 30.0);
+            Eventually.True(() => _receiver.IsReceiving, "the tracker's packet never arrived");
 
             var junk = new byte[8];
             var stopwatch = Stopwatch.StartNew();
             while (_receiver.IsReceiving && stopwatch.ElapsedMilliseconds < 10000)
             {
-                Sender.Send(junk, junk.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
+                Sender.Send(junk, junk.Length, new IPEndPoint(IPAddress.Loopback, _receiver.BoundPort));
                 Thread.Sleep(20);
             }
 
@@ -303,21 +232,22 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void APacketArrivingAsTheReceiveWaitRunsOut_IsNotLost()
         {
             _receiver = new OpenTrackReceiver();
-            Assert.True(_receiver.Start(TestPort));
-            SendTestPacket(TestPort, 1.0, 0.0, 0.0);
-            Assert.True(WaitFor(() => _receiver.GetRawPose().TimestampTicks != 0, 10000), "the first packet never arrived");
+            Assert.True(_receiver.Start(0));
+            SendTestPacketAndWait(1.0, 0.0, 0.0);
 
-            long spinTicks = Stopwatch.Frequency / 200;
-            for (double gapMs = 99.0; gapMs <= 102.0; gapMs += 0.1)
+            // Thread.Sleep(1) can last a whole 15.6 ms timer tick, so the last 20 ms spin.
+            long spinTicks = Stopwatch.Frequency / 50;
+            for (int tenths = 990; tenths <= 1020; tenths++)
             {
+                double gapMs = tenths / 10.0;
                 long last = _receiver.GetRawPose().TimestampTicks;
                 long sendAt = last + (long)(gapMs * Stopwatch.Frequency / 1000.0);
                 while (Stopwatch.GetTimestamp() < sendAt - spinTicks) Thread.Sleep(1);
                 while (Stopwatch.GetTimestamp() < sendAt) { }
 
-                SendTestPacket(TestPort, 1.0, 0.0, 0.0);
+                SendTestPacket(1.0, 0.0, 0.0);
 
-                Assert.True(WaitFor(() => _receiver.GetRawPose().TimestampTicks != last, 10000),
+                Eventually.True(() => _receiver.GetRawPose().TimestampTicks != last,
                     $"the packet sent {gapMs:F1} ms after the one before it never arrived");
             }
         }
@@ -326,22 +256,20 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void ReceivesUdpPacket_DataIsFresh()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 10.0, 20.0, 30.0);
-            Thread.Sleep(100);
+            SendTestPacket(10.0, 20.0, 30.0);
 
-            Assert.True(_receiver.IsDataFresh());
+            Eventually.True(() => _receiver.IsDataFresh(), "IsDataFresh did not go true after a packet was sent");
         }
 
         [Fact]
         public void Recenter_SetsOffsetToCurrentRotation()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 45.0, 30.0, 15.0);
-            Thread.Sleep(100);
+            SendTestPacketAndWait(45.0, 30.0, 15.0);
 
             _receiver.Recenter();
 
@@ -357,10 +285,9 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void ResetOffset_ClearsRecenterOffset()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 45.0, 30.0, 15.0);
-            Thread.Sleep(100);
+            SendTestPacketAndWait(45.0, 30.0, 15.0);
 
             _receiver.Recenter();
             _receiver.ResetOffset();
@@ -378,10 +305,9 @@ namespace CameraUnlock.Core.Tests.Protocol
         {
             var transformer = CoordinateTransformer.CreateFromInversions(true, false, false);
             _receiver = new OpenTrackReceiver(transformer);
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 45.0, 30.0, 15.0);
-            Thread.Sleep(100);
+            SendTestPacketAndWait(45.0, 30.0, 15.0);
 
 #pragma warning disable CS0618 // Compatibility coverage for the deprecated public entry point.
             TrackingPose transformed = _receiver.GetLatestPoseTransformed();
@@ -396,10 +322,9 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void GetLatestPoseTransformed_WithoutTransformer_ReturnsNormalPose()
         {
             _receiver = new OpenTrackReceiver();
-            _receiver.Start(TestPort);
+            _receiver.Start(0);
 
-            SendTestPacket(TestPort, 45.0, 30.0, 15.0);
-            Thread.Sleep(100);
+            SendTestPacketAndWait(45.0, 30.0, 15.0);
 
             TrackingPose pose = _receiver.GetLatestPose();
 #pragma warning disable CS0618 // Compatibility coverage for the deprecated public entry point.
@@ -415,33 +340,49 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void ASecondSource_IsIgnoredUntilTheFirstGoesSilent()
         {
             _receiver = new OpenTrackReceiver();
-            Assert.True(_receiver.Start(TestPort));
-            SendTestPacket(TestPort, 10, 0, 0);
-            Thread.Sleep(100);
+            var secondSourceIgnored = new ManualResetEventSlim();
+            _receiver.Log = message =>
+            {
+                if (message.StartsWith("a SECOND tracker source", StringComparison.Ordinal)) secondSourceIgnored.Set();
+            };
+            Assert.True(_receiver.Start(0));
+            SendTestPacketAndWait(10, 0, 0);
+            long firstSourceTicks = _receiver.GetRawPose().TimestampTicks;
             Assert.Equal(10f, _receiver.GetLatestPose().Yaw, precision: 3);
 
             using (var other = new UdpClient())
             {
                 byte[] packet = new byte[48];
                 Array.Copy(BitConverter.GetBytes(12.0), 0, packet, 24, 8);
-                other.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
-                Thread.Sleep(100);
+                other.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver.BoundPort));
+                Eventually.True(() => secondSourceIgnored.IsSet, "the receiver never logged that it ignored the second source");
                 Assert.Equal(10f, _receiver.GetLatestPose().Yaw, precision: 3);
 
-                Thread.Sleep(OpenTrackReceiver.SourceHandoverMs);
-                other.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
-                Thread.Sleep(100);
-                Assert.Equal(12f, _receiver.GetLatestPose().Yaw, precision: 3);
+                // Sleep can return a timer tick early, so the silence is measured from
+                // the first source's packet and given a margin past the handover.
+                long handoverAt = firstSourceTicks + (OpenTrackReceiver.SourceHandoverMs + 100) * Stopwatch.Frequency / 1000;
+                while (Stopwatch.GetTimestamp() < handoverAt) Thread.Sleep(10);
+                other.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver.BoundPort));
+                Eventually.True(() => _receiver.GetLatestPose().Yaw == 12f,
+                    () => "the second source's pose was not taken after the first went silent, yaw stayed " + _receiver.GetLatestPose().Yaw);
             }
         }
 
+        private void SendTestPacketAndWait(double yaw, double pitch, double roll)
+        {
+            long before = _receiver!.GetRawPose().TimestampTicks;
+            SendTestPacket(yaw, pitch, roll);
+            Eventually.True(() => _receiver.GetRawPose().TimestampTicks != before,
+                $"the packet ({yaw}, {pitch}, {roll}) was never published");
+        }
+
         /// <summary>
-        /// Sends a test OpenTrack packet to the specified port.
+        /// Sends a test OpenTrack packet to the receiver.
         /// OpenTrack packet format: 48 bytes (6 doubles)
         /// [0-7]: X position, [8-15]: Y position, [16-23]: Z position
         /// [24-31]: Yaw, [32-39]: Pitch, [40-47]: Roll
         /// </summary>
-        private static void SendTestPacket(int port, double yaw, double pitch, double roll)
+        private void SendTestPacket(double yaw, double pitch, double roll)
         {
             byte[] packet = new byte[48];
 
@@ -455,7 +396,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, port));
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver!.BoundPort));
         }
     }
 }

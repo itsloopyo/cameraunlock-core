@@ -1,7 +1,6 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading;
 using Xunit;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Processing;
@@ -14,8 +13,6 @@ namespace CameraUnlock.Core.Tests.Protocol
     {
         // One sender for every packet, as a tracker app sends: the receiver follows one source.
         private static readonly UdpClient Sender = new UdpClient();
-
-        private const int TestPort = 14260;
 
         private OpenTrackReceiver? _receiver;
 
@@ -85,8 +82,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         {
             _receiver = StartReceiver();
 
-            Send(BuildPacket(10, 20, 30));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 20, 30));
 
             Assert.False(_receiver.TryConsumeRecenterRequest());
         }
@@ -100,16 +96,13 @@ namespace CameraUnlock.Core.Tests.Protocol
             // rather than acted on.
             _receiver = StartReceiver();
 
-            Send(BuildPacket(10, 20, 30, recenterCounter: 1));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 20, 30, recenterCounter: 1));
             Assert.False(_receiver.TryConsumeRecenterRequest());
 
-            Send(BuildPacket(10, 20, 30, recenterCounter: 2));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 20, 30, recenterCounter: 2));
             Assert.False(_receiver.TryConsumeRecenterRequest());
 
-            Send(BuildPacket(10, 20, 30, recenterCounter: 2));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 20, 30, recenterCounter: 2));
             Assert.False(_receiver.TryConsumeRecenterRequest());
         }
 
@@ -120,8 +113,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             // its pose must still reach the consumer.
             _receiver = StartReceiver();
 
-            Send(BuildPacket(10, 20, 30, recenterCounter: 1));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 20, 30, recenterCounter: 1));
 
             TrackingPose pose = _receiver.GetLatestPose();
             Assert.Equal(10f, pose.Yaw, precision: 3);
@@ -135,13 +127,11 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
-            Send(BuildPacket(45, 30, 15));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(45, 30, 15));
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             float before = session.Rotation.Yaw;
 
-            Send(BuildPacket(45, 30, 15, recenterCounter: 1));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(45, 30, 15, recenterCounter: 1));
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
 
             Assert.Equal(before, session.Rotation.Yaw, precision: 2);
@@ -155,15 +145,13 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
-            Send(BuildPacket(40, 0, 0));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(40, 0, 0));
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             session.Recenter();
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             Assert.True(System.Math.Abs(session.Rotation.Yaw) < 1f);
 
-            Send(BuildPacket(60, 0, 0, recenterCounter: 1));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(60, 0, 0, recenterCounter: 1));
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
 
             Assert.True(System.Math.Abs(session.Rotation.Yaw - 20f) < 1f,
@@ -182,8 +170,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             var logs = new System.Collections.Generic.List<string>();
             session.Log = logs.Add;
 
-            Send(BuildPacket(10, 5, 0));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 5, 0));
             for (int i = 0; i < 5; i++)
             {
                 session.Update(1f / 60f);
@@ -191,14 +178,15 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.Single(logs, "Auto-recentered on tracker connection");
 
             // Face lost: the tracker stops sending and data goes stale.
-            Thread.Sleep(OpenTrackReceiver.DefaultMaxDataAgeMs + 100);
+            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the tracker stopped sending");
             session.Update(1f / 60f);
             Assert.True(session.IsHolding);
 
             // Face re-acquired mid-motion: resuming packets must not re-capture
             // the center - that decision belongs to the tracker app (trailer).
-            Send(BuildPacket(40, 20, 10));
-            Thread.Sleep(100);
+            // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
+            Send(BuildPacket(39.95, 20, 10));
+            SendAndWait(BuildPacket(40, 20, 10));
             for (int i = 0; i < 5; i++)
             {
                 session.Update(1f / 60f);
@@ -211,8 +199,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         {
             _receiver = StartReceiver();
 
-            Send(BuildPacket(10, 20, 30));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(10, 20, 30));
 
             Assert.False(RemoteRecenter.TryConsume(_receiver, new TrackingProcessor()));
         }
@@ -227,8 +214,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             var processor = new TrackingProcessor();
             var positionProcessor = new PositionProcessor();
 
-            Send(BuildPacket(0, 0, 0, recenterCounter: 1));
-            Thread.Sleep(100);
+            SendAndWait(BuildPacket(0, 0, 0, recenterCounter: 1));
 
             Assert.False(RemoteRecenter.TryConsume(
                 _receiver, processor, new PoseInterpolator(), positionProcessor, new PositionInterpolator()));
@@ -239,13 +225,20 @@ namespace CameraUnlock.Core.Tests.Protocol
         private static OpenTrackReceiver StartReceiver()
         {
             var receiver = new OpenTrackReceiver();
-            Assert.True(receiver.Start(TestPort));
+            Assert.True(receiver.Start(0));
             return receiver;
         }
 
-        private static void Send(byte[] packet)
+        private void Send(byte[] packet)
         {
-            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver!.BoundPort));
+        }
+
+        private void SendAndWait(byte[] packet)
+        {
+            long before = _receiver!.GetRawPose().TimestampTicks;
+            Send(packet);
+            Eventually.True(() => _receiver.GetRawPose().TimestampTicks != before, "the packet sent was never published");
         }
 
         private static byte[] BuildPacket(double yaw, double pitch, double roll, byte? recenterCounter = null,

@@ -33,10 +33,9 @@ namespace CameraUnlock.Core.Tests.Tracking
         [Fact]
         public void Update_DoesNotAutoRecenter_ByDefault()
         {
-            _config.UdpPort = 14276;
             _config.LocalSmoothing = 0f;
             StaticHeadTrackingCore.Initialize(_config);
-            SendPacket(14276, yaw: 40.0);
+            SendPacket(yaw: 40.0);
             WaitUntilReceiving();
 
             float settled = SettleYaw();
@@ -47,11 +46,10 @@ namespace CameraUnlock.Core.Tests.Tracking
         [Fact]
         public void Update_AutoRecenterOnConnect_CapturesTheCenter()
         {
-            _config.UdpPort = 14277;
             _config.LocalSmoothing = 0f;
             StaticHeadTrackingCore.AutoRecenterOnConnect = true;
             StaticHeadTrackingCore.Initialize(_config);
-            SendPacket(14277, yaw: 40.0);
+            SendPacket(yaw: 40.0);
             WaitUntilReceiving();
 
             float centered = SettleYaw();
@@ -60,9 +58,10 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             // Pin the captured centre itself: 20 degrees further must read as 20.
             // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
-            SendPacket(14277, yaw: 59.95);
-            SendPacket(14277, yaw: 60.0);
-            WaitUntilReceiving();
+            SendPacket(yaw: 59.95);
+            SendPacket(yaw: 60.0);
+            Eventually.True(() => StaticHeadTrackingCore.Receiver.GetRawPose().Yaw == 60f,
+                () => "the receiver never reported yaw 60, it stayed at " + StaticHeadTrackingCore.Receiver.GetRawPose().Yaw);
             float residual = SettleYaw();
             Assert.True(System.Math.Abs(residual - 20f) < 1f,
                 $"Expected 20 relative to a centre of 40, got {residual}");
@@ -428,25 +427,20 @@ namespace CameraUnlock.Core.Tests.Tracking
 
         private static void WaitUntilReceiving()
         {
-            for (int i = 0; i < 100; i++)
-            {
-                if (StaticHeadTrackingCore.IsReceiving) return;
-                System.Threading.Thread.Sleep(10);
-            }
-            Assert.Fail("Receiver never reported a connection");
+            Eventually.True(() => StaticHeadTrackingCore.IsReceiving, "the receiver never reported a connection after the first packet");
         }
 
-        private static void SendPacket(int port, double yaw)
+        private static void SendPacket(double yaw)
         {
             byte[] packet = new byte[48];
             Array.Copy(BitConverter.GetBytes(yaw), 0, packet, 24, 8);
 
-            lock (Sender) Sender.Send(packet, packet.Length, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
+            lock (Sender) Sender.Send(packet, packet.Length, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, StaticHeadTrackingCore.Receiver.BoundPort));
         }
 
         private class TestConfig : IHeadTrackingConfig
         {
-            public int UdpPort { get; set; } = 14275;
+            public int UdpPort { get; set; } = 0;
             public bool EnableOnStartup { get; set; } = true;
             public SensitivitySettings Sensitivity { get; set; } = SensitivitySettings.Default;
             public string RecenterKeyName { get; set; } = "Home";
