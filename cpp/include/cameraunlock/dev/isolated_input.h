@@ -1090,13 +1090,17 @@ inline bool DetourDeviceVtables(const std::vector<void**>& vtables, int& detours
                 break;
             }
             d.targets[method][variants++] = target;
-            if (MH_EnableHook(target) != MH_OK) {
+            if (MH_QueueEnableHook(target) != MH_OK) {
                 Log("isolated input: could not enable the hook on a DirectInput device method");
                 ok = false;
                 break;
             }
             ++detours;
         }
+    }
+    if (ok && MH_ApplyQueued() != MH_OK) {
+        Log("isolated input: could not enable the hooks on the DirectInput device methods");
+        ok = false;
     }
     if (ok) return true;
     // `originals` is left as it is: a game thread may still be inside a detour
@@ -2252,13 +2256,17 @@ inline std::vector<void*>& Detoured() {
     return targets;
 }
 
+// Makes the detour and queues it. Switching a detour on stops every other thread of the game
+// while it writes, and switched on one by one the sixteen took up to 23 seconds in a program
+// that was drawing, all of it on the thread that started isolated input.
+// SwitchOnQueued switches on everything queued in one stop.
 template <typename Detour, typename Original>
 inline bool Hook(const wchar_t* module, const char* name, Detour detour, Original& original) {
     void* target = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(module), name));
     MH_STATUS status = target
         ? MH_CreateHook(target, reinterpret_cast<void*>(detour), reinterpret_cast<void**>(&original))
         : MH_ERROR_FUNCTION_NOT_FOUND;
-    if (status == MH_OK) status = MH_EnableHook(target);
+    if (status == MH_OK) status = MH_QueueEnableHook(target);
     if (status == MH_OK) {
         Detoured().push_back(target);
         return true;
@@ -2276,6 +2284,15 @@ inline bool Hook(const wchar_t* module, const char* name, Detour detour, Origina
                   MH_StatusToString(status), bytes);
     Log(line);
     if (target) MH_RemoveHook(target);
+    return false;
+}
+
+inline bool SwitchOnQueued() {
+    const MH_STATUS status = MH_ApplyQueued();
+    if (status == MH_OK) return true;
+    char line[120];
+    std::snprintf(line, sizeof(line), "isolated input: could not switch its detours on: %s", MH_StatusToString(status));
+    Log(line);
     return false;
 }
 
@@ -2322,6 +2339,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     }
     FindDevices();
 
+    const ULONGLONG detoursBegan = GetTickCount64();
     static const wchar_t* const kUser32 = L"user32.dll";
     const bool hooked[] = {
         Hook(kUser32, "GetRawInputData", &HookedGetRawInputData, s.origGetRawInputData),
@@ -2356,11 +2374,16 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     }
     bool all = true;
     for (const bool one : hooked) all = all && one;
+    all = all && SwitchOnQueued();
     if (!all) {
         UnhookAll();
         if (isolatedEvent) CloseHandle(isolatedEvent);
         return false;
     }
+    char took[120];
+    std::snprintf(took, sizeof(took), "isolated input: its %zu detours went in in %llu ms, on the thread that started it",
+                  Detoured().size(), GetTickCount64() - detoursBegan);
+    Log(took);
     std::thread(&RunCommandFile).detach();
     std::thread(&GuardForeground).detach();
     Log("isolated input: the game takes its keyboard and mouse from the command file, not from the real devices");
