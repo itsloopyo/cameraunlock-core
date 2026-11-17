@@ -217,6 +217,9 @@ namespace CameraUnlock.Core.Protocol
                 // every local user would be silently reclassified as remote and handed
                 // RemoteSmoothing. Widen the classifier to unmap first if this ever changes.
                 client = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+                // ReceiveLoop waits in Poll, but a socket Poll reports readable can still
+                // have nothing to read (Linux select(2) drops a datagram that fails its
+                // checksum at the read), and this keeps that read from blocking until Stop.
                 client.Client.ReceiveTimeout = ReceiveTimeoutMs;
             }
             catch (SocketException ex)
@@ -608,11 +611,22 @@ namespace CameraUnlock.Core.Protocol
                     var socket = client.Client;
                     if (socket == null) break;
 
+                    // The wait is a Poll, which takes nothing off the socket. Waiting in
+                    // ReceiveFrom on the socket's receive timeout loses the datagram that
+                    // arrives as the timeout runs out: on Windows 53 of 400 packets sent
+                    // within 1.5 ms of that moment never reached the caller, and none of
+                    // 400 did with the Poll.
+                    if (!socket.Poll(ReceiveTimeoutMs * 1000, SelectMode.SelectRead))
+                    {
+                        CountSilentWait();
+                        continue;
+                    }
+
                     int received = socket.ReceiveFrom(data, ref remoteEndpoint);
 
                     // Traffic that publishes nothing (short, unparseable, gated, or from a
-                    // sender other than the locked one) never times the receive out, so
-                    // the timeout count alone kept IsReceiving true on the last pose for
+                    // sender other than the locked one) never leaves a wait empty, so
+                    // the silent-wait count alone kept IsReceiving true on the last pose for
                     // as long as anyone on the LAN kept sending.
                     DisconnectIfSilent();
 
@@ -727,15 +741,7 @@ namespace CameraUnlock.Core.Protocol
                 {
                     if (ex.SocketErrorCode == SocketError.TimedOut)
                     {
-                        _consecutiveTimeouts++;
-                        if (_consecutiveTimeouts >= DisconnectThreshold)
-                        {
-                            _isConnected = false;
-                            // A tracker app that restarts counts its presses from zero
-                            // again, so a counter latched from the old session would hide
-                            // the first press of the new one from the gate.
-                            _hasRecenterCounter = false;
-                        }
+                        CountSilentWait();
                     }
                     else if (ex.SocketErrorCode == SocketError.Interrupted)
                     {
@@ -768,6 +774,19 @@ namespace CameraUnlock.Core.Protocol
                 {
                     break;
                 }
+            }
+        }
+
+        private void CountSilentWait()
+        {
+            _consecutiveTimeouts++;
+            if (_consecutiveTimeouts >= DisconnectThreshold)
+            {
+                _isConnected = false;
+                // A tracker app that restarts counts its presses from zero
+                // again, so a counter latched from the old session would hide
+                // the first press of the new one from the gate.
+                _hasRecenterCounter = false;
             }
         }
 

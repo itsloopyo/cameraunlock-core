@@ -296,6 +296,32 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.InRange(stopwatch.ElapsedMilliseconds, 4000, 9000);
         }
 
+        // A receive that waits on the socket's own timeout loses the datagram that arrives
+        // as the timeout runs out, so each packet here is sent to land around that moment.
+        // Against that receiver this failed 5 runs in 12.
+        [Fact]
+        public void APacketArrivingAsTheReceiveWaitRunsOut_IsNotLost()
+        {
+            _receiver = new OpenTrackReceiver();
+            Assert.True(_receiver.Start(TestPort));
+            SendTestPacket(TestPort, 1.0, 0.0, 0.0);
+            Assert.True(WaitFor(() => _receiver.GetRawPose().TimestampTicks != 0, 10000), "the first packet never arrived");
+
+            long spinTicks = Stopwatch.Frequency / 200;
+            for (double gapMs = 99.0; gapMs <= 102.0; gapMs += 0.1)
+            {
+                long last = _receiver.GetRawPose().TimestampTicks;
+                long sendAt = last + (long)(gapMs * Stopwatch.Frequency / 1000.0);
+                while (Stopwatch.GetTimestamp() < sendAt - spinTicks) Thread.Sleep(1);
+                while (Stopwatch.GetTimestamp() < sendAt) { }
+
+                SendTestPacket(TestPort, 1.0, 0.0, 0.0);
+
+                Assert.True(WaitFor(() => _receiver.GetRawPose().TimestampTicks != last, 10000),
+                    $"the packet sent {gapMs:F1} ms after the one before it never arrived");
+            }
+        }
+
         [Fact]
         public void ReceivesUdpPacket_DataIsFresh()
         {
