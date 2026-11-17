@@ -11,6 +11,11 @@
 //   - Every top-level window is made WS_EX_NOACTIVATE and is shown without being
 //     activated. A window is never raised above other programs' windows, and a
 //     game's first plain window goes to the bottom of the stack.
+//   - Every top-level window that has no owner and is not a tool window sits in
+//     the bottom right corner of the work area at the size the game gave it:
+//     put there before it is shown, and held there through SetWindowPos,
+//     MoveWindow, DeferWindowPos and SetWindowPlacement. A maximised window
+//     is left as it is.
 //   - SetForegroundWindow, SwitchToThisWindow, BringWindowToTop, FlashWindow(Ex),
 //     LockSetForegroundWindow and AllowSetForegroundWindow do nothing and answer
 //     success. AttachThreadInput to another process's thread does nothing.
@@ -92,7 +97,7 @@ Refused g_foreground{"SetForegroundWindow"}, g_switch{"SwitchToThisWindow"}, g_b
     g_attach{"AttachThreadInput to another process"}, g_lock{"LockSetForegroundWindow or AllowSetForegroundWindow"},
     g_sendInput{"SendInput"}, g_mode{"a display mode change"}, g_clip{"ClipCursor"}, g_cursor{"SetCursorPos"},
     g_rawSink{"raw input while in the background"}, g_activate{"a window activating as it was shown or moved"},
-    g_raise{"a window raised above other programs"}, g_exclusive{"exclusive fullscreen"}, g_diExclusive{"an exclusive DirectInput device"};
+    g_raise{"a window raised above other programs"}, g_place{"a window anywhere but the corner"}, g_exclusive{"exclusive fullscreen"}, g_diExclusive{"an exclusive DirectInput device"};
 
 // ---------------------------------------------------------------------------
 // The originals, each reached through its trampoline
@@ -101,6 +106,7 @@ Refused g_foreground{"SetForegroundWindow"}, g_switch{"SwitchToThisWindow"}, g_b
 using CreateWindow_t = HWND (WINAPI*)(DWORD, void*, void*, void*, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, void*, DWORD, void*, void*, void*);
 using ShowWindow_t = BOOL (WINAPI*)(HWND, int);
 using SetWindowPos_t = BOOL (WINAPI*)(HWND, HWND, int, int, int, int, UINT);
+using MoveWindow_t = BOOL (WINAPI*)(HWND, int, int, int, int, BOOL);
 using SetWindowPlacement_t = BOOL (WINAPI*)(HWND, const WINDOWPLACEMENT*);
 using SetWindowLong_t = LONG_PTR (WINAPI*)(HWND, int, LONG, BOOL);
 using SetWindowLongPtr_t = LONG_PTR (WINAPI*)(HWND, int, LONG_PTR, BOOL);
@@ -122,6 +128,7 @@ using CreateProcessInternal_t = BOOL (WINAPI*)(HANDLE, LPCWSTR, LPWSTR, LPSECURI
 CreateWindow_t oCreateWindow;
 ShowWindow_t oShowWindow, oShowWindowAsync;
 SetWindowPos_t oSetWindowPos;
+MoveWindow_t oMoveWindow;
 SetWindowPlacement_t oSetWindowPlacement;
 SetWindowLong_t oSetWindowLong;
 SetWindowLongPtr_t oSetWindowLongPtr;
@@ -154,6 +161,67 @@ bool Ours(HWND window) {
 }
 
 bool TopLevel(HWND window) { return window && !(GetWindowLongW(window, GWL_STYLE) & WS_CHILD); }
+
+// The windows that are kept in the corner: the game's own top-level windows. Not
+// a window with an owner (a dialog), a tool window, or a message-only window,
+// whose parent is not the desktop.
+bool GameWindow(HWND window) {
+    return TopLevel(window) && Ours(window) && GetAncestor(window, GA_PARENT) == GetDesktopWindow() && !GetWindow(window, GW_OWNER) &&
+           !(GetWindowLongW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW);
+}
+
+POINT CornerFor(int width, int height) {
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    return {work.right - width, work.bottom - height};
+}
+
+// The place a window is restored to is given from the work area's top left,
+// for a window that is not a tool window.
+bool PlacementToCorner(WINDOWPLACEMENT& placement) {
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    const RECT asked = placement.rcNormalPosition;
+    const POINT corner = CornerFor(asked.right - asked.left, asked.bottom - asked.top);
+    const int dx = corner.x - work.left - asked.left, dy = corner.y - work.top - asked.top;
+    OffsetRect(&placement.rcNormalPosition, dx, dy);
+    return dx || dy;
+}
+
+// A minimised window has no place on the screen, so the place it comes back to is
+// what is put in the corner.
+void Corner(HWND window) {
+    if (!GameWindow(window) || IsZoomed(window)) return;
+    if (IsIconic(window)) {
+        WINDOWPLACEMENT placement{};
+        placement.length = sizeof(placement);
+        if (!GetWindowPlacement(window, &placement) || !PlacementToCorner(placement)) return;
+        g_place.Note();
+        placement.showCmd = SW_SHOWMINNOACTIVE;
+        oSetWindowPlacement(window, &placement);
+        return;
+    }
+    RECT now{};
+    GetWindowRect(window, &now);
+    const POINT corner = CornerFor(now.right - now.left, now.bottom - now.top);
+    if (now.left == corner.x && now.top == corner.y) return;
+    g_place.Note();
+    oSetWindowPos(window, nullptr, corner.x, corner.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// A resize moves the window too, since the corner it is held by is the bottom
+// right one.
+void HoldInCorner(HWND window, int& x, int& y, int cx, int cy, UINT& flags) {
+    if (!GameWindow(window) || IsIconic(window) || IsZoomed(window)) return;
+    if ((flags & SWP_NOMOVE) && (flags & SWP_NOSIZE) && !(flags & SWP_SHOWWINDOW)) return;
+    RECT now{};
+    GetWindowRect(window, &now);
+    const POINT corner = CornerFor((flags & SWP_NOSIZE) ? now.right - now.left : cx, (flags & SWP_NOSIZE) ? now.bottom - now.top : cy);
+    if (!(flags & SWP_NOMOVE) && (x != corner.x || y != corner.y)) g_place.Note();
+    x = corner.x;
+    y = corner.y;
+    flags &= ~static_cast<UINT>(SWP_NOMOVE);
+}
 
 bool FirstTimeShown(HWND window) {
     AcquireSRWLockExclusive(&g_shownLock);
@@ -199,6 +267,7 @@ HWND WINAPI HookedCreateWindow(DWORD exStyle, void* className, void* classVersio
                                     instance, parameter, flags, a15, a16, a17);
     if (made && (style & WS_VISIBLE)) {
         g_activate.Note();
+        Corner(made);
         oShowWindow(made, SW_SHOWNA);
         Shown(made);
     }
@@ -209,7 +278,10 @@ BOOL ShowQuietly(ShowWindow_t original, HWND window, int command) {
     if (!TopLevel(window) || !Ours(window)) return original(window, command);
     const int quiet = WithoutActivating(command);
     if (quiet != command) g_activate.Note();
+    if (Shows(quiet)) Corner(window);
     const BOOL result = original(window, quiet);
+    // Again once it is shown: a minimised or maximised window has just been given back the place it had.
+    if (IsWindowVisible(window)) Corner(window);
     if (Shows(quiet)) Shown(window);
     return result;
 }
@@ -233,13 +305,28 @@ void QuietPosition(HWND& after, UINT& flags) {
 BOOL WINAPI HookedSetWindowPos(HWND window, HWND after, int x, int y, int cx, int cy, UINT flags) {
     if (!TopLevel(window) || !Ours(window)) return oSetWindowPos(window, after, x, y, cx, cy, flags);
     QuietPosition(after, flags);
+    HoldInCorner(window, x, y, cx, cy, flags);
     const BOOL result = oSetWindowPos(window, after, x, y, cx, cy, flags);
+    // The window's own procedure can change the size on the way. Not after a call the game
+    // did not wait for: the window's thread may be waiting for this one.
+    if (!(flags & SWP_ASYNCWINDOWPOS) && IsWindowVisible(window)) Corner(window);
     if (flags & SWP_SHOWWINDOW) Shown(window);
     return result;
 }
 
+BOOL WINAPI HookedMoveWindow(HWND window, int x, int y, int cx, int cy, BOOL repaint) {
+    UINT flags = 0;
+    HoldInCorner(window, x, y, cx, cy, flags);
+    const BOOL result = oMoveWindow(window, x, y, cx, cy, repaint);
+    if (IsWindowVisible(window)) Corner(window);
+    return result;
+}
+
 HDWP WINAPI HookedDeferWindowPos(HDWP positions, HWND window, HWND after, int x, int y, int cx, int cy, UINT flags) {
-    if (TopLevel(window) && Ours(window)) QuietPosition(after, flags);
+    if (TopLevel(window) && Ours(window)) {
+        QuietPosition(after, flags);
+        HoldInCorner(window, x, y, cx, cy, flags);
+    }
     return oDeferWindowPos(positions, window, after, x, y, cx, cy, flags);
 }
 
@@ -248,7 +335,9 @@ BOOL WINAPI HookedSetWindowPlacement(HWND window, const WINDOWPLACEMENT* placeme
     WINDOWPLACEMENT quiet = *placement;
     quiet.showCmd = static_cast<UINT>(WithoutActivating(static_cast<int>(placement->showCmd)));
     if (quiet.showCmd != placement->showCmd) g_activate.Note();
+    if (GameWindow(window) && PlacementToCorner(quiet)) g_place.Note();
     const BOOL result = oSetWindowPlacement(window, &quiet);
+    if (IsWindowVisible(window)) Corner(window);
     if (Shows(static_cast<int>(quiet.showCmd))) Shown(window);
     return result;
 }
@@ -372,10 +461,9 @@ void PlaceSmall(HWND window, UINT width, UINT height) {
     RECT frame{0, 0, static_cast<LONG>(width * scale), static_cast<LONG>(height * scale)};
     AdjustWindowRectEx(&frame, static_cast<DWORD>(GetWindowLongW(window, GWL_STYLE)), GetMenu(window) != nullptr,
                        static_cast<DWORD>(GetWindowLongW(window, GWL_EXSTYLE)));
-    RECT work{};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int w = frame.right - frame.left, h = frame.bottom - frame.top;
-    oSetWindowPos(window, nullptr, work.right - w, work.bottom - h, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
+    const POINT corner = CornerFor(w, h);
+    oSetWindowPos(window, nullptr, corner.x, corner.y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
 }
 
 // --- Direct3D 9 ---
@@ -793,7 +881,10 @@ BOOL CALLBACK QuietExisting(HWND window, LPARAM count) {
 #else
     oSetWindowLong(window, GWL_EXSTYLE, style | WS_EX_NOACTIVATE, FALSE);
 #endif
-    if (IsWindowVisible(window)) ++*reinterpret_cast<int*>(count);
+    if (IsWindowVisible(window)) {
+        Corner(window);
+        ++*reinterpret_cast<int*>(count);
+    }
     return TRUE;
 }
 
@@ -802,7 +893,8 @@ BOOL CALLBACK QuietExisting(HWND window, LPARAM count) {
 DWORD WINAPI QuietExistingWindows(void*) {
     int visible = 0;
     EnumWindows(&QuietExisting, reinterpret_cast<LPARAM>(&visible));
-    Log("LATE: the shim went into a process that was already running, with %d visible window(s), which were made non-activating. "
+    Log("LATE: the shim went into a process that was already running, with %d visible window(s). They were made non-activating, and those with no owner that are "
+        "not tool windows or maximised were put in the corner. "
         "A Direct3D device, a swap chain or a DirectInput device it made before now is not covered",
         visible);
     return 0;
@@ -840,6 +932,7 @@ bool Start(HMODULE self) {
     Detour(win32u, "NtUserShowWindow", reinterpret_cast<void*>(&HookedShowWindow), oShowWindow, 2 * 4);
     Detour(win32u, "NtUserShowWindowAsync", reinterpret_cast<void*>(&HookedShowWindowAsync), oShowWindowAsync, 2 * 4);
     Detour(win32u, "NtUserSetWindowPos", reinterpret_cast<void*>(&HookedSetWindowPos), oSetWindowPos, 7 * 4);
+    Detour(win32u, "NtUserMoveWindow", reinterpret_cast<void*>(&HookedMoveWindow), oMoveWindow, 6 * 4);
     Detour(win32u, "NtUserSetWindowPlacement", reinterpret_cast<void*>(&HookedSetWindowPlacement), oSetWindowPlacement, 2 * 4);
     Detour(win32u, "NtUserSetWindowLong", reinterpret_cast<void*>(&HookedSetWindowLong), oSetWindowLong, 4 * 4);
 #ifdef _WIN64

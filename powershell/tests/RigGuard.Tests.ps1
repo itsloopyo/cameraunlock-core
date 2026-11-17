@@ -10,8 +10,11 @@
 # takes the machine over: it activates its windows by every call there is,
 # asks for another display mode twice a second, goes exclusive fullscreen
 # through Direct3D 9 and 11, clips and moves the cursor, and starts a 32-bit
-# child that does the same. It goes through Start-IsolatedGame, as a rig's
-# game does, and refuses to run without the shim in it.
+# child that does the same. It also opens a plain window away from the corner
+# of the desktop and moves it back out four times a second, with a tool window
+# an owned window, a child window and a message-only window it moves too. It
+# goes through Start-IsolatedGame, as a rig's game does, and refuses to run
+# without the shim in it.
 #
 # A second process, CameraUnlockRig watch, writes down every change of the
 # foreground window and of the display mode on the real desktop for the whole
@@ -22,6 +25,10 @@
 # whole, parent and child, with one line saying why. Ending a run because its
 # window took the foreground is the same code path from the verdict on; this
 # test does not take the foreground from the person at the machine to show it.
+#
+# Not run here: a window the game made before the shim was in (the stand-in
+# waits for the shim), a maximised window, a window first shown by SetWindowPos
+# or SetWindowPlacement, and a window placed from another thread.
 # ============================================================================
 
 param([int]$Seconds = 60)
@@ -69,6 +76,22 @@ function Check-Stats {
         "create $($Stats.create11), SetFullscreenState $($Stats.setFullscreen), says $($Stats.saysFullscreen), frames $($Stats.frames11)"
     $w9, $h9 = $Stats.window9 -split 'x'; $w11, $h11 = $Stats.window11 -split 'x'
     Check "$Who`: both fullscreen windows ended small ($($Stats.window9) and $($Stats.window11))" ([int]$w9 -le 1320 -and [int]$h9 -le 780 -and [int]$w11 -le 1320 -and [int]$h11 -le 780)
+    $work = [int[]]($Stats.work -split ',')
+    $inCorner = {
+        param([string]$Place, [int]$Width, [int]$Height)
+        $l, $t, $r, $b = [int[]]($Place -split ',')
+        $r -eq $work[2] -and $b -eq $work[3] -and $r - $l -eq $Width -and $b - $t -eq $Height
+    }
+    $askedW, $askedH = [int[]]($Stats.plainAsked -split 'x')
+    Check "$Who`: both fullscreen windows ended in the corner ($($Stats.window9At) and $($Stats.window11At))" ((& $inCorner $Stats.window9At $w9 $h9) -and (& $inCorner $Stats.window11At $w11 $h11)) "work area $($Stats.work)"
+    Check "$Who`: a window made visible was in the corner, at the size asked for, when CreateWindow returned ($($Stats.made9))" (& $inCorner $Stats.made9 480 300) "work area $($Stats.work)"
+    Check "$Who`: a window made hidden at 200,200 was in the corner, at the size asked for, when ShowWindow returned ($($Stats.plainShown))" (& $inCorner $Stats.plainShown 320 200) "work area $($Stats.work)"
+    Check "$Who`: that window was in the corner, at the size asked for, after each of the $($Stats.plainMoves) times it was moved to 200,200 or resized, and ended there ($($Stats.plain))" `
+        ([int]$Stats.plainMoves -gt $Ran -and $Stats.plainAway -eq '0' -and (& $inCorner $Stats.plain $askedW $askedH)) "away or of another size after $($Stats.plainAway) moves, asked $($Stats.plainAsked), work area $($Stats.work)"
+    Check "$Who`: minimised, moved to 200,200 and restored, it came back to the corner ($($Stats.plainRestored))" (& $inCorner $Stats.plainRestored 360 220) "work area $($Stats.work)"
+    Check "$Who`: that window was never the foreground window" ($Stats.plainForeground -eq '0') "in $($Stats.plainForeground) rounds"
+    Check "$Who`: its tool, owned, child and message-only windows went where it moved them ($($Stats.tool), $($Stats.owned), $($Stats.inner), $($Stats.messageOnly))" `
+        ($Stats.tool -eq '16,16,176,76' -and $Stats.owned -eq '16,90,176,150' -and $Stats.inner -eq '20,20,120,60' -and $Stats.messageOnly -eq '5,5,15,15')
     Check "$Who`: raw input registered and the exclusive DirectInput mouse taken without error" ($Stats.rawRegistered -eq '1' -and $Stats.mouseLevel -eq '0x00000000' -and $Stats.mouseAcquire -eq '0x00000000') "raw $($Stats.rawRegistered), level $($Stats.mouseLevel), acquire $($Stats.mouseAcquire)"
 }
 

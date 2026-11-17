@@ -10,6 +10,13 @@
 // and moves the cursor, takes raw input in the background and the mouse
 // exclusively through DirectInput, and starts a child that does the same.
 //
+// It is also a game that is windowed already: a third window, never given a
+// Direct3D device, is made away from the corner and moved back out of it four
+// times a second, by SetWindowPos, MoveWindow, SetWindowPlacement and
+// DeferWindowPos in turn, and once while it is minimised. A tool window, an
+// owned window, a child window and a message-only window are moved too, and
+// those moves are theirs to make.
+//
 // It runs only with the rig shim in it: without, it would do all of that for real.
 // It draws the whole time, loads the isolated-input host when given one, and at
 // the end writes what it saw to the stats file, one key=value a line.
@@ -122,6 +129,37 @@ HWND MakeWindow(const wchar_t* title, int x, int y) {
     return CreateWindowExW(0, L"RigMisbehave", title, WS_OVERLAPPEDWINDOW | WS_VISIBLE, x, y, 480, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
+// One placing call a round, each asking for a size of its own. `size` is left as what the window was last asked to be.
+void MoveAway(HWND window, int round, SIZE& size) {
+    switch (round % 5) {
+        case 0: SetWindowPos(window, nullptr, 200, 200, 0, 0, SWP_NOSIZE | SWP_NOZORDER); break;
+        case 1:
+            size = {360, 220};
+            MoveWindow(window, 200, 200, size.cx, size.cy, TRUE);
+            break;
+        case 2: {
+            size = {340, 210};
+            WINDOWPLACEMENT placement{};
+            placement.length = sizeof(placement);
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = {200, 200, 200 + size.cx, 200 + size.cy};
+            SetWindowPlacement(window, &placement);
+            break;
+        }
+        case 3: {
+            size = {350, 215};
+            HDWP positions = BeginDeferWindowPos(1);
+            positions = DeferWindowPos(positions, window, nullptr, 200, 200, size.cx, size.cy, SWP_NOZORDER);
+            EndDeferWindowPos(positions);
+            break;
+        }
+        case 4:
+            size = {330, 205};
+            SetWindowPos(window, nullptr, 0, 0, size.cx, size.cy, SWP_NOMOVE | SWP_NOZORDER);
+            break;
+    }
+}
+
 void Pump() {
     MSG message;
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
@@ -177,9 +215,35 @@ int wmain(int argc, wchar_t** argv) {
     const int offset = childExe.empty() ? 320 : 0;
     const HWND window = MakeWindow(L"RigMisbehave Direct3D 9", 40 + offset, 40 + offset);
     if (!window) return 4;
+    RECT made9{};
+    GetWindowRect(window, &made9);
     const LONG_PTR exStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
     UpdateWindow(window);
     Grab(window);
+
+    const HWND plain = CreateWindowExW(0, L"RigMisbehave", L"RigMisbehave windowed", WS_OVERLAPPEDWINDOW, 200 + offset, 200 + offset, 320, 200, nullptr, nullptr,
+                                       GetModuleHandleW(nullptr), nullptr);
+    const HWND tool = CreateWindowExW(WS_EX_TOOLWINDOW, L"RigMisbehave", L"RigMisbehave tool", WS_POPUP | WS_CAPTION, 8, 8, 160, 60, nullptr, nullptr,
+                                      GetModuleHandleW(nullptr), nullptr);
+    const HWND inner = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 10, 10, 100, 40, plain, nullptr, GetModuleHandleW(nullptr), nullptr);
+    const HWND owned = CreateWindowExW(0, L"RigMisbehave", L"RigMisbehave owned", WS_POPUP | WS_CAPTION, 8, 80, 160, 60, plain, nullptr,
+                                       GetModuleHandleW(nullptr), nullptr);
+    const HWND messageOnly = CreateWindowExW(0, L"RigMisbehave", L"", WS_POPUP, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!plain || !tool || !inner || !owned || !messageOnly) return 4;
+    ShowWindow(plain, SW_SHOW);
+    RECT plainShown{};
+    GetWindowRect(plain, &plainShown);
+    // Under everyone else's before they are shown: a tool window and an owned window are left where the game puts them.
+    SetWindowPos(tool, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    ShowWindow(tool, SW_SHOWNA);
+    SetWindowPos(owned, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    ShowWindow(owned, SW_SHOWNA);
+    MoveWindow(messageOnly, 5, 5, 10, 10, FALSE);
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    int plainMoves = 0, plainAway = 0, plainForeground = 0;
+    SIZE plainAsked{320, 200};
+    RECT plainRestored{};
 
     RAWINPUTDEVICE raw[2] = {{1, 6, RIDEV_INPUTSINK, window}, {1, 2, RIDEV_INPUTSINK, window}};
     const BOOL rawRegistered = RegisterRawInputDevices(raw, 2, sizeof(RAWINPUTDEVICE));
@@ -272,6 +336,20 @@ int wmain(int argc, wchar_t** argv) {
             const ULONGLONG from = GetTickCount64();
             Grab(window);
             if (window11) Grab(window11);
+            if (plainMoves == 7) {
+                ShowWindow(plain, SW_MINIMIZE);
+                SetWindowPos(plain, nullptr, 200, 200, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+                ShowWindow(plain, SW_RESTORE);
+                GetWindowRect(plain, &plainRestored);
+            }
+            MoveAway(plain, plainMoves++, plainAsked);
+            RECT at{};
+            GetWindowRect(plain, &at);
+            if (at.right != work.right || at.bottom != work.bottom || at.right - at.left != plainAsked.cx || at.bottom - at.top != plainAsked.cy) ++plainAway;
+            if (g_realForeground() == plain) ++plainForeground;
+            SetWindowPos(tool, nullptr, 16, 16, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(owned, nullptr, 16, 90, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(inner, nullptr, 20, 20, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
             grabMs += since(from);
         }
         if (now >= nextMode) {
@@ -306,8 +384,14 @@ int wmain(int argc, wchar_t** argv) {
         Sleep(8);
     }
 
-    RECT rect9{}, rect11{};
+    RECT rect9{}, rect11{}, rectPlain{}, rectTool{}, rectInner{}, rectOwned{}, rectMessageOnly{};
+    GetWindowRect(owned, &rectOwned);
+    GetWindowRect(messageOnly, &rectMessageOnly);
     GetWindowRect(window, &rect9);
+    GetWindowRect(plain, &rectPlain);
+    GetWindowRect(tool, &rectTool);
+    GetWindowRect(inner, &rectInner);
+    MapWindowPoints(nullptr, plain, reinterpret_cast<POINT*>(&rectInner), 2);
     if (window11) GetWindowRect(window11, &rect11);
     DWORD childExit = STILL_ACTIVE;
     if (childProcess) {
@@ -331,6 +415,20 @@ int wmain(int argc, wchar_t** argv) {
     fprintf(stats, "create11=0x%08lX\nsetFullscreen=0x%08lX\nsaysFullscreen=%d\nresizeTarget=0x%08lX\nframes11=%d\nwindow11=%ldx%ld\n",
             static_cast<unsigned long>(create11), static_cast<unsigned long>(setFullscreen), saysFullscreen, static_cast<unsigned long>(resizeTarget), frames11,
             rect11.right - rect11.left, rect11.bottom - rect11.top);
+    const auto place = [stats](const char* name, const RECT& rect) { fprintf(stats, "%s=%ld,%ld,%ld,%ld\n", name, rect.left, rect.top, rect.right, rect.bottom); };
+    place("work", work);
+    place("made9", made9);
+    place("plainShown", plainShown);
+    place("plain", rectPlain);
+    place("window9At", rect9);
+    place("window11At", rect11);
+    place("plainRestored", plainRestored);
+    fprintf(stats, "plainAsked=%ldx%ld\n", plainAsked.cx, plainAsked.cy);
+    place("tool", rectTool);
+    place("owned", rectOwned);
+    place("messageOnly", rectMessageOnly);
+    place("inner", rectInner);
+    fprintf(stats, "plainMoves=%d\nplainAway=%d\nplainForeground=%d\n", plainMoves, plainAway, plainForeground);
     fprintf(stats, "grabMs=%llu\npresent9Ms=%llu\npresent11Ms=%llu\nreset9Ms=%llu\n", grabMs, present9Ms, present11Ms, reset9Ms);
     fprintf(stats, "hostResult=%d\nkeyDownW=%d\nwHeldFrames=%d\n", hostResult, g_seen.keyDownW, wHeldFrames);
     fclose(stats);

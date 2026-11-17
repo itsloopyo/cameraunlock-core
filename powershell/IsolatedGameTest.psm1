@@ -667,7 +667,10 @@ function Start-IsolatedGame {
 
     An executable -Launch is started by the guard itself, suspended, with the rig shim in before
     its first instruction: its windows are made without being activated, and it cannot take the
-    foreground, clip or move the cursor, or change the display mode. Anything else (a steam:// URI,
+    foreground, clip or move the cursor, or change the display mode. Each of its top-level windows
+    that has no owner and is not a tool window sits in the bottom right corner of the work area,
+    at the size the game gave it, from before it is first shown, whether or not the game asked for
+    fullscreen, and a move or resize the game makes later leaves it there. Anything else (a steam:// URI,
     a shell:AppsFolder path) is started as before, and the guard puts the shim into the game as
     soon as a process named -ProcessName or one of -Processes appears. Name every launcher the
     game comes up through in -Processes, or its windows are nobody's.
@@ -697,6 +700,10 @@ function Start-IsolatedGame {
       CoCreateInstance, a borderless window the size of the screen (not activated, but not made
       smaller), low-level keyboard and mouse hooks, RegisterHotKey, or a console window the game
       opens. For the first four the guard ending the game is all there is.
+    - The corner is held at the calls that place a window (SetWindowPos, MoveWindow,
+      DeferWindowPos, SetWindowPlacement) and at each show. A window whose own procedure answers
+      a move with another place, one made visible by a change of style alone, a maximised window,
+      and a window with an owner or a tool window are left where the game puts them.
     - A process the shim cannot be put into ends the run: one that is elevated or protected, or
       a packaged app. -NoShim runs such a game with the guard alone.
     - The guard ends the run on a change of display mode whoever made it, the person at the

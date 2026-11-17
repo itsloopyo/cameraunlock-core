@@ -914,6 +914,7 @@ the guard. Inside the game:
 | What the game does | What happens |
 | --- | --- |
 | makes or shows a top-level window | it is made `WS_EX_NOACTIVATE` and shown without activating, never topmost, not raised by the game's own calls. Each window without an owner that is not a tool window is put at the bottom of the window order the first time it is shown; an owned window (a dialog) or a tool window stays where Windows put it, which can be on top, without being activated. A window shown on its own thread is activated inside the game's own input queue, so the game is sent `WM_ACTIVATE`, `WM_ACTIVATEAPP` and `WM_SETFOCUS` as if it were in front |
+| makes, shows, moves or resizes a top-level window that has no owner and is not a tool window (`SetWindowPos`, `MoveWindow`, `DeferWindowPos`, `SetWindowPlacement`) | the window sits in the bottom right corner of the work area at the size the game gave it, from before it is first shown, whether or not the game asked for fullscreen. A move is answered as done and leaves it there; a resize is made and the window moved so that it stays in the corner. A minimised window comes back to the corner when it is restored, and a maximised window is left as it is. A window with an owner (a dialog), a tool window, a child window and a message-only window are placed by the game |
 | `SetForegroundWindow`, `SwitchToThisWindow`, `BringWindowToTop`, `FlashWindowEx`, `LockSetForegroundWindow`, `AllowSetForegroundWindow`, `SendInput`, `AttachThreadInput` to another process's thread | nothing, answered as done |
 | `ChangeDisplaySettings(Ex)`, `SetDisplayConfig` | nothing, answered as done. A test of a mode (`CDS_TEST`) is passed on |
 | `ClipCursor`, `SetCursorPos`, `SetPhysicalCursorPos` | nothing, answered as done |
@@ -948,7 +949,12 @@ What the shim does not touch: DirectDraw, DirectInput 7 and older, Direct3D 10's
 own create-with-swap-chain calls, a DirectInput made through `CoCreateInstance`,
 a borderless window the size of the screen (it is not activated and sits at the
 bottom, but it is not made smaller), low-level keyboard and mouse hooks, and
-`RegisterHotKey`. For the first four the guard is what is left. A console window
+`RegisterHotKey`. For the first four the guard is what is left. A window whose
+own procedure answers a move with another place (`WM_WINDOWPOSCHANGING`), or
+changes the size of a move made through `DeferWindowPos`, is not held in the
+corner, nor is one made visible, given no owner or made a top-level window by a
+change of style or parent alone, until the next call that shows or places it.
+The corner is the one the work area had at that call. A console window
 is not the game's own (it belongs to the console host), so neither the shim nor
 the guard sees one a game opens. A packaged app (`shell:AppsFolder`) cannot read
 what the injector leaves for the shim, so it is ended as one that cannot be
