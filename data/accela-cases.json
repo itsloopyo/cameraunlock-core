@@ -1,5 +1,5 @@
 {
-  "about": "Hypari's Accela filter (hypari-webcam smoothing.rs, from headcam-android and opentrack's filter-accela by Stanislaw Halik, ISC) on these inputs. Core's C++ and C# AccelaFilter match the outputs. Made by hypari-webcam's accela_cases test with ACCELA_CASES_WRITE set; do not edit by hand.",
+  "about": "Headstart's Accela filter (headstart-webcam smoothing.rs, from headcam-android and opentrack's filter-accela by Stanislaw Halik, ISC) on these inputs. Core's C++ and C# AccelaFilter match the outputs. Made by headstart-webcam's accela_cases test with ACCELA_CASES_WRITE set; do not edit by hand.",
   "cases": [
     {
       "amount": 0.75,

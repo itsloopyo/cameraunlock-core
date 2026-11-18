@@ -8,7 +8,7 @@ using Xunit;
 namespace CameraUnlock.Core.Tests.Processing
 {
     /// <summary>
-    /// AccelaFilter against data/accela-cases.json, the outputs Hypari's Rust filter gives on the
+    /// AccelaFilter against data/accela-cases.json, the outputs Headstart's Rust filter gives on the
     /// same inputs, which the C++ port matches too.
     /// </summary>
     public class AccelaFilterTests

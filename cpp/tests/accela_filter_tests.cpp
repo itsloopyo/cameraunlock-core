@@ -1,4 +1,4 @@
-// AccelaFilter against data/accela-cases.json, the outputs Hypari's Rust filter gives on the
+// AccelaFilter against data/accela-cases.json, the outputs Headstart's Rust filter gives on the
 // same inputs, which the C# port matches too.
 
 #include <cameraunlock/processing/accela_filter.h>

@@ -15,7 +15,7 @@ constexpr double kDegPerRad = 180.0 / kPi;
 constexpr double kRadPerDeg = kPi / 180.0;
 
 // Single-precision trigonometry computed in double and rounded once, as the Rust filter
-// (hypari-webcam fmath.rs) does, so the ports agree to the last bit or close to it.
+// (headstart-webcam fmath.rs) does, so the ports agree to the last bit or close to it.
 float Sin(float x) { return static_cast<float>(std::sin(static_cast<double>(x))); }
 float Cos(float x) { return static_cast<float>(std::cos(static_cast<double>(x))); }
 float Acos(float x) { return static_cast<float>(std::acos(static_cast<double>(x))); }

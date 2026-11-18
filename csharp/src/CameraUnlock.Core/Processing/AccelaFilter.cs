@@ -27,7 +27,7 @@ namespace CameraUnlock.Core.Processing
     }
 
     /// <summary>
-    /// The Accela filter, ported from Hypari's webcam tracker (hypari-webcam smoothing.rs),
+    /// The Accela filter, ported from Headstart's webcam tracker (headstart-webcam smoothing.rs),
     /// which ports headcam-android's, itself a port of opentrack's filter-accela by Stanislaw
     /// Halik (ISC licence). Rotation is filtered as one quaternion step toward the input, the
     /// position per axis, each with its gain curve; one amount from 0 (lightest) to 1
@@ -39,7 +39,7 @@ namespace CameraUnlock.Core.Processing
     /// </summary>
     public sealed class AccelaFilter
     {
-        /// <summary>The amount Hypari and headcam-android ship.</summary>
+        /// <summary>The amount Headstart and headcam-android ship.</summary>
         public const double DefaultAmount = 0.75;
         /// <summary>A long gap is integrated as at most this much time.</summary>
         public const double MaxDt = 0.066;
@@ -130,7 +130,7 @@ namespace CameraUnlock.Core.Processing
         }
 
         // Single-precision trigonometry computed in double and rounded once, as the Rust filter
-        // (hypari-webcam fmath.rs) does.
+        // (headstart-webcam fmath.rs) does.
         private static float Sin(float x) { return (float)System.Math.Sin(x); }
         private static float Cos(float x) { return (float)System.Math.Cos(x); }
         private static float Acos(float x) { return (float)System.Math.Acos(x); }

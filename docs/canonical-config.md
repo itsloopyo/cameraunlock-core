@@ -466,7 +466,7 @@ canonical file it draws `MisplacedKey` and is not read. The older flat readers r
 
 `Accela` is how much the Accela filter smooths, 0 the least and 1 the most, default 0.75, and
 `AccelaPlayers` is the players whose tracker it smooths, a player list such as `2, 3`, empty for
-none. Hypari writes both into a game's file. Both are
+none. Headstart writes both into a game's file. Both are
 global, so each follows Defaults.ini unless the table marks it `PerGame()`. `AccelaPlayers` is
 the one concept on the player list codec (`"codec": "player_list"` in the schema); its field holds
 the list's canonical text, so `3,02` in a file reads as `3, 2`. Core's `HeadTrackingConfigTable`

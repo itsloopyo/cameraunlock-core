@@ -17,7 +17,7 @@ struct AccelaPose {
     double z = 0.0;
 };
 
-/// The Accela filter, ported from Hypari's webcam tracker (hypari-webcam `smoothing.rs`),
+/// The Accela filter, ported from Headstart's webcam tracker (headstart-webcam `smoothing.rs`),
 /// which ports headcam-android's, itself a port of opentrack's filter-accela by Stanislaw
 /// Halik (ISC licence). Rotation is filtered as one quaternion step toward the input, the
 /// position per axis, each with its gain curve; one amount from 0 (lightest) to 1
@@ -28,7 +28,7 @@ struct AccelaPose {
 /// handling: whatever feeds the filter has already judged the step.
 class AccelaFilter {
 public:
-    /// The amount Hypari and headcam-android ship.
+    /// The amount Headstart and headcam-android ship.
     static constexpr double kDefaultAmount = 0.75;
     /// A long gap is integrated as at most this much time.
     static constexpr double kMaxDt = 0.066;

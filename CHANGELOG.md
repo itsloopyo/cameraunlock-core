@@ -272,7 +272,7 @@ the game's un-zoomed FOV, and every other FOV the game draws at (a scope, the si
 cut scene) keeps its ratio to it. Vertical, because it is the axis that stays put at every aspect
 ratio: 60 vertical is about 91 horizontal at 16:9 and about 128 at 32:9. Each mod converts it to
 its engine's own axis with the aspect its projection divides by (owner request: a game FOV setting
-in Hypari, global with a per-game override). No aliases: the fleet's `FieldOfView` and
+in Headstart, global with a per-game override). No aliases: the fleet's `FieldOfView` and
 `FovOffset` rows are horizontal or relative in the mods that wrote them, so they stay in the
 unaliased list.
 
@@ -321,9 +321,9 @@ first-person key, marks the row `PerGame()` under an owner-approved `per_game` e
 ### Added - an Accela filter, and a per-packet Accela stage in the head tracking session
 
 - `AccelaFilter` in C++ (`cameraunlock/processing/accela_filter.h`) and C#
-  (`CameraUnlock.Core.Processing.AccelaFilter`), a port of Hypari's webcam filter, itself from
+  (`CameraUnlock.Core.Processing.AccelaFilter`), a port of Headstart's webcam filter, itself from
   opentrack's filter-accela. One amount from 0 to 1 sets every parameter. Its output on
-  `data/accela-cases.json` matches Hypari's Rust filter. Position is in centimetres, as the
+  `data/accela-cases.json` matches Headstart's Rust filter. Position is in centimetres, as the
   OpenTrack packet carries it; the deadzone and gains are tuned for that.
 - The head tracking session can run it once per new packet, between the receiver and the
   interpolators: `SetAccela`, `IsAccelaOn`, `SetAccelaAmount` and `GetAccelaAmount` in C++,
@@ -337,7 +337,7 @@ first-person key, marks the row `PerGame()` under an owner-approved `per_game` e
 `Accela` is a canonical concept: float, 0 to 1, default `0.75`, no aliases, global, directly after
 `RemoteSmoothing`. It is how much the Accela filter smooths. `AccelaPlayers` follows it: string,
 default empty, no aliases, global, the players whose tracker the filter smooths, such as `2, 3`.
-Hypari writes both into a game's file.
+Headstart writes both into a game's file.
 
 - A canonical string concept may now name `"codec": "player_list"` where it named only `hotkey`.
   The codec is `PlayerListCodec` in C++ (`cameraunlock/config/player_list_codec.h`) and C#, over

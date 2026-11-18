@@ -353,7 +353,7 @@ public:
                 }
                 m_accelaLastTimestamp = receiveTs;
                 // The receiver gives metres; the filter's position deadzone and gains are in
-                // the centimetres OpenTrack sends, as Hypari's webcam filter runs them.
+                // the centimetres OpenTrack sends, as Headstart's webcam filter runs them.
                 AccelaPose in;
                 in.yaw = rawYaw;
                 in.pitch = rawPitch;

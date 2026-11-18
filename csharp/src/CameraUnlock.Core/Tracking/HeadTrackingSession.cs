@@ -344,7 +344,7 @@ namespace CameraUnlock.Core.Tracking
                         }
                         _accelaLastTicks = ticks;
                         // The receiver gives metres; the filter's position deadzone and gains are
-                        // in the centimetres OpenTrack sends, as Hypari's webcam filter runs them.
+                        // in the centimetres OpenTrack sends, as Headstart's webcam filter runs them.
                         _accelaOutput = _accela.Filter(
                             new AccelaPose(rawPose.Yaw, rawPose.Pitch, rawPose.Roll,
                                 rawPosition.X * CmPerMetre, rawPosition.Y * CmPerMetre, rawPosition.Z * CmPerMetre),
