@@ -2,8 +2,6 @@
 #pragma warning disable CS8625
 
 using System;
-using System.Net;
-using System.Net.Sockets;
 using Xunit;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Processing;
@@ -14,15 +12,13 @@ namespace CameraUnlock.Core.Tests.Tracking
 {
     public class HeadTrackingSessionTests : IDisposable
     {
-        // One sender for every packet, as a tracker app sends: the receiver follows one source.
-        private static readonly UdpClient Sender = new UdpClient();
-
         private const float FrameTime = 1f / 60f;
 
         private readonly OpenTrackReceiver _receiver;
         private readonly TrackingProcessor _processor;
         private readonly PositionProcessor _positionProcessor;
         private readonly HeadTrackingSession _session;
+        private TrackerStream? _tracker;
 
         public HeadTrackingSessionTests()
         {
@@ -34,6 +30,7 @@ namespace CameraUnlock.Core.Tests.Tracking
 
         public void Dispose()
         {
+            _tracker?.Dispose();
             _receiver.Dispose();
         }
 
@@ -150,7 +147,8 @@ namespace CameraUnlock.Core.Tests.Tracking
             var heldYaw = _session.Rotation.Yaw;
 
             // Tracking loss: no packet arrives for longer than the freshness window.
-            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the last packet");
+            _tracker!.Pause();
+            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the tracker stopped sending");
 
             bool result = _session.Update(FrameTime);
 
@@ -454,7 +452,8 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             _session.Reset();
             // Wait out freshness so Update has neither fresh data nor a held pose.
-            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the last packet");
+            _tracker!.Pause();
+            Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the tracker stopped sending");
 
             bool result = _session.Update(FrameTime);
 
@@ -465,6 +464,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             double x = 0.0, double y = 0.0, double z = 0.0)
         {
             Assert.True(_receiver.Start(0), "Failed to bind a UDP port");
+            _tracker = new TrackerStream(_receiver.BoundPort);
             SendTestPacket(yaw, pitch, roll, x, y, z);
             Eventually.True(() => _receiver.GetRawPose().TimestampTicks != 0, "the first packet sent was never published");
         }
@@ -499,7 +499,7 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         /// <summary>
-        /// Sends a test OpenTrack packet (48 bytes, 6 doubles: x, y, z, yaw, pitch, roll).
+        /// Queues a test OpenTrack packet (48 bytes, 6 doubles: x, y, z, yaw, pitch, roll) on the tracker stream.
         /// </summary>
         private void SendTestPacket(double yaw, double pitch, double roll,
             double x = 0.0, double y = 0.0, double z = 0.0)
@@ -513,7 +513,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver.BoundPort));
+            _tracker!.Send(packet);
         }
     }
 }

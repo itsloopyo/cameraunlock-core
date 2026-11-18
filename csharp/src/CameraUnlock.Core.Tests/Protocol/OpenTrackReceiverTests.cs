@@ -258,9 +258,12 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = new OpenTrackReceiver();
             _receiver.Start(0);
 
-            SendTestPacket(10.0, 20.0, 30.0);
-
-            Eventually.True(() => _receiver.IsDataFresh(), "IsDataFresh did not go true after a packet was sent");
+            // Streamed, so the data is still fresh when this thread looks, however late.
+            using (var tracker = new TrackerStream(_receiver.BoundPort))
+            {
+                tracker.Send(BuildTestPacket(10.0, 20.0, 30.0));
+                Eventually.True(() => _receiver.IsDataFresh(), "IsDataFresh did not go true while a tracker was streaming");
+            }
         }
 
         [Fact]
@@ -384,6 +387,12 @@ namespace CameraUnlock.Core.Tests.Protocol
         /// </summary>
         private void SendTestPacket(double yaw, double pitch, double roll)
         {
+            byte[] packet = BuildTestPacket(yaw, pitch, roll);
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver!.BoundPort));
+        }
+
+        private static byte[] BuildTestPacket(double yaw, double pitch, double roll)
+        {
             byte[] packet = new byte[48];
 
             // Position (not used, set to 0)
@@ -396,7 +405,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _receiver!.BoundPort));
+            return packet;
         }
     }
 }

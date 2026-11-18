@@ -2,8 +2,6 @@
 #pragma warning disable CS8625
 
 using System;
-using System.Net;
-using System.Net.Sockets;
 using Xunit;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Tracking;
@@ -12,12 +10,10 @@ namespace CameraUnlock.Core.Tests.Tracking
 {
     public class MultiPlayerTrackingManagerTests : IDisposable
     {
-        // One sender for every packet, as a tracker app sends: the receiver follows one source.
-        private static readonly UdpClient Sender = new UdpClient();
-
         private const float FrameTime = 1f / 60f;
 
         private readonly MultiPlayerTrackingManager _manager;
+        private TrackerStream? _tracker;
 
         public MultiPlayerTrackingManagerTests()
         {
@@ -26,6 +22,7 @@ namespace CameraUnlock.Core.Tests.Tracking
 
         public void Dispose()
         {
+            _tracker?.Dispose();
             _manager.Dispose();
         }
 
@@ -118,7 +115,7 @@ namespace CameraUnlock.Core.Tests.Tracking
         public void Start_OnlyPlayerOneSendsData_OnlyPlayerOneHasPose()
         {
             _manager.Start();
-            SendTestPacketAndWait(0, yaw: 30.0, pitch: 10.0, roll: 0.0);
+            StartPlayerOneTracker(30.0, 10.0, 0.0);
 
             _manager.Update(FrameTime);
 
@@ -135,7 +132,7 @@ namespace CameraUnlock.Core.Tests.Tracking
         public void Reset_ClearsPoses()
         {
             _manager.Start();
-            SendTestPacketAndWait(0, yaw: 30.0, pitch: 0.0, roll: 0.0);
+            StartPlayerOneTracker(30.0, 0.0, 0.0);
             _manager.Update(FrameTime);
 
             _manager.Reset();
@@ -148,7 +145,7 @@ namespace CameraUnlock.Core.Tests.Tracking
         {
             _manager.ApplySmoothing(0f, 0f);
             _manager.Start();
-            SendTestPacketAndWait(0, yaw: 20.0, pitch: 0.0, roll: 0.0);
+            StartPlayerOneTracker(20.0, 0.0, 0.0);
 
             // Settle smoothing at sensitivity 1, capture yaw, then double sensitivity.
             for (int i = 0; i < 60; i++) _manager.Update(FrameTime);
@@ -157,7 +154,6 @@ namespace CameraUnlock.Core.Tests.Tracking
                 $"Baseline never reached the pose, got {baseYaw} - the ratio check below would pass on 0 == 2*0");
 
             _manager.ApplySensitivity(new SensitivitySettings(2f, 2f, 2f));
-            SendTestPacketAndWait(0, yaw: 20.0, pitch: 0.0, roll: 0.0);
             for (int i = 0; i < 60; i++) _manager.Update(FrameTime);
             float scaledYaw = _manager.GetSession(0).Rotation.Yaw;
 
@@ -272,7 +268,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             // report a local connection; player 2, which never received anything,
             // must not have been touched by player 1's flag.
             _manager.Start();
-            SendTestPacketAndWait(0, yaw: 5.0, pitch: 0.0, roll: 0.0);
+            StartPlayerOneTracker(5.0, 0.0, 0.0);
             _manager.Update(FrameTime);
 
             Assert.True(_manager.IsReceiving(0));
@@ -289,30 +285,21 @@ namespace CameraUnlock.Core.Tests.Tracking
             Assert.Throws<ObjectDisposedException>(() => manager.Start());
         }
 
-        private void SendTestPacketAndWait(int playerIndex, double yaw, double pitch, double roll)
-        {
-            long before = _manager.GetReceiver(playerIndex).GetRawPose().TimestampTicks;
-            SendTestPacket(playerIndex, yaw, pitch, roll);
-            // IsReceiving goes true just after the pose is published, so it is waited for too.
-            Eventually.True(() => _manager.GetReceiver(playerIndex).GetRawPose().TimestampTicks != before && _manager.IsReceiving(playerIndex),
-                $"player {playerIndex + 1}'s packet was never published");
-        }
-
-        /// <summary>
-        /// Sends a test OpenTrack packet (48 bytes, 6 doubles: x, y, z, yaw, pitch, roll).
-        /// </summary>
-        private void SendTestPacket(int playerIndex, double yaw, double pitch, double roll)
+        // Player 1's tracker streams the pose, so the data stays fresh through the Update
+        // runs however long the test thread is held up. Only the first packet of the
+        // stream moves the timestamp from zero, so the wait cannot be met by another.
+        private void StartPlayerOneTracker(double yaw, double pitch, double roll)
         {
             byte[] packet = new byte[48];
-
-            Array.Copy(BitConverter.GetBytes(0.0), 0, packet, 0, 8);
-            Array.Copy(BitConverter.GetBytes(0.0), 0, packet, 8, 8);
-            Array.Copy(BitConverter.GetBytes(0.0), 0, packet, 16, 8);
             Array.Copy(BitConverter.GetBytes(yaw), 0, packet, 24, 8);
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, _manager.GetReceiver(playerIndex).BoundPort));
+            _tracker = new TrackerStream(_manager.GetReceiver(0).BoundPort);
+            _tracker.Send(packet);
+            // IsReceiving goes true just after the pose is published, so it is waited for too.
+            Eventually.True(() => _manager.GetReceiver(0).GetRawPose().TimestampTicks != 0 && _manager.IsReceiving(0),
+                "player 1's packet was never published");
         }
     }
 }

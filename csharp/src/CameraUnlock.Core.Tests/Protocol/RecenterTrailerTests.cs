@@ -15,9 +15,11 @@ namespace CameraUnlock.Core.Tests.Protocol
         private static readonly UdpClient Sender = new UdpClient();
 
         private OpenTrackReceiver? _receiver;
+        private TrackerStream? _tracker;
 
         public void Dispose()
         {
+            _tracker?.Dispose();
             _receiver?.Dispose();
         }
 
@@ -127,11 +129,12 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
-            SendAndWait(BuildPacket(45, 30, 15));
+            StreamAndWait(45, 30, 15);
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             float before = session.Rotation.Yaw;
 
-            SendAndWait(BuildPacket(45, 30, 15, recenterCounter: 1));
+            // Moved 1 cm so its arrival can be seen; the rotation is the same.
+            StreamAndWait(45, 30, 15, recenterCounter: 1, xCm: 1.0);
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
 
             Assert.Equal(before, session.Rotation.Yaw, precision: 2);
@@ -145,13 +148,13 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
-            SendAndWait(BuildPacket(40, 0, 0));
+            StreamAndWait(40, 0, 0);
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             session.Recenter();
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             Assert.True(System.Math.Abs(session.Rotation.Yaw) < 1f);
 
-            SendAndWait(BuildPacket(60, 0, 0, recenterCounter: 1));
+            StreamAndWait(60, 0, 0, recenterCounter: 1);
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
 
             Assert.True(System.Math.Abs(session.Rotation.Yaw - 20f) < 1f,
@@ -170,7 +173,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             var logs = new System.Collections.Generic.List<string>();
             session.Log = logs.Add;
 
-            SendAndWait(BuildPacket(10, 5, 0));
+            StreamAndWait(10, 5, 0);
             for (int i = 0; i < 5; i++)
             {
                 session.Update(1f / 60f);
@@ -178,6 +181,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.Single(logs, "Auto-recentered on tracker connection");
 
             // Face lost: the tracker stops sending and data goes stale.
+            _tracker!.Pause();
             Eventually.True(() => !_receiver.IsDataFresh(), "the data never went stale after the tracker stopped sending");
             session.Update(1f / 60f);
             Assert.True(session.IsHolding);
@@ -185,8 +189,8 @@ namespace CameraUnlock.Core.Tests.Protocol
             // Face re-acquired mid-motion: resuming packets must not re-capture
             // the center - that decision belongs to the tracker app (trailer).
             // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
-            Send(BuildPacket(39.95, 20, 10));
-            SendAndWait(BuildPacket(40, 20, 10));
+            _tracker.Send(BuildPacket(39.95, 20, 10));
+            StreamAndWait(40, 20, 10);
             for (int i = 0; i < 5; i++)
             {
                 session.Update(1f / 60f);
@@ -239,6 +243,21 @@ namespace CameraUnlock.Core.Tests.Protocol
             long before = _receiver!.GetRawPose().TimestampTicks;
             Send(packet);
             Eventually.True(() => _receiver.GetRawPose().TimestampTicks != before, "the packet sent was never published");
+        }
+
+        // For the session tests, whose Update runs need the data kept fresh as a tracker
+        // keeps it. Waits on the values, as a repeat of the previous packet also moves
+        // the receiver's timestamp.
+        private void StreamAndWait(double yaw, double pitch, double roll, byte? recenterCounter = null, double xCm = 0.0)
+        {
+            _tracker ??= new TrackerStream(_receiver!.BoundPort);
+            _tracker.Send(BuildPacket(yaw, pitch, roll, recenterCounter, x: xCm));
+            Eventually.True(() =>
+            {
+                TrackingPose pose = _receiver!.GetRawPose();
+                return pose.Yaw == (float)yaw && pose.Pitch == (float)pitch && pose.Roll == (float)roll &&
+                    System.Math.Abs(_receiver.GetLatestPosition().X - (float)xCm / 100f) < 0.0001f;
+            }, () => $"the receiver never reported ({yaw}, {pitch}, {roll}) at x {xCm} cm, last saw {_receiver!.GetRawPose()}");
         }
 
         private static byte[] BuildPacket(double yaw, double pitch, double roll, byte? recenterCounter = null,
