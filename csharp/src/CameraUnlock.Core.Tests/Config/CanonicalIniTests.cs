@@ -99,30 +99,68 @@ namespace CameraUnlock.Core.Tests.Config
         [Fact]
         public void ManyKeysAndSectionsAreReadInLinearTime()
         {
-            var keys = new StringBuilder("[A]\r\n");
-            var sections = new StringBuilder();
-            for (int i = 0; i < 100000; i++)
-            {
-                keys.Append('k').Append(i).Append("=1\r\n");
-                sections.Append("[s").Append(i).Append("]\r\n");
-            }
-            keys.Append("K0=2\r\n");
-            sections.Append("[S0]\r\nx=1\r\n");
-
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            CanonicalIni manyKeys = CanonicalIni.Parse(Bytes(keys.ToString()));
-            CanonicalIni manySections = CanonicalIni.Parse(Bytes(sections.ToString()));
-            stopwatch.Stop();
-
+            CanonicalIni manyKeys = CanonicalIni.Parse(Bytes(ManyKeys(16000)));
             Assert.Single(manyKeys.Sections);
-            Assert.Equal(100000, manyKeys.Sections[0].Values.Count);
+            Assert.Equal(16000, manyKeys.Sections[0].Values.Count);
             CanonicalValue? repeated = manyKeys.Find("a", "k0");
             Assert.NotNull(repeated);
             Assert.Equal("2", Text(repeated!.Value));
             Assert.Equal(new[] { 2 }, repeated.EarlierLines);
-            Assert.Equal(100000, manySections.Sections.Count);
+
+            CanonicalIni manySections = CanonicalIni.Parse(Bytes(ManySections(16000)));
+            Assert.Equal(16000, manySections.Sections.Count);
             Assert.NotNull(manySections.Find("s0", "x"));
-            Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 2000);
+
+            AssertParseGrowsLinearly(ManyKeys, "keys in one section");
+            AssertParseGrowsLinearly(ManySections, "sections");
+        }
+
+        // Times a file and one GrowthFactor times its size on the same run, so the speed of the
+        // machine cancels out: reading linearly takes about GrowthFactor times as long, and
+        // comparing every line with every earlier one GrowthFactor squared. The fastest of a few
+        // parses is kept, so a stall in one of them is not counted. The two sizes take turns, so
+        // the JIT moving the parser to optimised code part way through speeds both up alike.
+        private const int GrowthFactor = 8;
+
+        private static void AssertParseGrowsLinearly(Func<int, string> build, string what)
+        {
+            const int small = 2000;
+            byte[] smallFile = Bytes(build(small));
+            byte[] largeFile = Bytes(build(small * GrowthFactor));
+
+            long fastestSmall = long.MaxValue;
+            long fastestLarge = long.MaxValue;
+            for (int i = 0; i < 8; i++)
+            {
+                fastestSmall = System.Math.Min(fastestSmall, ParseTicks(smallFile));
+                fastestLarge = System.Math.Min(fastestLarge, ParseTicks(largeFile));
+            }
+
+            double ratio = (double)fastestLarge / fastestSmall;
+            Assert.True(ratio < GrowthFactor * 3,
+                $"reading {GrowthFactor} times as many {what} took {ratio:F1} times as long;"
+                + $" linear is about {GrowthFactor}, comparing every line with every earlier one about {GrowthFactor * GrowthFactor}");
+        }
+
+        private static long ParseTicks(byte[] file)
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            CanonicalIni.Parse(file);
+            return stopwatch.ElapsedTicks;
+        }
+
+        private static string ManyKeys(int count)
+        {
+            var text = new StringBuilder("[A]\r\n");
+            for (int i = 0; i < count; i++) text.Append('k').Append(i).Append("=1\r\n");
+            return text.Append("K0=2\r\n").ToString();
+        }
+
+        private static string ManySections(int count)
+        {
+            var text = new StringBuilder();
+            for (int i = 0; i < count; i++) text.Append("[s").Append(i).Append("]\r\n");
+            return text.Append("[S0]\r\nx=1\r\n").ToString();
         }
 
         [Fact]
