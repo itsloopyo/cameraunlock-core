@@ -40,6 +40,7 @@ add_executable(cameraunlock_tests
     quat_helpers_tests.cpp
     head_bones_tests.cpp
     follow_turn_tests.cpp
+    fov_axis_tests.cpp
     tracking_mode_tests.cpp
     ini_editor_tests.cpp
     checked_file_writer_tests.cpp
