@@ -2,10 +2,10 @@
 //
 // The point of these is not that a good address reads back - it is that a bad
 // one comes back false instead of taking the player's session with it, and that
-// the guard is not a blanket swallow. Only EXCEPTION_ACCESS_VIOLATION is
-// handled; a breakpoint, a stack overflow or a C++ exception travelling through
-// has to keep unwinding to whoever owns it, and AccessViolationFilter is what
-// says so.
+// the guard is not a blanket swallow. Only an access violation and a guard
+// page hit (with the guard put back) are handled; a breakpoint, a stack
+// overflow or a C++ exception travelling through has to keep unwinding to
+// whoever owns it, and MemoryFaultFilter is what says so.
 
 #include <iostream>
 
@@ -187,6 +187,8 @@ void TestMemoryFaultFilter() {
           "a stack overflow keeps unwinding");
     Check(MemoryFaultFilter(Fault(record, pointers, EXCEPTION_INT_DIVIDE_BY_ZERO)) == EXCEPTION_CONTINUE_SEARCH,
           "a divide by zero keeps unwinding");
+    Check(MemoryFaultFilter(Fault(record, pointers, STATUS_GUARD_PAGE_VIOLATION)) == EXCEPTION_EXECUTE_HANDLER,
+          "a guard page hit with no address (nothing to put back) is still a fault");
 }
 
 bool HasGuard(const void* at) {

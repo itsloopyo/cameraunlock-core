@@ -59,15 +59,16 @@ inline int AccessViolationFilter(DWORD code) {
 inline int MemoryFaultFilter(const EXCEPTION_POINTERS* e) {
     const DWORD code = e->ExceptionRecord->ExceptionCode;
     if (code == STATUS_GUARD_PAGE_VIOLATION) {
-        // A guard that cannot be put back is left to crash where it was hit,
-        // not later in the owning thread's stack growth.
-        if (e->ExceptionRecord->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
-        const auto* at = reinterpret_cast<const void*>(e->ExceptionRecord->ExceptionInformation[1]);
-        MEMORY_BASIC_INFORMATION mbi;
-        DWORD was = 0;
-        if (!VirtualQuery(at, &mbi, sizeof mbi) ||
-            !VirtualProtect(const_cast<void*>(at), 1, mbi.Protect | PAGE_GUARD, &was))
-            return EXCEPTION_CONTINUE_SEARCH;
+        // Where the guard cannot be put back the page was freed or decommitted
+        // after the fault, so there is no stack left to grow and the read is
+        // still just a fault.
+        if (e->ExceptionRecord->NumberParameters >= 2) {
+            const auto* at = reinterpret_cast<const void*>(e->ExceptionRecord->ExceptionInformation[1]);
+            MEMORY_BASIC_INFORMATION mbi;
+            DWORD was = 0;
+            if (VirtualQuery(at, &mbi, sizeof mbi))
+                VirtualProtect(const_cast<void*>(at), 1, mbi.Protect | PAGE_GUARD, &was);
+        }
         return EXCEPTION_EXECUTE_HANDLER;
     }
     return AccessViolationFilter(code);
