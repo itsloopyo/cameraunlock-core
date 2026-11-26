@@ -20,7 +20,6 @@ using memory::PlausiblePtr;
 namespace {
 
 constexpr std::int32_t kMinObjects = 0x400;
-constexpr std::int32_t kMaxObjects = 0x4000000;
 // How many of an array's first slots are checked for objects that name their own slot.
 constexpr std::int32_t kProbeSlots = 512;
 // The longest chain of outers a path name is made from.

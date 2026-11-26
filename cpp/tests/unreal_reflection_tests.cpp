@@ -666,6 +666,22 @@ void TestGeneration(const Generation& g) {
     }
 }
 
+// A torn object count is walked no further than kMaxObjects.
+void TestTornObjectCount() {
+    std::cout << "  -- a torn object count\n";
+    World w(kUE418);
+    const ReflectionDiscoveryResult r = DiscoverReflection(w.arena, w.arena.module, w.arena);
+    CHECK(r.found.has_value());
+    if (!r.found) return;
+    w.Truncate(0x7FFFFFFF);
+    std::int64_t asked = 0;
+    r.found->objects.ForEach([&](std::uintptr_t) {
+        ++asked;
+        return false;
+    });
+    CHECK(asked > 0 && asked <= kMaxObjects);
+}
+
 // The header is refused rather than guessed: while the engine has made few
 // class defaults it is asked for again, and a flag bit that a live object
 // shares with the class defaults is no RF_ClassDefaultObject.
@@ -914,6 +930,7 @@ int RunUnrealReflectionTests() {
     TestNetFunctionFlags();
     TestScriptFunction();
     TestCrosshairMoverNeedsUmg();
+    TestTornObjectCount();
     TestObjectAt();
     std::cout << (g_failures ? "  [FAIL] " : "  [PASS] ") << "Unreal reflection, " << g_failures << " failed\n";
     return g_failures;

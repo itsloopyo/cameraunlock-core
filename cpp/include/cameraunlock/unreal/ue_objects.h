@@ -21,6 +21,10 @@ namespace cameraunlock::unreal {
 
 inline constexpr std::size_t kChunkElements = 65536;
 
+// The most objects an array is taken to hold: a count above it is torn or not
+// an object count, and a walk stops there.
+inline constexpr std::int32_t kMaxObjects = 0x4000000;
+
 struct ObjectArray {
     bool chunked = true;          // FChunkedFixedUObjectArray (4.20 on) or FFixedUObjectArray
     std::uintptr_t objects = 0;   // address of the ObjObjects member
@@ -78,7 +82,8 @@ struct Objects {
 
     template <class Fn>
     void ForEach(Fn&& fn) const {
-        const std::int32_t n = ObjectCount(*mem, array);
+        const std::int32_t count = ObjectCount(*mem, array);
+        const std::int32_t n = count < kMaxObjects ? count : kMaxObjects;
         for (std::int32_t i = 0; i < n; ++i) {
             const std::uintptr_t obj = ObjectAt(*mem, array, i);
             if (obj && fn(obj)) return;
