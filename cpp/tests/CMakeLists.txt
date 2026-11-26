@@ -62,6 +62,7 @@ add_executable(cameraunlock_tests
     legacy_import_tests.cpp
     ini_mutations_tests.cpp
     config_owner_tests.cpp
+    config_watcher_tests.cpp
     canonical_config_example_tests.cpp
     getasynckeystate_probe.cpp
     defaults_ini_probe.cpp

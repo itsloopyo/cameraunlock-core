@@ -68,6 +68,7 @@ int RunDefaultsLocationTests();
 int RunPreferencesFixtureTests();
 int RunCheckedFileWriterInterruptChild(const char* step);
 int RunConfigOwnerTests();
+int RunConfigWatcherTests();
 int RunConfigOwnerInterruptChild(const char* step);
 int RunGetAsyncKeyStateProbe();
 int RunDefaultsIniProbe(int argc, char** argv);
@@ -161,6 +162,7 @@ int main(int argc, char** argv) {
     failures += RunLegacyImportTests();
     failures += RunIniMutationsTests();
     failures += RunConfigOwnerTests();
+    failures += RunConfigWatcherTests();
     failures += RunCanonicalConfigExampleTests();
 #ifdef CAMERAUNLOCK_TESTS_DISCOVERY
     failures += RunRttiVtableTests();

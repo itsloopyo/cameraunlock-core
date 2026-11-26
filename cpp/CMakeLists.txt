@@ -86,7 +86,7 @@ endif()
 # from isolated input, so a release build, which never compiles that, links none of it.
 if(WIN32)
     target_link_libraries(cameraunlock PUBLIC ws2_32)
-    target_sources(cameraunlock PRIVATE src/dev/game_link.cpp)
+    target_sources(cameraunlock PRIVATE src/dev/game_link.cpp src/config/config_watcher.cpp)
 endif()
 
 # Reads of this process through VirtualQuery and SEH, and exes mapped into it. Windows only, and not in

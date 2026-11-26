@@ -56,6 +56,9 @@
 #include "cameraunlock/config/config_key_schema.g.h"
 #include "cameraunlock/config/config_owner.h"
 #include "cameraunlock/config/config_table.h"
+#ifdef _WIN32
+#include "cameraunlock/config/config_watcher.h"
+#endif
 #include "cameraunlock/config/defaults_file.h"
 #include "cameraunlock/config/defaults_ini.h"
 #include "cameraunlock/config/defaults_location.h"
@@ -175,4 +178,5 @@ template std::string cameraunlock::config::detail::RenderCanonicalMigration<came
 #ifdef _WIN32
 template class cameraunlock::config::ConfigOwner<cameraunlock::HeadTrackingConfig>;
 template class cameraunlock::config::ConfigOwner<cameraunlock::reframework::PluginConfig>;
+template class cameraunlock::config::ConfigWatcher<cameraunlock::HeadTrackingConfig>;
 #endif
