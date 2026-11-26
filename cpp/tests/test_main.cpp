@@ -41,6 +41,9 @@ int RunGameInputStateTests();
 #ifdef CAMERAUNLOCK_TESTS_GAME_LINK
 int RunGameLinkTests();
 #endif
+#ifdef CAMERAUNLOCK_TESTS_HEAP_EXE
+int RunHeapExeTests();
+#endif
 int RunLeanLineSweepTests();
 int RunRigLeanTests();
 int RunZoomCompensationTests();
@@ -128,6 +131,9 @@ int main(int argc, char** argv) {
     failures += RunGameInputStateTests();
 #ifdef CAMERAUNLOCK_TESTS_GAME_LINK
     failures += RunGameLinkTests();
+#endif
+#ifdef CAMERAUNLOCK_TESTS_HEAP_EXE
+    failures += RunHeapExeTests();
 #endif
     failures += RunLeanLineSweepTests();
     failures += RunRigLeanTests();

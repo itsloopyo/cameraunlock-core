@@ -109,6 +109,8 @@
 #include "cameraunlock/memory/safe_memory.h"
 #include "cameraunlock/memory/x86_decode.h"
 #include "cameraunlock/memory/process_memory.h"
+#include "cameraunlock/memory/heap_search.h"
+#include "cameraunlock/memory/exe_mapper.h"
 #endif
 #include "cameraunlock/os/game_window.h"
 #include "cameraunlock/os/module_paths.h"

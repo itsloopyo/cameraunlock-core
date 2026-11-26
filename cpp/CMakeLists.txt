@@ -88,10 +88,10 @@ if(WIN32)
     target_sources(cameraunlock PRIVATE src/dev/game_link.cpp)
 endif()
 
-# Reads of this process through VirtualQuery and SEH. Windows only, and not in
+# Reads of this process through VirtualQuery and SEH, and exes mapped into it. Windows only, and not in
 # scripts/build-wasm.mjs's list, like the game link above.
 if(WIN32)
-    target_sources(cameraunlock PRIVATE src/memory/process_memory.cpp)
+    target_sources(cameraunlock PRIVATE src/memory/process_memory.cpp src/memory/heap_search.cpp src/memory/exe_mapper.cpp)
 endif()
 
 # Optional hook manager module (requires MinHook)
