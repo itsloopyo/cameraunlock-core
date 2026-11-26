@@ -4,6 +4,7 @@
 #ifdef _WIN32
 #include <Windows.h>
 #include <Psapi.h>
+#include <cameraunlock/memory/safe_memory.h>
 #endif
 
 #include <string>
@@ -49,7 +50,7 @@ const RTTICompleteObjectLocator* ScanRunForCol(uintptr_t runBase, size_t runSize
             return col;
         }
 #ifdef _WIN32
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
     }
 #endif
     return nullptr;
@@ -66,7 +67,7 @@ uintptr_t ScanRunForColPointer(uintptr_t runBase, size_t runSize, uintptr_t colA
             }
         }
 #ifdef _WIN32
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
     }
 #endif
     return 0;
@@ -106,7 +107,7 @@ int ReadVfuncs(uintptr_t vtable, uintptr_t codeStart, uintptr_t codeEnd,
             count = v + 1;
         }
 #ifdef _WIN32
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
     }
 #endif
     return count;

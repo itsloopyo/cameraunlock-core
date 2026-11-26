@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #include <Psapi.h>
+#include <cameraunlock/memory/safe_memory.h>
 #pragma comment(lib, "psapi.lib")
 #endif
 
@@ -98,7 +99,7 @@ void* ScanRunMask(const uint8_t* start, size_t lastIndex,
             }
         }
 #ifdef _WIN32
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
     }
 #endif
     return nullptr;
@@ -115,7 +116,7 @@ const uint8_t* ScanRunBytes(const uint8_t* start, size_t lastIndex,
             }
         }
 #ifdef _WIN32
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
     }
 #endif
     return nullptr;

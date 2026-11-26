@@ -28,7 +28,7 @@ void ReadManagedString(void* stringPtr, char* out, size_t outSize) {
             out[i] = (c >= 32 && c < 127) ? (char)c : '?';
         }
         out[strLen] = 0;
-    } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
+    } __except(cameraunlock::memory::MemoryFaultFilter(GetExceptionInformation())) {
         out[0] = 0;
     }
 }

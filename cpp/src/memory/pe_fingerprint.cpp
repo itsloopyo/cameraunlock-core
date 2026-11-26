@@ -8,6 +8,8 @@
 #endif
 #include <windows.h>
 
+#include <cameraunlock/memory/safe_memory.h>
+
 namespace cameraunlock::memory {
 
 FingerprintMismatch ClassifyMismatch(const PeFingerprint& running,
@@ -40,7 +42,7 @@ bool ReadPeFingerprint(void* moduleBase, PeFingerprint& out) {
         out.SizeOfImage   = *reinterpret_cast<const std::uint32_t*>(opt + 0x38);
         out.CheckSum      = *reinterpret_cast<const std::uint32_t*>(opt + 0x40);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
         return false;
     }
 }

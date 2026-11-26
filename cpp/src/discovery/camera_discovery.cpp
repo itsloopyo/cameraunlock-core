@@ -29,13 +29,13 @@ namespace {
 // function that needs C++ object unwinding).
 // ClassifyMemoryRegion walks the region itself, so this cannot go through
 // SafeRead - it is a call, not a dereference. The filter is still narrowed to
-// an access violation: a stack overflow or a C++ exception raised inside the
+// a memory fault: a stack overflow or a C++ exception raised inside the
 // classifier belongs to whoever owns it.
 bool SafeClassify(uintptr_t addr, size_t size, LayoutReport& out) {
     __try {
         out = ClassifyMemoryRegion(reinterpret_cast<const void*>(addr), size);
         return true;
-    } __except (memory::AccessViolationFilter(GetExceptionCode())) {
+    } __except (memory::MemoryFaultFilter(GetExceptionInformation())) {
         return false;
     }
 }
