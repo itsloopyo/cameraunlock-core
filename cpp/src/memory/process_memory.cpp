@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-CameraUnlock-Core
 #include <cameraunlock/memory/process_memory.h>
+#include <cameraunlock/memory/safe_memory.h>
 
 #include <Windows.h>
 
@@ -12,33 +13,6 @@
 
 namespace cameraunlock::memory {
 namespace {
-
-// A guard page can turn up under a cached region (a new thread's stack where a
-// freed block was). Touching it clears the guard, so the filter puts it back
-// before the read is failed: without it the owning thread's stack could not grow.
-// The same rule as safe_memory.h's filter once that one handles guard pages.
-int ReadFaultFilter(const EXCEPTION_POINTERS* e) {
-    const DWORD code = e->ExceptionRecord->ExceptionCode;
-    if (code == STATUS_GUARD_PAGE_VIOLATION) {
-        const auto* at = reinterpret_cast<const void*>(e->ExceptionRecord->ExceptionInformation[1]);
-        MEMORY_BASIC_INFORMATION mbi;
-        DWORD was = 0;
-        if (VirtualQuery(at, &mbi, sizeof mbi))
-            VirtualProtect(const_cast<void*>(at), 1, mbi.Protect | PAGE_GUARD, &was);
-        return EXCEPTION_EXECUTE_HANDLER;
-    }
-    return code == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
-}
-
-// No C++ objects in this frame: __try cannot share a function with unwinding.
-bool GuardedCopy(void* out, const void* from, std::size_t size) {
-    __try {
-        std::memcpy(out, from, size);
-        return true;
-    } __except (ReadFaultFilter(GetExceptionInformation())) {
-        return false;
-    }
-}
 
 #if defined(_WIN64)
 constexpr std::uint8_t kUnwindChained = 0x4;
@@ -118,7 +92,7 @@ void SplitByPages(const Range& range, std::vector<Range>& writable, std::vector<
 bool ProcessMemory::Read(std::uintptr_t addr, void* out, std::size_t size) const {
     if (addr < 0x10000 || addr + size < addr) return false;
     if (!Readable(addr, addr + size)) return false;
-    return GuardedCopy(out, reinterpret_cast<const void*>(addr), size);
+    return GuardedMemcpy(out, reinterpret_cast<const void*>(addr), size);
 }
 
 LoadedModule::LoadedModule(std::uintptr_t base, Pages pages) {
