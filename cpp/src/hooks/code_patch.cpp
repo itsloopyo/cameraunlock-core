@@ -28,7 +28,7 @@ struct Stored {
 };
 
 // The `size` bytes at `at` replaced in one compare-exchange of the aligned block around them, against the block as it
-// is read here with `expected` spliced in, or as it is read when `expected` is null.
+// is read here with `expected` spliced in.
 Stored StoreInBlock(std::uintptr_t at, const void* expected, const void* replacement, std::size_t size, const std::string& unwritable) {
     const std::uintptr_t start = at & ~(kBlock - 1);
     void* block = reinterpret_cast<void*>(start);
@@ -39,7 +39,7 @@ Stored StoreInBlock(std::uintptr_t at, const void* expected, const void* replace
     if (!VirtualProtect(block, kBlock, PAGE_EXECUTE_READWRITE, &old)) throw std::runtime_error(unwritable);
     alignas(16) std::uint8_t before[kBlock];
     std::memcpy(before, block, kBlock);
-    if (expected) std::memcpy(before + (at - start), expected, size);
+    std::memcpy(before + (at - start), expected, size);
     alignas(16) std::uint8_t after[kBlock];
     std::memcpy(after, before, kBlock);
     std::memcpy(after + (at - start), replacement, size);
@@ -121,12 +121,12 @@ Redirect PrepareRedirect(std::uintptr_t site, void* to, std::uintptr_t expected,
     FlushInstructionCache(GetCurrentProcess(), stub, kJumpBytes);
     const std::int64_t delta = reinterpret_cast<std::intptr_t>(stub) - static_cast<std::intptr_t>(site + 5);
     if (delta < INT32_MIN || delta > INT32_MAX) throw std::runtime_error(name + "'s detour is out of a call's reach");
-    return {call, static_cast<std::int32_t>(delta)};
+    return {call, static_cast<std::int32_t>(delta), rel};
 #else
     if (!InOneBlock(site + 1, 4))
         throw std::runtime_error("the displacement of the call to " + name + " crosses an 8-byte boundary, so it cannot be rewritten in one store");
     // A rel32 wraps around a 32-bit address space, so every target is in reach.
-    return {call, static_cast<std::int32_t>(reinterpret_cast<std::uintptr_t>(to) - (site + 5))};
+    return {call, static_cast<std::int32_t>(reinterpret_cast<std::uintptr_t>(to) - (site + 5)), rel};
 #endif
 }
 
@@ -134,8 +134,9 @@ void ApplyRedirect(const Redirect& r, const char* what) {
     const std::string name(what);
     const std::uintptr_t at = reinterpret_cast<std::uintptr_t>(r.call + 1);
     if (!InOneBlock(at, 4)) throw std::invalid_argument("the call to " + name + " was not prepared by PrepareRedirect");
-    const Stored s = StoreInBlock(at, nullptr, &r.rel, 4, "the call to " + name + " could not be made writable");
-    if (!s.swapped) throw std::runtime_error("the call to " + name + " changed while it was redirected");
+    const Stored s = StoreInBlock(at, &r.was, &r.rel, 4, "the call to " + name + " could not be made writable");
+    if (!s.swapped)
+        throw std::runtime_error("the call to " + name + " no longer holds the displacement discovery read, or changed while it was redirected");
     if (!s.protectedAgain) throw std::runtime_error("the call to " + name + " could not be made read-only again");
     FlushInstructionCache(GetCurrentProcess(), r.call, 5);
 }
@@ -143,6 +144,7 @@ void ApplyRedirect(const Redirect& r, const char* what) {
 void SwapCode(void* at, const void* expected, const void* replacement, std::size_t size, const char* what) {
     const std::string name(what);
     const auto address = reinterpret_cast<std::uintptr_t>(at);
+    if (!expected || !replacement) throw std::invalid_argument(name + ": SwapCode needs the bytes expected there and their replacement");
     if (size == 0 || !InOneBlock(address, size))
         throw std::invalid_argument(name + ": " + std::to_string(size) + " bytes at " + Hex(address) + " do not lie in one aligned " +
                                     std::to_string(kBlock) + "-byte block, so they cannot be written in one store");

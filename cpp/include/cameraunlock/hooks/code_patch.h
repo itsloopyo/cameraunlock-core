@@ -26,10 +26,12 @@ constexpr std::size_t kJumpBytes = 14;
 void JumpAbsolute(std::uint8_t* at, const void* to);
 #endif
 
-// A rel32 call about to be pointed somewhere else.
+// A rel32 call about to be pointed somewhere else: `was` is the displacement PrepareRedirect read, `rel` the one it
+// is to hold.
 struct Redirect {
     std::uint8_t* call = nullptr;
     std::int32_t rel = 0;
+    std::int32_t was = 0;
 };
 
 // The call at `site`, which must call `expected`, pointed at `to`: on x64 through a jump AllocNear places within
@@ -38,13 +40,15 @@ struct Redirect {
 // refuses three call sites in eight; nothing here stops the game's threads to write the rest.
 Redirect PrepareRedirect(std::uintptr_t site, void* to, std::uintptr_t expected, const char* what);
 
-// Writes the prepared displacement in one compare-exchange of the block around it. Throws when the block changed
-// between the read and the store, or its protection could not be changed or put back.
+// Writes the prepared displacement in one compare-exchange of the block around it, from the displacement
+// PrepareRedirect read. Throws when the call no longer holds that one (another mod changed it in between), when
+// the block around it changed during the store, or when its protection could not be changed or put back.
 void ApplyRedirect(const Redirect& r, const char* what);
 
 // The `size` bytes at `at`, which must hold `expected`, replaced by `replacement` in one compare-exchange, the
 // code's protection put back after and the instruction cache flushed. The bytes must lie in one aligned 8-byte
-// word, or on x64 in one aligned 16-byte block. Throws when they do not, when they do not hold `expected`, or when
+// word, or on x64 in one aligned 16-byte block. Throws when they do not, when `expected` is null, when they do not
+// hold `expected`, or when
 // the protection could not be changed or put back.
 void SwapCode(void* at, const void* expected, const void* replacement, std::size_t size, const char* what);
 

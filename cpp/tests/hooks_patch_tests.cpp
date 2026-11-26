@@ -225,6 +225,16 @@ void Redirect() {
 
     const code_patch::Redirect r = code_patch::PrepareRedirect(reinterpret_cast<std::uintptr_t>(site), detour, target, "the test call");
     CHECK(run() == 1);
+    // Another mod points the call at its own code between the two steps: the redirect is refused and theirs stays.
+    std::int32_t game = 0;
+    std::memcpy(&game, site + 1, 4);
+    const auto theirs = static_cast<std::int32_t>(reinterpret_cast<std::uintptr_t>(&RedirectDetour) - (reinterpret_cast<std::uintptr_t>(site) + 5));
+    code_patch::SwapCode(site + 1, &game, &theirs, 4, "another mod's redirect");
+    CHECK(run() == 2);
+    CHECK(Throws([&] { code_patch::ApplyRedirect(r, "the test call"); }));
+    CHECK(std::memcmp(site + 1, &theirs, 4) == 0);
+    code_patch::SwapCode(site + 1, &theirs, &game, 4, "another mod's redirect taken out");
+    CHECK(run() == 1);
     code_patch::ApplyRedirect(r, "the test call");
     CHECK(run() == 2);
     MEMORY_BASIC_INFORMATION info{};
@@ -258,6 +268,8 @@ void SwapCode() {
     // Four bytes across the edge of the block a store writes whole, and nothing at all.
     CHECK(Throws([&] { code_patch::SwapCode(page + 0x30E, one, seven, 4, "a split constant"); }));
     CHECK(Throws([&] { code_patch::SwapCode(page + 0x300, one, seven, 0, "nothing"); }));
+    CHECK(Throws([&] { code_patch::SwapCode(page + 0x301, nullptr, seven, 4, "the test's constant, unchecked"); }));
+    CHECK(run() == 1);
     VirtualFree(page, 0, MEM_RELEASE);
 }
 
