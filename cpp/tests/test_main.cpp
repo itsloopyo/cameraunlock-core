@@ -17,6 +17,7 @@ int RunAccelaFilterTests();
 int RunProbeSelectionTests();
 int RunFileLogTests();
 int RunHotkeyTests();
+int RunHotkeyPollerSwapTests();
 int RunOsTests();
 int RunValueGuardTests();
 int RunFrozenIniHelperTests();
@@ -115,6 +116,7 @@ int main(int argc, char** argv) {
     failures += RunProbeSelectionTests();
     failures += RunFileLogTests();
     failures += RunHotkeyTests();
+    failures += RunHotkeyPollerSwapTests();
     failures += RunOsTests();
     failures += RunValueGuardTests();
     failures += RunFrozenIniHelperTests();

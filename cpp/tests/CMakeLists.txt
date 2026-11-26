@@ -23,6 +23,7 @@ add_executable(cameraunlock_tests
     probe_selection_tests.cpp
     file_log_tests.cpp
     hotkey_tests.cpp
+    hotkey_poller_swap_tests.cpp
     os_tests.cpp
     value_guard_tests.cpp
     frozen_ini_helper_tests.cpp

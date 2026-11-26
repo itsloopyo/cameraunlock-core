@@ -86,6 +86,7 @@
 #include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/deferred_actions.h"
 #include "cameraunlock/input/hotkey_poller.h"
+#include "cameraunlock/input/hotkey_poller_swap.h"
 #include "cameraunlock/input/key_binding_registration.h"
 #include "cameraunlock/input/key_bindings.h"
 #include "cameraunlock/input/key_names.g.h"

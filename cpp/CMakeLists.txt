@@ -51,6 +51,7 @@ set(CAMERAUNLOCK_SOURCES
     src/memory/pe_image.cpp
     src/memory/msvc_rtti.cpp
     src/input/hotkey_poller.cpp
+    src/input/hotkey_poller_swap.cpp
     src/input/key_bindings.cpp
     src/logging/file_log.cpp
     src/diagnostics/crash_handler.cpp
