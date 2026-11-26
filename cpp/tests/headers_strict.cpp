@@ -100,6 +100,7 @@
 #include "cameraunlock/math/vec3.h"
 #include "cameraunlock/memory/memory_view.h"
 #include "cameraunlock/memory/pattern_scanner.h"
+#include "cameraunlock/memory/pe_image.h"
 #include "cameraunlock/memory/pe_fingerprint.h"
 #include "cameraunlock/memory/rtti_vtable.h"
 #ifdef _WIN32

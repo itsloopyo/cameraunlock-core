@@ -24,6 +24,7 @@ int RunWin32ProfileSemanticsTests();
 int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 int RunMemoryViewTests();
+int RunPeImageTests();
 int RunLeanClampTests();
 int RunHeldPointerTests();
 #ifdef CAMERAUNLOCK_TESTS_DISCOVERY
@@ -116,6 +117,7 @@ int main(int argc, char** argv) {
     failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
     failures += RunMemoryViewTests();
+    failures += RunPeImageTests();
     failures += RunLeanClampTests();
     failures += RunHeldPointerTests();
     failures += RunInputScriptTests();
