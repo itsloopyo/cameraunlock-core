@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace {
 
@@ -197,6 +198,8 @@ bool HasGuard(const void* at) {
 // with the guard on. Touching it clears the guard and raises
 // STATUS_GUARD_PAGE_VIOLATION, which AccessViolationFilter let through.
 void TestAGuardPageIsReadAsAFaultAndKeepsItsGuard() {
+    using cameraunlock::memory::RangeReadable;
+    using cameraunlock::memory::SafeCopy;
     using cameraunlock::memory::SafeRead;
     using cameraunlock::memory::SafeWrite;
     std::cout << "guard page:\n";
@@ -213,10 +216,99 @@ void TestAGuardPageIsReadAsAFaultAndKeepsItsGuard() {
     Check(!SafeRead(at, value) && value == 0x77, "SafeRead of a guard page returns false and leaves the value");
     Check(HasGuard(page), "and the guard is back on the page");
 
+    unsigned char bytes[16] = {};
+    Check(!SafeCopy(bytes, at, sizeof bytes), "SafeCopy of a guard page returns false");
+    Check(HasGuard(page), "and the guard is back on the page");
+
     Check(!SafeWrite(at, std::uint32_t{1}), "SafeWrite to a guard page returns false");
     Check(HasGuard(page), "and the guard is back on the page");
 
+    Check(!RangeReadable(at, 4), "RangeReadable calls a guard page unreadable");
+    Check(HasGuard(page), "without touching the guard");
+
     VirtualFree(page, 0, MEM_RELEASE);
+}
+
+void TestCopyAndWriteBytes() {
+    using cameraunlock::memory::SafeCopy;
+    using cameraunlock::memory::SafeWriteBytes;
+    std::cout << "SafeCopy / SafeWriteBytes:\n";
+
+    unsigned char live[600];
+    for (std::size_t i = 0; i < sizeof live; ++i) live[i] = static_cast<unsigned char>(i * 7);
+    const auto liveAddr = reinterpret_cast<std::uintptr_t>(live);
+
+    unsigned char small[32] = {};
+    Check(SafeCopy(small, liveAddr + 10, sizeof small) && std::memcmp(small, live + 10, sizeof small) == 0,
+          "a small live range copies back");
+    unsigned char large[600] = {};
+    Check(SafeCopy(large, liveAddr, sizeof large) && std::memcmp(large, live, sizeof large) == 0,
+          "a range wider than the stack staging copies back");
+
+    unsigned char kept[8];
+    std::memset(kept, 0x33, sizeof kept);
+    Check(!SafeCopy(kept, std::uintptr_t{0x10}, sizeof kept), "a copy from unmapped memory returns false");
+    bool untouched = true;
+    for (unsigned char b : kept) untouched = untouched && b == 0x33;
+    Check(untouched, "and leaves the destination untouched");
+
+    const unsigned char patch[4] = {1, 2, 3, 4};
+    Check(SafeWriteBytes(liveAddr + 100, patch, sizeof patch) && std::memcmp(live + 100, patch, sizeof patch) == 0,
+          "SafeWriteBytes writes a live range");
+    Check(!SafeWriteBytes(std::uintptr_t{0x10}, patch, sizeof patch), "and returns false on unmapped memory");
+}
+
+// Both stagings: on the stack up to 256 bytes, on the heap past it.
+void TestACopyStraddlingAPageLeavesTheDestinationAlone() {
+    using cameraunlock::memory::SafeCopy;
+    std::cout << "page-straddling copy:\n";
+
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const SIZE_T pageSize = info.dwPageSize;
+    auto* base = static_cast<unsigned char*>(VirtualAlloc(nullptr, pageSize * 2, MEM_RESERVE, PAGE_NOACCESS));
+    Check(base != nullptr, "two pages reserved");
+    if (base == nullptr) return;
+    VirtualAlloc(base, pageSize, MEM_COMMIT, PAGE_READWRITE);
+    memset(base, 0xAA, pageSize);
+
+    for (std::size_t n : {std::size_t{64}, std::size_t{1024}}) {
+        std::vector<unsigned char> out(n, 0x11);
+        const bool ok = SafeCopy(out.data(), reinterpret_cast<std::uintptr_t>(base + pageSize - 32), n);
+        bool untouched = true;
+        for (unsigned char b : out) untouched = untouched && b == 0x11;
+        Check(!ok && untouched, n == 64 ? "a 64-byte copy that runs into an unmapped page leaves the destination alone"
+                                        : "a 1024-byte copy that runs into an unmapped page leaves the destination alone");
+    }
+    VirtualFree(base, 0, MEM_RELEASE);
+}
+
+void TestRanges() {
+    using cameraunlock::memory::RangeReadable;
+    using cameraunlock::memory::RangeWritable;
+    std::cout << "RangeReadable / RangeWritable:\n";
+
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const SIZE_T pageSize = info.dwPageSize;
+    auto* base = static_cast<unsigned char*>(VirtualAlloc(nullptr, pageSize * 3, MEM_RESERVE, PAGE_NOACCESS));
+    Check(base != nullptr, "three pages reserved");
+    if (base == nullptr) return;
+    DWORD was = 0;
+    VirtualAlloc(base, pageSize * 2, MEM_COMMIT, PAGE_READWRITE);
+    VirtualProtect(base + pageSize, pageSize, PAGE_READONLY, &was);
+    const auto at = reinterpret_cast<std::uintptr_t>(base);
+
+    Check(RangeReadable(at, pageSize * 2), "two committed pages of different protection read as one range");
+    Check(RangeWritable(at, pageSize), "a read-write page is writable");
+    Check(!RangeWritable(at, pageSize + 1), "a range running onto a read-only page is not writable");
+    Check(!RangeReadable(at + pageSize * 2 - 4, 8), "a range running onto a reserved page is not readable");
+    Check(!RangeReadable(at + pageSize * 2, 4), "a reserved page is not readable");
+    Check(!RangeReadable(0, 4), "a null address is not readable");
+    Check(!RangeReadable(at, 0), "an empty range is not readable");
+    Check(!RangeReadable(~std::uintptr_t{0} - 2, 8), "a range that wraps is not readable");
+
+    VirtualFree(base, 0, MEM_RELEASE);
 }
 
 }  // namespace
@@ -233,6 +325,9 @@ int RunSafeMemoryTests() {
     TestFaultCounter();
     TestMemoryFaultFilter();
     TestAGuardPageIsReadAsAFaultAndKeepsItsGuard();
+    TestCopyAndWriteBytes();
+    TestACopyStraddlingAPageLeavesTheDestinationAlone();
+    TestRanges();
     return g_failures;
 #else
     std::cout << "  (skipped: SEH-guarded access is Windows-only)\n";

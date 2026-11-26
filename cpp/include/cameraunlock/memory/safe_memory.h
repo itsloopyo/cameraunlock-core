@@ -8,7 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <type_traits>
+#include <vector>
 
 #include <Windows.h>
 
@@ -130,6 +132,66 @@ bool SafeWrite(std::uintptr_t addr, const T& in) {
 /// committed page and silently returns the name one character short.
 inline bool SafeReadU8(std::uintptr_t addr, std::uint8_t& out) {
     return SafeRead<std::uint8_t>(addr, out);
+}
+
+/// Copies `n` bytes from `addr` into `dst`. False on a fault, with `dst` left
+/// untouched: the bytes land in a staging buffer first, for the same reason
+/// SafeRead stages.
+inline bool SafeCopy(void* dst, std::uintptr_t addr, std::size_t n) {
+    constexpr std::size_t kOnStack = 256;
+    if (n <= kOnStack) {
+        unsigned char staging[kOnStack];
+        if (!GuardedMemcpy(staging, reinterpret_cast<const void*>(addr), n)) return false;
+        std::memcpy(dst, staging, n);
+        return true;
+    }
+    std::vector<unsigned char> staging(n);
+    if (!GuardedMemcpy(staging.data(), reinterpret_cast<const void*>(addr), n)) return false;
+    std::memcpy(dst, staging.data(), n);
+    return true;
+}
+
+/// Writes `n` bytes from `src` to `addr`. False on a fault, and like SafeWrite
+/// a false can leave the bytes before the faulting page already written.
+inline bool SafeWriteBytes(std::uintptr_t addr, const void* src, std::size_t n) {
+    return GuardedMemcpy(reinterpret_cast<void*>(addr), src, n);
+}
+
+namespace detail {
+
+constexpr DWORD kReadableProtect = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+                                   PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+constexpr DWORD kWritableProtect = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+
+inline bool RangeAllows(std::uintptr_t addr, std::size_t n, DWORD want) {
+    if (!addr || !n || addr > (std::numeric_limits<std::uintptr_t>::max)() - n) return false;
+    const std::uintptr_t end = addr + n;
+    for (std::uintptr_t at = addr; at < end;) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<const void*>(at), &mbi, sizeof mbi)) return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || !(mbi.Protect & want))
+            return false;
+        const auto next = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (next <= at) return false;
+        at = next;
+    }
+    return true;
+}
+
+}  // namespace detail
+
+/// Whether every page of [addr, addr + n) is committed and can be read without
+/// a fault. A guard page counts as unreadable: touching one clears the guard.
+/// False for a null address, an empty range or one that wraps. The answer is
+/// for the moment of the call; another thread can free the range after it.
+inline bool RangeReadable(std::uintptr_t addr, std::size_t n) {
+    return detail::RangeAllows(addr, n, detail::kReadableProtect);
+}
+
+/// Whether every page of [addr, addr + n) is committed and can be written
+/// without a fault, as RangeReadable. Copy-on-write pages count as writable.
+inline bool RangeWritable(std::uintptr_t addr, std::size_t n) {
+    return detail::RangeAllows(addr, n, detail::kWritableProtect);
 }
 
 /// Counting forms. The read/write itself is delegated, so the __try stays in
