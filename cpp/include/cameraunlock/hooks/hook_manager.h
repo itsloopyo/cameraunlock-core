@@ -36,9 +36,14 @@ const char* HookStatusToString(HookStatus status);
 //
 // Every member may be called from any thread: the list of hooks is guarded by
 // a lock of the manager's own, held across the MinHook call so the list and
-// MinHook agree. The lock is recursive because MinHook calls Win32 functions
-// (VirtualProtect, SuspendThread) that a mod may itself have detoured, and such
-// a detour can call back in here on the thread holding it. A caller that needs several calls to go in as one (make every
+// MinHook agree. The lock is recursive, so a call back in on the thread
+// holding it that does not reach MinHook (GetHookCount, IsInitialized) returns
+// instead of deadlocking. One that does reach MinHook still hangs, on
+// MinHook's own lock, which is not re-entrant (vendor/minhook/src/hook.c,
+// EnterSpinLock): a detour on a Win32 function MinHook calls (VirtualProtect,
+// SuspendThread) must not make, enable or remove hooks.
+//
+// A caller that needs several calls to go in as one (make every
 // detour before any is enabled, and take them out again on a failure) still
 // holds a lock of its own round them.
 class HookManager {
