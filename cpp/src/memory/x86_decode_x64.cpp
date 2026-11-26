@@ -54,6 +54,7 @@ std::size_t DecodeModrm(const std::uint8_t* p, std::size_t avail, bool rex_r, bo
         out.base = out.rm;
     }
     if (avail < n + disp_size) return 0;
+    out.has_disp = disp_size != 0;
     if (disp_size == 1) out.disp = static_cast<std::int8_t>(p[n]);
     if (disp_size == 4) {
         std::int32_t d;
@@ -111,6 +112,8 @@ bool DecodeVex(const std::uint8_t* p, std::size_t avail, std::uint32_t rva, Insn
         if (avail < i + 1) return false;
         out.has_imm = true;
         out.imm = static_cast<std::int8_t>(p[i]);
+        out.imm_size = 1;
+        out.imm_raw = p[i];
         ++i;
     }
     if (i > kMaxInsn) return false;
@@ -129,8 +132,9 @@ bool DecodeLegacyMaps(const std::uint8_t* p, std::size_t avail, std::uint32_t rv
     while (i < avail) {
         const std::uint8_t b = p[i];
         if (b == 0x66) { out.opsize16 = true; ++i; continue; }
+        if (b == 0x67) { out.addr_size = true; ++i; continue; }
         if (b == 0x2E || b == 0x3E || b == 0x26 || b == 0x36
-            || b == 0x64 || b == 0x65 || b == 0x67 || b == 0xF0) { ++i; continue; }
+            || b == 0x64 || b == 0x65 || b == 0xF0) { ++i; continue; }
         if (b == 0xF2 || b == 0xF3) { out.rep = b; ++i; continue; }
         break;
     }
@@ -165,6 +169,8 @@ bool DecodeLegacyMaps(const std::uint8_t* p, std::size_t avail, std::uint32_t rv
         if (avail < i + 1) return false;
         out.has_imm = true;
         out.imm = static_cast<std::int8_t>(p[i]);
+        out.imm_size = 1;
+        out.imm_raw = p[i];
         ++i;
     }
     if (i > kMaxInsn) return false;
@@ -173,13 +179,32 @@ bool DecodeLegacyMaps(const std::uint8_t* p, std::size_t avail, std::uint32_t rv
     return true;
 }
 
+// hde64 reads up to sixteen prefixes and then an opcode with its ModRM, SIB,
+// displacement and immediates, which comes to under 48 bytes. It decodes from a
+// zero-padded copy, so it never reads past the range.
+unsigned Hde64(const std::uint8_t* code, std::size_t avail, hde64s& hs) {
+    std::uint8_t buf[48] = {};
+    std::memcpy(buf, code, avail < sizeof(buf) ? avail : sizeof(buf));
+    return hde64_disasm(buf, &hs);
+}
+
+bool Hde64Error(const std::uint8_t* code, std::size_t avail) {
+    hde64s hs;
+    Hde64(code, avail, hs);
+    return (hs.flags & F_ERROR) != 0;
+}
+
 }  // namespace
 
 bool DecodeX64(const std::uint8_t* code, std::size_t avail, std::uint32_t rva, Insn& out) {
     out = Insn{};
     if (avail == 0) return false;
     if (code[0] == 0x62) return false;  // EVEX
-    if (code[0] == 0xC4 || code[0] == 0xC5) return DecodeVex(code, avail, rva, out);
+    if (code[0] == 0xC4 || code[0] == 0xC5) {
+        if (!DecodeVex(code, avail, rva, out)) return false;
+        out.hde64_error = Hde64Error(code, avail);
+        return true;
+    }
     // The CPU takes a REX only directly ahead of the opcode and ignores one
     // followed by another prefix, where hde64 takes the byte after a REX for
     // the opcode. hde64 also reads a VEX or EVEX prefix behind a legacy prefix
@@ -191,19 +216,15 @@ bool DecodeX64(const std::uint8_t* code, std::size_t avail, std::uint32_t rva, I
     if (rex && next < avail && (IsRex(code[next]) || IsLegacyPrefix(code[next]))) return false;
     if (next > 0 && next < avail && (code[next] == 0x62 || code[next] == 0xC4 || code[next] == 0xC5)) return false;
     bool handled = false;
-    if (DecodeLegacyMaps(code, avail, rva, out, handled)) return true;
+    if (DecodeLegacyMaps(code, avail, rva, out, handled)) {
+        out.hde64_error = Hde64Error(code, avail);
+        return true;
+    }
     if (handled) return false;
     out = Insn{};
 
-    // hde64 reads on whatever is left of the range: up to sixteen prefixes, then
-    // an opcode with its ModRM, SIB, displacement and immediates, which comes to
-    // under 48 bytes. It decodes from a zero-padded copy, so it never reads past
-    // the range.
-    std::uint8_t buf[48] = {};
-    std::memcpy(buf, code, avail < sizeof(buf) ? avail : sizeof(buf));
-
     hde64s hs;
-    const unsigned len = hde64_disasm(buf, &hs);
+    const unsigned len = Hde64(code, avail, hs);
     // F_ERROR_OPCODE alone marks opcodes hde64's tables call invalid in 64-bit
     // mode (lahf, sahf, ud2, the 0F 01 system group) while still lengthing them
     // correctly. Anything else is a length it cannot vouch for.
@@ -220,6 +241,8 @@ bool DecodeX64(const std::uint8_t* code, std::size_t avail, std::uint32_t rva, I
     out.rex_w = hs.rex_w != 0;
     out.rex_b = hs.rex_b != 0;
     out.opsize16 = hs.p_66 != 0;
+    out.addr_size = hs.p_67 != 0;
+    out.hde64_error = (hs.flags & F_ERROR) != 0;
 
     if (hs.flags & F_MODRM) {
         out.has_modrm = true;
@@ -243,14 +266,29 @@ bool DecodeX64(const std::uint8_t* code, std::size_t avail, std::uint32_t rva, I
     }
     if (hs.flags & F_DISP8) out.disp = static_cast<std::int8_t>(hs.disp.disp8);
     if (hs.flags & F_DISP32) out.disp = static_cast<std::int32_t>(hs.disp.disp32);
+    out.has_disp = (hs.flags & (F_DISP8 | F_DISP16 | F_DISP32)) != 0;
 
     std::int64_t imm = 0;
     bool has_imm = true;
-    if (hs.flags & F_IMM64) imm = static_cast<std::int64_t>(hs.imm.imm64);
-    else if (hs.flags & F_IMM32) imm = static_cast<std::int32_t>(hs.imm.imm32);
-    else if (hs.flags & F_IMM16) imm = static_cast<std::int16_t>(hs.imm.imm16);
-    else if (hs.flags & F_IMM8) imm = static_cast<std::int8_t>(hs.imm.imm8);
-    else has_imm = false;
+    if (hs.flags & F_IMM64) {
+        imm = static_cast<std::int64_t>(hs.imm.imm64);
+        out.imm_size = 8;
+        out.imm_raw = hs.imm.imm64;
+    } else if (hs.flags & F_IMM32) {
+        imm = static_cast<std::int32_t>(hs.imm.imm32);
+        out.imm_size = 4;
+        out.imm_raw = hs.imm.imm32;
+    } else if (hs.flags & F_IMM16) {
+        imm = static_cast<std::int16_t>(hs.imm.imm16);
+        out.imm_size = 2;
+        out.imm_raw = hs.imm.imm16;
+    } else if (hs.flags & F_IMM8) {
+        imm = static_cast<std::int8_t>(hs.imm.imm8);
+        out.imm_size = 1;
+        out.imm_raw = hs.imm.imm8;
+    } else {
+        has_imm = false;
+    }
 
     if (hs.flags & F_RELATIVE) {
         out.relative = true;
@@ -260,6 +298,13 @@ bool DecodeX64(const std::uint8_t* code, std::size_t avail, std::uint32_t rva, I
         out.imm = imm;
     }
     return true;
+}
+
+unsigned LengthX64(const std::uint8_t* code, std::size_t avail) {
+    if (avail == 0) return 0;
+    hde64s hs;
+    const unsigned len = Hde64(code, avail, hs);
+    return len > avail ? 0 : len;
 }
 
 }  // namespace cameraunlock::memory

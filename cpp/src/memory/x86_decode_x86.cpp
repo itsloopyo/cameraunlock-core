@@ -52,13 +52,25 @@ bool DecodeX86(const std::uint8_t* code, std::size_t avail, std::uint32_t at, In
     if (hs.flags & F_DISP8) out.disp = static_cast<std::int8_t>(hs.disp.disp8);
     if (hs.flags & F_DISP16) out.disp = static_cast<std::int16_t>(hs.disp.disp16);
     if (hs.flags & F_DISP32) out.disp = static_cast<std::int32_t>(hs.disp.disp32);
+    out.has_disp = (hs.flags & (F_DISP8 | F_DISP16 | F_DISP32)) != 0;
 
     std::int64_t imm = 0;
     bool has_imm = true;
-    if (hs.flags & F_IMM32) imm = static_cast<std::int32_t>(hs.imm.imm32);
-    else if (hs.flags & F_IMM16) imm = static_cast<std::int16_t>(hs.imm.imm16);
-    else if (hs.flags & F_IMM8) imm = static_cast<std::int8_t>(hs.imm.imm8);
-    else has_imm = false;
+    if (hs.flags & F_IMM32) {
+        imm = static_cast<std::int32_t>(hs.imm.imm32);
+        out.imm_size = 4;
+        out.imm_raw = hs.imm.imm32;
+    } else if (hs.flags & F_IMM16) {
+        imm = static_cast<std::int16_t>(hs.imm.imm16);
+        out.imm_size = 2;
+        out.imm_raw = hs.imm.imm16;
+    } else if (hs.flags & F_IMM8) {
+        imm = static_cast<std::int8_t>(hs.imm.imm8);
+        out.imm_size = 1;
+        out.imm_raw = hs.imm.imm8;
+    } else {
+        has_imm = false;
+    }
 
     if (hs.flags & F_RELATIVE) {
         out.relative = true;
@@ -68,6 +80,15 @@ bool DecodeX86(const std::uint8_t* code, std::size_t avail, std::uint32_t at, In
         out.imm = imm;
     }
     return true;
+}
+
+unsigned LengthX86(const std::uint8_t* code, std::size_t avail) {
+    if (avail == 0) return 0;
+    std::uint8_t buf[48] = {};
+    std::memcpy(buf, code, avail < sizeof(buf) ? avail : sizeof(buf));
+    hde32s hs;
+    const unsigned len = hde32_disasm(buf, &hs);
+    return len > avail ? 0 : len;
 }
 
 }  // namespace cameraunlock::memory

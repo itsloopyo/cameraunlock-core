@@ -175,6 +175,131 @@ void X86Test() {
     Check(!DecodeX86(none.data(), 0, 0, in), "no bytes at all is refused");
 }
 
+unsigned Length64(std::initializer_list<std::uint8_t> bytes) {
+    const std::vector<std::uint8_t> b(bytes);
+    return LengthX64(b.data(), b.size());
+}
+
+unsigned Length32(std::initializer_list<std::uint8_t> bytes) {
+    const std::vector<std::uint8_t> b(bytes);
+    return LengthX86(b.data(), b.size());
+}
+
+// Each expected length is hde's own, worked from its tables, including where
+// hde is wrong about the CPU: the old walks stepped by these.
+void LengthTest() {
+    std::printf("hde32 and hde64 lengths, refused or not\n");
+    Check(Length32({ 0x8B, 0x41, 0x10 }) == 3, "x86 mov eax, [ecx+0x10] is 3 bytes, as DecodeX86 lengths it");
+    Check(Length32({ 0xC5, 0xF8, 0x77 }) == 2, "x86 VEX, which DecodeX86 refuses, is hde32's LDS of 2 bytes");
+    Check(Length32({ 0xF0, 0x01, 0xC0 }) == 3, "x86 lock on a register form, an hde32 error, is 3 bytes");
+    Check(Length32({ 0x0F, 0x0B }) == 2, "x86 ud2, an hde32 error, is 2 bytes");
+    Check(Length32({ 0x67, 0x8B, 0x06, 0x34, 0x12 }) == 5, "x86 mov eax, [0x1234] with 16-bit addressing is 5 bytes");
+    Check(Length32({ 0x67, 0x8B, 0x00 }) == 3, "x86 mov eax, [bx+si] is 3 bytes");
+    Check(Length32({ 0x67, 0x8B, 0x40, 0x08 }) == 4, "x86 mov eax, [bx+si+8] is 4 bytes");
+    Check(Length32({ 0x67, 0x8B, 0x80, 0x34, 0x12 }) == 5, "x86 mov eax, [bx+si+0x1234] is 5 bytes, a disp16");
+    Check(Length32({ 0x67, 0x8B, 0x04, 0x00 }) == 3, "x86 mov eax, [si] is 3 bytes: rm 4 is no SIB under 67");
+    Check(Length32({ 0x67, 0xA1, 0x34, 0x12 }) == 4, "x86 mov eax, [moffs16] is 4 bytes");
+    Check(Length32({ 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x90 }) == 15,
+          "x86 sixteen prefixes are capped at 15");
+    Check(Length32({ 0xE8, 0x00, 0x01 }) == 0, "x86 a call cut short of its rel32 is 0");
+    std::vector<std::uint8_t> none;
+    Check(LengthX86(none.data(), 0) == 0, "x86 no bytes at all is 0");
+
+    Check(Length64({ 0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00 }) == 7, "x64 mov rax, [rip+0x10] is 7 bytes");
+    Check(Length64({ 0x48, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8 }) == 10, "x64 mov rax, imm64 is 10 bytes");
+    Check(Length64({ 0x62, 0xF1, 0x7C, 0x48, 0x28, 0xC1 }) == 1, "x64 EVEX, which DecodeX64 refuses, is hde64's 1-byte error");
+    Check(Length64({ 0x40, 0x4C, 0x8B, 0xF0 }) == 2, "x64 a REX after a REX, which DecodeX64 refuses, is hde64's 2 bytes");
+    Check(Length64({ 0xC5, 0xF8, 0x77 }) == 1, "x64 VEX is hde64's 1-byte error, not DecodeX64's 3");
+    Check(Length64({ 0x66, 0x0F, 0x38, 0x00, 0xC1 }) == 3, "x64 pshufb is hde64's 3 bytes, not DecodeX64's 5");
+    Check(Length64({ 0xF3, 0x0F, 0xB8, 0xC1 }) == 3, "x64 popcnt is hde64's 3-byte JMPE");
+    Check(Length64({ 0x67, 0x8B, 0x06, 0x34, 0x12 }) == 5, "x64 67 8B 06 is hde64's 5 bytes with a disp16");
+    Check(Length64({ 0x9F }) == 1, "x64 lahf is 1 byte");
+    Check(Length64({ 0x48, 0x8B, 0x05, 0x10 }) == 0, "x64 a RIP load cut short is 0");
+    Check(LengthX64(none.data(), 0) == 0, "x64 no bytes at all is 0");
+}
+
+void ImmediateTest() {
+    std::printf("Immediates as encoded\n");
+    Insn in;
+    if (Check(Decode32({ 0x6A, 0x80 }, in), "x86 push -128 decodes"))
+        Check(in.imm == -128 && in.imm_size == 1 && in.imm_raw == 0x80, "imm8: sign-extended imm, 1 byte, raw 0x80");
+    if (Check(Decode32({ 0x66, 0x68, 0x00, 0x80 }, in), "x86 push word 0x8000 decodes"))
+        Check(in.imm == -32768 && in.imm_size == 2 && in.imm_raw == 0x8000, "imm16: 2 bytes, raw 0x8000");
+    if (Check(Decode32({ 0xC2, 0xFC, 0xFF }, in), "x86 ret 0xFFFC decodes"))
+        Check(in.imm == -4 && in.imm_size == 2 && in.imm_raw == 0xFFFC, "ret's imm16 reads back unsigned from imm_raw");
+    if (Check(Decode32({ 0x68, 0x00, 0x00, 0x00, 0x80 }, in), "x86 push 0x80000000 decodes"))
+        Check(in.imm_size == 4 && in.imm_raw == 0x80000000u, "imm32: 4 bytes, raw 0x80000000");
+    if (Check(Decode32({ 0xE8, 0xF0, 0xFF, 0xFF, 0xFF }, in, 0x402000), "x86 call back 16 decodes"))
+        Check(!in.has_imm && in.imm_size == 4 && in.imm_raw == 0xFFFFFFF0u && in.target == 0x401FF5,
+              "a rel32 has no has_imm, but imm_size and imm_raw carry its displacement");
+    if (Check(Decode32({ 0xEB, 0xFE }, in), "x86 jmp $ decodes")) Check(in.imm_size == 1 && in.imm_raw == 0xFE, "a rel8 of 1 byte, raw 0xFE");
+    if (Check(Decode32({ 0x8B, 0xC1 }, in), "x86 mov eax, ecx decodes")) Check(in.imm_size == 0 && in.imm_raw == 0, "no immediate");
+
+    if (Check(Decode({ 0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0x80 }, in), "x64 mov rax, imm64 decodes"))
+        Check(in.imm_size == 8 && in.imm_raw == 0x8000000000000000ull, "imm64: 8 bytes, raw top bit set");
+    if (Check(Decode({ 0x48, 0xC7, 0xC0, 0x00, 0x00, 0x00, 0x80 }, in), "x64 mov rax, imm32 decodes"))
+        Check(in.imm == -2147483647LL - 1 && in.imm_size == 4 && in.imm_raw == 0x80000000u, "imm32 sign-extended in imm, as encoded in imm_raw");
+    if (Check(Decode({ 0x66, 0xB8, 0x00, 0x80 }, in), "x64 mov ax, 0x8000 decodes"))
+        Check(in.imm_size == 2 && in.imm_raw == 0x8000 && in.imm == -32768, "imm16: 2 bytes, raw 0x8000");
+    if (Check(Decode({ 0x83, 0xC0, 0xFF }, in), "x64 add eax, -1 decodes")) Check(in.imm_size == 1 && in.imm_raw == 0xFF, "imm8: 1 byte, raw 0xFF");
+    if (Check(Decode({ 0xC4, 0xE3, 0x79, 0x0F, 0xC1, 0x84 }, in), "x64 vpalignr with imm8 0x84 decodes"))
+        Check(in.imm == -124 && in.imm_size == 1 && in.imm_raw == 0x84, "a VEX imm8 as encoded");
+    if (Check(Decode({ 0x66, 0x0F, 0x3A, 0x0F, 0xC1, 0xF0 }, in), "x64 palignr with imm8 0xF0 decodes"))
+        Check(in.imm_size == 1 && in.imm_raw == 0xF0, "an 0F 3A imm8 as encoded");
+    if (Check(Decode({ 0xE9, 0x00, 0x00, 0x00, 0x80 }, in), "x64 jmp rel32 decodes"))
+        Check(!in.has_imm && in.imm_size == 4 && in.imm_raw == 0x80000000u, "a rel32's displacement as encoded");
+    if (Check(Decode({ 0x66, 0x0F, 0x38, 0x00, 0xC1 }, in), "x64 pshufb decodes")) Check(in.imm_size == 0, "no immediate");
+}
+
+void DisplacementTest() {
+    std::printf("Displacement present or not\n");
+    Insn in;
+    if (Check(Decode32({ 0x8B, 0x01 }, in), "x86 mov eax, [ecx] decodes")) Check(!in.has_disp, "no displacement");
+    if (Check(Decode32({ 0x8B, 0x41, 0x10 }, in), "x86 mov eax, [ecx+0x10] decodes")) Check(in.has_disp, "a disp8");
+    if (Check(Decode32({ 0x8B, 0x45, 0x00 }, in), "x86 mov eax, [ebp+0] decodes")) Check(in.has_disp && in.disp == 0, "a disp8 of 0 is still there");
+    if (Check(Decode32({ 0x8B, 0x0D, 0x78, 0x56, 0x34, 0x12 }, in), "x86 mov ecx, [0x12345678] decodes")) Check(in.has_disp, "a disp32");
+    if (Check(Decode32({ 0x8B, 0x04, 0x24 }, in), "x86 mov eax, [esp] decodes")) Check(!in.has_disp, "SIB with no displacement");
+    if (Check(Decode32({ 0x8B, 0x04, 0x8D, 0x00, 0x10, 0x40, 0x00 }, in), "x86 mov eax, [ecx*4+0x401000] decodes"))
+        Check(in.has_disp, "SIB with no base has a disp32");
+    if (Check(Decode32({ 0x8B, 0xC1 }, in), "x86 mov eax, ecx decodes")) Check(!in.has_disp, "a register form has none");
+    if (Check(Decode32({ 0xA1, 0x78, 0x56, 0x34, 0x12 }, in), "x86 mov eax, [moffs32] decodes")) Check(!in.has_disp, "moffs has none; its address is imm");
+
+    if (Check(Decode({ 0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00 }, in), "x64 mov rax, [rip+0x10] decodes")) Check(in.has_disp, "RIP-relative has a disp32");
+    if (Check(Decode({ 0x48, 0x8B, 0x01 }, in), "x64 mov rax, [rcx] decodes")) Check(!in.has_disp, "no displacement");
+    if (Check(Decode({ 0x41, 0x8B, 0x45, 0x08 }, in), "x64 mov eax, [r13+8] decodes")) Check(in.has_disp, "a disp8");
+    if (Check(Decode({ 0xC5, 0xF8, 0x28, 0x74, 0x24, 0x40 }, in), "x64 vmovaps xmm6, [rsp+0x40] decodes")) Check(in.has_disp, "a VEX disp8");
+    if (Check(Decode({ 0xC5, 0xF8, 0x28, 0x06 }, in), "x64 vmovaps xmm0, [rsi] decodes")) Check(!in.has_disp, "a VEX form with none");
+    if (Check(Decode({ 0x66, 0x0F, 0x38, 0x00, 0x40, 0x10 }, in), "x64 pshufb xmm0, [rax+0x10] decodes")) Check(in.has_disp, "an 0F 38 disp8");
+    if (Check(Decode({ 0x66, 0x0F, 0x38, 0x00, 0x00 }, in), "x64 pshufb xmm0, [rax] decodes")) Check(!in.has_disp, "an 0F 38 form with none");
+}
+
+void AddressSizeTest() {
+    std::printf("67 prefix\n");
+    Insn in;
+    Check(!Decode32({ 0x67, 0x8B, 0x40, 0x08 }, in), "x86 67 is still refused, and LengthX86 steps over it");
+    if (Check(Decode({ 0x67, 0x8B, 0x40, 0x08 }, in), "x64 mov eax, [eax+8] decodes")) Check(in.addr_size && in.len == 4, "with addr_size, 4 bytes");
+    if (Check(Decode({ 0x8B, 0x40, 0x08 }, in), "x64 mov eax, [rax+8] decodes")) Check(!in.addr_size, "with no addr_size");
+    if (Check(Decode({ 0x67, 0x66, 0x0F, 0x38, 0x00, 0x40, 0x08 }, in), "x64 pshufb xmm0, [eax+8] decodes"))
+        Check(in.addr_size && in.len == 7 && in.map == 2, "an 0F 38 form with addr_size, 7 bytes");
+}
+
+void Hde64ErrorTest() {
+    std::printf("What hde64 calls an error\n");
+    Insn in;
+    if (Check(Decode({ 0x9F }, in), "x64 lahf decodes")) Check(in.hde64_error && in.len == 1, "hde64 calls it invalid in 64-bit mode");
+    if (Check(Decode({ 0x0F, 0x0B }, in), "x64 ud2 decodes")) Check(in.hde64_error && in.len == 2, "hde64 calls it an error");
+    if (Check(Decode({ 0xC5, 0xF8, 0x77 }, in), "x64 vzeroupper decodes")) Check(in.hde64_error, "hde64 refuses VEX");
+    if (Check(Decode({ 0xC4, 0xE2, 0x70, 0xF2, 0xC2 }, in), "x64 andn decodes")) Check(in.hde64_error, "hde64 refuses three-byte VEX");
+    if (Check(Decode({ 0x66, 0x0F, 0x38, 0x00, 0xC1 }, in), "x64 pshufb decodes")) Check(in.hde64_error, "hde64 refuses the 0F 38 map");
+    if (Check(Decode({ 0x66, 0x0F, 0x3A, 0x0F, 0xC1, 0x08 }, in), "x64 palignr decodes")) Check(in.hde64_error, "hde64 refuses the 0F 3A map");
+    if (Check(Decode({ 0xF3, 0x48, 0x0F, 0xB8, 0xC1 }, in), "x64 popcnt decodes")) Check(!in.hde64_error, "hde64 reads popcnt as JMPE with no error");
+    if (Check(Decode({ 0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00 }, in), "x64 mov rax, [rip+0x10] decodes")) Check(!in.hde64_error, "no error");
+    if (Check(Decode({ 0x0F, 0x28, 0xC1 }, in), "x64 movaps xmm0, xmm1 decodes")) Check(!in.hde64_error, "no error");
+    if (Check(Decode({ 0xF3, 0x0F, 0x28, 0xC1 }, in), "x64 F3 0F 28 decodes")) Check(in.hde64_error, "hde64's prefix table rejects F3 on 0F 28");
+    if (Check(Decode({ 0xF0, 0xF3, 0x0F, 0xB8, 0xC1 }, in), "x64 lock popcnt decodes")) Check(in.hde64_error, "hde64 calls the lock an error");
+    if (Check(Decode32({ 0x8B, 0x01 }, in), "x86 mov eax, [ecx] decodes")) Check(!in.hde64_error && !in.addr_size, "DecodeX86 sets neither");
+}
+
 }  // namespace
 
 int RunX86DecodeTests() {
@@ -185,5 +310,10 @@ int RunX86DecodeTests() {
     PrefixFieldTest();
     TruncatedTest();
     X86Test();
+    LengthTest();
+    ImmediateTest();
+    DisplacementTest();
+    AddressSizeTest();
+    Hde64ErrorTest();
     return g_failures;
 }
