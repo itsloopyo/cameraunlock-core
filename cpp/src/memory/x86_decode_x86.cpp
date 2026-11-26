@@ -24,6 +24,8 @@ bool DecodeX86(const std::uint8_t* code, std::size_t avail, std::uint32_t at, In
     hde32s hs;
     const unsigned len = hde32_disasm(buf, &hs);
     if ((hs.flags & F_ERROR) || len == 0 || len > avail) return false;
+    // 16-bit addressing names registers Insn has no numbers for.
+    if (hs.flags & F_PREFIX_67) return false;
 
     out.rva = at;
     out.len = static_cast<std::uint8_t>(len);

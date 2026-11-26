@@ -83,7 +83,8 @@ bool DecodeX64(const std::uint8_t* code, std::size_t avail, std::uint32_t rva, I
 
 // Decodes one x86 (32-bit mode) instruction the same way. False for anything
 // hde32 flags as an error, and for VEX and EVEX (C4, C5 or 62 followed by a
-// byte of 0xC0 or more), which hde32 would length as LES, LDS or BOUND.
+// byte of 0xC0 or more), which hde32 would length as LES, LDS or BOUND, and for
+// a 67 prefix, whose 16-bit addressing has registers Insn cannot name.
 bool DecodeX86(const std::uint8_t* code, std::size_t avail, std::uint32_t at, Insn& out);
 
 }  // namespace cameraunlock::memory

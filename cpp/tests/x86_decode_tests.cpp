@@ -169,6 +169,7 @@ void X86Test() {
         Check(in.len == 2 && in.opcode == 0xC4, "C4 with a memory operand is LES in 32-bit mode");
     Check(!Decode32({ 0xC5, 0xF8, 0x77 }, in), "VEX is refused");
     Check(!Decode32({ 0x62, 0xF1, 0x7C, 0x48, 0x28, 0xC1 }, in), "EVEX is refused");
+    Check(!Decode32({ 0x67, 0x8B, 0x06, 0x34, 0x12 }, in), "16-bit addressing (a 67 prefix) is refused");
     Check(!Decode32({ 0xE8, 0x00, 0x01 }, in), "a call cut short of its rel32 is refused");
     std::vector<std::uint8_t> none;
     Check(!DecodeX86(none.data(), 0, 0, in), "no bytes at all is refused");
