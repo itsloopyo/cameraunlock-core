@@ -18,7 +18,8 @@
 // operand by the address it reaches, each function decoded with its jump
 // tables told apart from its code, and a class's primary vtable found from its
 // type descriptor. Read from a pe::Image, live or offline alike. In
-// cameraunlock_hooks, beside the decoder it is built on.
+// cameraunlock_hooks, beside the decoder it is built on. After
+// wreckfest-2-headtracking src/builds/runtime_discovery.cpp.
 namespace cameraunlock::memory::x64 {
 
 // One unwind table entry, with the start of the function it belongs to.
@@ -44,6 +45,8 @@ public:
     // its exception directory is empty, not whole entries or not sorted, or no
     // entry lies in .text.
     explicit Analysis(const pe::Image& img);
+    // It keeps a reference to the image, so the image must outlive it.
+    explicit Analysis(const pe::Image&&) = delete;
 
     const Chunk* ChunkAt(std::uint32_t rva) const;
     // The start of the function `rva` is in, 0 when no chunk holds it.

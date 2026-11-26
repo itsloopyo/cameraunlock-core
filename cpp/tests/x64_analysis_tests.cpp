@@ -2,8 +2,7 @@
 // Tests for the x64 code analysis (cameraunlock/memory/x64_analysis.h) on
 // hand-made x64 images: function chunks and their starts, cross references,
 // jump tables, leaves, a class's primary vtable by its type descriptor, the
-// instruction shapes, and the registers each kind of instruction may write
-// (from Headstart's Bugbear backend).
+// instruction shapes, and the registers each kind of instruction may write.
 
 #include <cameraunlock/memory/x64_analysis.h>
 
@@ -116,6 +115,10 @@ void ChunksAndTheirStarts() {
     empty.Directory(3, 0x4000, 0);
     const pe::Image e = empty.Open();
     Check(!Thrown([&] { x64::Analysis a(e); }).empty(), "an empty exception directory throws");
+    CodeFixture partial;
+    partial.Directory(3, 0x4000, 4 * 12 + 4);
+    const pe::Image p = partial.Open();
+    Check(Thrown([&] { x64::Analysis a(p); }).find("not whole entries") != std::string::npos, "an exception directory that ends inside an entry throws");
     CodeFixture outside;
     for (unsigned i = 0; i < 4; ++i) outside.Entry(i, 0x2000 + 0x20 * i, 0x2010 + 0x20 * i, 0x2600);
     const pe::Image o = outside.Open();
