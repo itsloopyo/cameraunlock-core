@@ -33,6 +33,7 @@ int RunRttiVtableTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_HOOKS
 int RunHookManagerTests();
+int RunX86DecodeTests();
 #endif
 int RunInputScriptTests();
 int RunDirectInputStateTests();
@@ -158,6 +159,7 @@ int main(int argc, char** argv) {
 #endif
 #ifdef CAMERAUNLOCK_TESTS_HOOKS
     failures += RunHookManagerTests();
+    failures += RunX86DecodeTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();

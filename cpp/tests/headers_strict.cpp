@@ -107,6 +107,7 @@
 #ifdef _WIN32
 // SEH-only, so it #errors rather than degrading on a non-Windows build.
 #include "cameraunlock/memory/safe_memory.h"
+#include "cameraunlock/memory/x86_decode.h"
 #include "cameraunlock/memory/process_memory.h"
 #endif
 #include "cameraunlock/os/game_window.h"

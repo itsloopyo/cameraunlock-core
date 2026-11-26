@@ -87,6 +87,12 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
         CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/reframework-legacy")
 endif()
 
+if(TARGET cameraunlock_hooks)
+    target_sources(cameraunlock_tests PRIVATE x86_decode_tests.cpp)
+    target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_hooks)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_HOOKS)
+endif()
+
 if(TARGET cameraunlock_discovery)
     target_sources(cameraunlock_tests PRIVATE rtti_vtable_tests.cpp)
     target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_discovery)

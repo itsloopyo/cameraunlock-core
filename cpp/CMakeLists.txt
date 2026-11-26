@@ -114,7 +114,16 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
         unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
 
-    add_library(cameraunlock_hooks STATIC src/hooks/hook_manager.cpp)
+    # The instruction decoders compile the vendored hde32 and hde64 under names of
+    # their own (src/memory/hde_names.h), whichever MinHook the consumer links.
+    enable_language(C)
+    add_library(cameraunlock_hooks STATIC
+        src/hooks/hook_manager.cpp
+        src/memory/x86_decode_x64.cpp
+        src/memory/x86_decode_x86.cpp
+        src/memory/hde32_any.c
+        src/memory/hde64_any.c
+    )
     target_include_directories(cameraunlock_hooks
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
