@@ -41,6 +41,7 @@
 #include "cameraunlock/ads/ads_fade.h"
 #include "cameraunlock/ads/aim_mode.h"
 #include "cameraunlock/ads/lean_handover.h"
+#include "cameraunlock/camera/head_bones.h"
 #include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/camera/lean_line_sweep.h"
 #include "cameraunlock/camera/zoom_compensation.h"
