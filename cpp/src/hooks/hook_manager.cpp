@@ -56,6 +56,7 @@ HookManager& HookManager::Instance() {
 }
 
 HookStatus HookManager::Initialize() {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (m_initialized) {
         return HookStatus::ErrorAlreadyInitialized;
     }
@@ -70,11 +71,12 @@ HookStatus HookManager::Initialize() {
 }
 
 void HookManager::Shutdown() {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return;
     }
 
-    DisableAllHooks();
+    MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
     m_hooks.clear();
@@ -82,6 +84,7 @@ void HookManager::Shutdown() {
 }
 
 HookStatus HookManager::CreateHook(void* target, void* detour, void** original) {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return HookStatus::ErrorNotInitialized;
     }
@@ -96,6 +99,7 @@ HookStatus HookManager::CreateHook(void* target, void* detour, void** original) 
 }
 
 HookStatus HookManager::RemoveHook(void* target) {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return HookStatus::ErrorNotInitialized;
     }
@@ -114,6 +118,7 @@ HookStatus HookManager::RemoveHook(void* target) {
 }
 
 HookStatus HookManager::EnableHook(void* target) {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return HookStatus::ErrorNotInitialized;
     }
@@ -122,6 +127,7 @@ HookStatus HookManager::EnableHook(void* target) {
 }
 
 HookStatus HookManager::DisableHook(void* target) {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return HookStatus::ErrorNotInitialized;
     }
@@ -130,6 +136,7 @@ HookStatus HookManager::DisableHook(void* target) {
 }
 
 HookStatus HookManager::EnableAllHooks() {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return HookStatus::ErrorNotInitialized;
     }
@@ -138,6 +145,7 @@ HookStatus HookManager::EnableAllHooks() {
 }
 
 HookStatus HookManager::DisableAllHooks() {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return HookStatus::ErrorNotInitialized;
     }
@@ -146,6 +154,7 @@ HookStatus HookManager::DisableAllHooks() {
 }
 
 void HookManager::RemoveAllHooks() {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
     if (!m_initialized) {
         return;
     }
@@ -157,6 +166,10 @@ void HookManager::RemoveAllHooks() {
     m_hooks.clear();
 }
 
+size_t HookManager::GetHookCount() const {
+    std::lock_guard<std::recursive_mutex> hold(m_mutex);
+    return m_hooks.size();
+}
 
 ScopedHook::ScopedHook(void* target, void* detour, void** original) {
     Create(target, detour, original);

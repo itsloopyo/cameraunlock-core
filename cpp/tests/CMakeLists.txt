@@ -83,6 +83,12 @@ if(TARGET cameraunlock_discovery)
     target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_DISCOVERY)
 endif()
 
+if(TARGET cameraunlock_hooks)
+    target_sources(cameraunlock_tests PRIVATE hook_manager_tests.cpp)
+    target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_hooks)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_HOOKS)
+endif()
+
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)
 
 # The C interface, driven as a host drives it: through CameraUnlockCore.dll and the C header

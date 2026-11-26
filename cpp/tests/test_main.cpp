@@ -28,6 +28,9 @@ int RunHeldPointerTests();
 #ifdef CAMERAUNLOCK_TESTS_DISCOVERY
 int RunRttiVtableTests();
 #endif
+#ifdef CAMERAUNLOCK_TESTS_HOOKS
+int RunHookManagerTests();
+#endif
 int RunInputScriptTests();
 int RunDirectInputStateTests();
 int RunGameInputStateTests();
@@ -132,6 +135,9 @@ int main(int argc, char** argv) {
     failures += RunCanonicalConfigExampleTests();
 #ifdef CAMERAUNLOCK_TESTS_DISCOVERY
     failures += RunRttiVtableTests();
+#endif
+#ifdef CAMERAUNLOCK_TESTS_HOOKS
+    failures += RunHookManagerTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
