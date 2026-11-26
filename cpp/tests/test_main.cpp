@@ -44,6 +44,7 @@ int RunQuatHelpersTests();
 int RunHeadBonesTests();
 int RunFollowTurnTests();
 int RunFovAxisTests();
+int RunViewmodelTests();
 int RunTrackingModeTests();
 int RunIniEditorTests();
 int RunCheckedFileWriterTests();
@@ -126,6 +127,7 @@ int main(int argc, char** argv) {
     failures += RunHeadBonesTests();
     failures += RunFollowTurnTests();
     failures += RunFovAxisTests();
+    failures += RunViewmodelTests();
     failures += RunTrackingModeTests();
     failures += RunIniEditorTests();
     failures += RunCheckedFileWriterTests();
