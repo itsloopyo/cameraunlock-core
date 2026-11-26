@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-CameraUnlock-Core
 // Copyright (c) 2026 itsloopyo
 
-// Tests for the code patching helpers in cameraunlock/hooks, in an executable of their own.
+// Tests for the code patching helpers in cameraunlock/hooks, in an executable of their own: the hook-or-point test
+// fills the address space around a page.
 
 #include <cameraunlock/hooks/code_patch.h>
+#include <cameraunlock/hooks/hook_manager.h>
+#include <cameraunlock/hooks/hook_or_point.h>
 #include <cameraunlock/hooks/planted_jump.h>
 #include <cameraunlock/hooks/vtable_slot.h>
 
@@ -318,6 +321,93 @@ void VtableSlots() {
     delete g_probe;
 }
 
+// ---- MinHook, or the vtable entries where it has no memory
+
+__declspec(noinline) int __cdecl HookTarget(int x) {
+    g_sink = g_sink + 1;
+    return x + 1;
+}
+using IntFn = int(__cdecl*)(int);
+IntFn g_originalTarget = nullptr;
+int __cdecl HookDetour(int x) { return g_originalTarget(x) + 100; }
+int(__cdecl* volatile g_callTarget)(int) = &HookTarget;
+
+void HookOrPoint() {
+    std::printf("-- hooked by MinHook, or through the vtables where it has no memory\n");
+    auto& hm = hooks::HookManager::Instance();
+    if (!hm.IsInitialized() && hm.Initialize() != hooks::HookStatus::Ok) throw std::runtime_error("MinHook did not initialise");
+    hooks::SlotSwaps pointed;
+    void* const target = reinterpret_cast<void*>(&HookTarget);
+    CHECK(hooks::HookOrPointVtables(target, {}, reinterpret_cast<void*>(&HookDetour), reinterpret_cast<void**>(&g_originalTarget), pointed,
+                                    "the test target") == hooks::HookedBy::MinHook);
+    CHECK(g_callTarget(1) == 102);
+    CHECK(pointed.Count() == 0);
+    // Hooked already: MinHook's refusal is not a want of memory, so nothing is pointed.
+    CHECK(Throws([&] {
+        void* unused = nullptr;
+        hooks::HookOrPointVtables(target, {}, reinterpret_cast<void*>(&HookDetour), &unused, pointed, "the test target again");
+    }));
+    CHECK(hm.RemoveHook(target) == hooks::HookStatus::Ok);
+    CHECK(g_callTarget(1) == 2);
+
+#ifdef _WIN64
+    // A function on a page far from everything, with every free granule within MinHook's reach of it reserved.
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const std::uintptr_t gran = si.dwAllocationGranularity;
+    std::uint8_t* code = nullptr;
+    for (std::uintptr_t at = 0x100000000000ull; !code && at < 0x700000000000ull; at += 0x10000000000ull)
+        code = static_cast<std::uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(at), gran, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (!code) throw std::runtime_error("no far page for the test's function");
+    // mov eax, ecx; add eax, 1; nop x3; ret
+    const std::uint8_t addOne[9] = {0x89, 0xC8, 0x83, 0xC0, 0x01, 0x90, 0x90, 0x90, 0xC3};
+    std::memcpy(code, addOne, sizeof addOne);
+    MakeExecutable(code, gran);
+    std::vector<void*> fences;
+    const auto origin = reinterpret_cast<std::uintptr_t>(code);
+    // Past MinHook's reach either way: MAX_MEMORY_RANGE 0x40000000 in vendor/minhook/src/buffer.c.
+    constexpr std::uintptr_t kAround = 0x48000000;
+    for (std::uintptr_t at = origin - kAround; at < origin + kAround;) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<void*>(at), &mbi, sizeof mbi)) break;
+        const std::uintptr_t regionEnd = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (mbi.State == MEM_FREE) {
+            const std::uintptr_t start = (at + gran - 1) & ~(gran - 1);
+            const std::uintptr_t end = (regionEnd < origin + kAround ? regionEnd : origin + kAround) & ~(gran - 1);
+            if (end > start)
+                if (void* fence = VirtualAlloc(reinterpret_cast<void*>(start), end - start, MEM_RESERVE, PAGE_NOACCESS)) fences.push_back(fence);
+        }
+        at = regionEnd;
+    }
+    void* table[2] = {code, code};
+    void* const distant = code;
+    IntFn original = nullptr;
+    g_originalTarget = nullptr;
+    CHECK(hooks::HookOrPointVtables(distant, {&table[0], &table[1]}, reinterpret_cast<void*>(&HookDetour), reinterpret_cast<void**>(&original),
+                                    pointed, "the far function") == hooks::HookedBy::Vtables);
+    g_originalTarget = original;
+    CHECK(original == reinterpret_cast<IntFn>(distant));
+    CHECK(pointed.Count() == 2);
+    CHECK(reinterpret_cast<IntFn>(table[0])(1) == 102 && reinterpret_cast<IntFn>(table[1])(5) == 106);
+    CHECK(reinterpret_cast<IntFn>(distant)(1) == 2);
+    pointed.RestoreAll();
+    CHECK(table[0] == distant && table[1] == distant);
+    // No vtable to fall back on, and an entry that holds something else.
+    CHECK(Throws([&] {
+        void* unused = nullptr;
+        hooks::HookOrPointVtables(distant, {}, reinterpret_cast<void*>(&HookDetour), &unused, pointed, "the far function");
+    }));
+    void* other[1] = {reinterpret_cast<void*>(&HookTarget)};
+    CHECK(Throws([&] {
+        void* unused = nullptr;
+        hooks::HookOrPointVtables(distant, {&other[0]}, reinterpret_cast<void*>(&HookDetour), &unused, pointed, "the far function");
+    }));
+    CHECK(other[0] == reinterpret_cast<void*>(&HookTarget) && pointed.Count() == 0);
+    for (void* fence : fences) VirtualFree(fence, 0, MEM_RELEASE);
+    VirtualFree(code, 0, MEM_RELEASE);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -326,6 +416,7 @@ int main() {
         Redirect();
         SwapCode();
         VtableSlots();
+        HookOrPoint();
     } catch (const std::exception& e) {
         ++g_failures;
         std::printf("  FAIL: a test threw: %s\n", e.what());

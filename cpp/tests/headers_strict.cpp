@@ -89,6 +89,7 @@
 #include "cameraunlock/hooks/planted_jump.h"
 #ifdef _WIN32
 #include "cameraunlock/hooks/code_patch.h"
+#include "cameraunlock/hooks/hook_or_point.h"
 #include "cameraunlock/hooks/vtable_slot.h"
 #endif
 #include "cameraunlock/input/chord_hotkeys.h"
