@@ -3,13 +3,12 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <cstring>
-#include <deque>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
-#include <unordered_set>
 
 #include <cameraunlock/logging/file_log.h>
 #include <cameraunlock/re_engine/discovery.h>
@@ -36,13 +35,19 @@ discovery::Vm FindVm() {
 
 std::uint32_t VersionAt(const void* header) { return static_cast<const std::uint32_t*>(header)[1]; }
 
+// One less than the smallest power of two at or above `bytes`: the mask the
+// engine keeps string offsets under.
+std::uint32_t MaskCovering(std::uint32_t bytes) {
+    if (bytes < 2) return 0;
+    std::uint32_t v = bytes - 1;
+    for (int shift = 1; shift < 32; shift *= 2) v |= v >> shift;
+    return v;
+}
+
 }  // namespace
 
-Tdb::Tdb(Layout layout, const void* header) : reader_(std::move(layout), header), version_(VersionAt(header)) {
-    std::uint32_t mask = 1;
-    while (mask < reader_.StringBytes()) mask <<= 1;
-    stringMask_ = mask - 1;
-}
+Tdb::Tdb(Layout layout, const void* header)
+    : reader_(std::move(layout), header), version_(VersionAt(header)), stringMask_(MaskCovering(reader_.StringBytes())) {}
 
 // A method's code is wherever the engine's decoder puts its encoded offset.
 // REFramework finds the decoder by its bytes, which Requiem's build does not
@@ -91,6 +96,7 @@ void Tdb::Discover(const LayoutFor& layoutFor) {
 
     // Each type database the VM points at, and where it first points at it.
     std::map<std::uintptr_t, std::uintptr_t> headers;
+    // 0x20000 is how far into the VM REFramework looks for the database too.
     for (std::uintptr_t off = 0; off < 0x20000; off += 8) {
         const auto p = Read<std::uintptr_t>(*vm + off);
         if (!p || !*p || (*p & 7)) continue;
@@ -152,24 +158,24 @@ bool Tdb::Derives(const Type* t, const Type& base) const {
 }
 
 std::string Tdb::FullName(const Type& t) const {
-    std::deque<std::string> parts;
-    const Type* at = &t;
-    std::unordered_set<const Type*> seen;
-    while (at && seen.insert(at).second) {
-        parts.push_front(Name(*at));
-        const TypeView v = reader_.ReadType(*at);
-        const bool nested = v.enclosing != 0 && v.enclosing != v.self && v.enclosing < reader_.TypeCount();
-        if (!nested) {
-            const char* ns = String(Detail(*at).nameSpace);
-            if (*ns) parts.push_front(ns);
+    // The chain from `t` out to its outermost enclosing type, stopping before
+    // a type already in it.
+    std::vector<const Type*> chain{&t};
+    const char* nameSpace = "";
+    for (;;) {
+        const TypeView v = reader_.ReadType(*chain.back());
+        if (v.enclosing == 0 || v.enclosing == v.self || v.enclosing >= reader_.TypeCount()) {
+            nameSpace = String(Detail(*chain.back()).nameSpace);
             break;
         }
-        at = reader_.TypeAt(v.enclosing);
+        const Type* outer = reader_.TypeAt(v.enclosing);
+        if (!outer || std::find(chain.begin(), chain.end(), outer) != chain.end()) break;
+        chain.push_back(outer);
     }
-    std::string out;
-    for (const std::string& part : parts) {
+    std::string out = nameSpace;
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
         if (!out.empty()) out += '.';
-        out += part;
+        out += Name(**it);
     }
     return out;
 }
@@ -364,6 +370,7 @@ void Tdb::RequireFloats(const Type& t, const std::vector<std::string>& names, st
 void* Tdb::RuntimeType(void* ctx, const Type& t) const {
     // GetType reads only the object's info, whose first word is the type: a
     // stand-in object with the type in that place gets the type's System.Type.
+    // The idea is REFramework's (RETypeDefinition::get_runtime_type, past TDB 74).
     const Type* info = &t;
     const Type* const* stand = &info;
     return GetType(ctx, &stand);

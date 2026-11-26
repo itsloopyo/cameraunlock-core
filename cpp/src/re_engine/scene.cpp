@@ -124,7 +124,7 @@ Scene::Scene() {
     // A string `length` long: FastAllocateString where the database has it
     // (Requiem). Resident Evil 4's has none, so there the engine's version
     // string is cut to nothing with Substring(0, 0) and padded out with
-    // PadLeft(length, ' ').
+    // PadLeft(length, ' '), the way REFramework's create_managed_string makes one.
     const Method allocate = tdb.FindMethodTaking(string, "FastAllocateString", "System.Int32");
     if (allocate.fn) {
         if (!allocate.isStatic) throw std::runtime_error("System.String.FastAllocateString(System.Int32) takes an object");
