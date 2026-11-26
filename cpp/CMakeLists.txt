@@ -120,6 +120,7 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
     enable_language(C)
     add_library(cameraunlock_hooks STATIC
         src/hooks/hook_manager.cpp
+        src/hooks/code_patch.cpp
         src/memory/x86_decode_x64.cpp
         src/memory/x86_decode_x86.cpp
         src/memory/hde32_any.c

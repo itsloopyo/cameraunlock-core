@@ -3,6 +3,7 @@
 
 // Tests for the code patching helpers in cameraunlock/hooks, in an executable of their own.
 
+#include <cameraunlock/hooks/code_patch.h>
 #include <cameraunlock/hooks/planted_jump.h>
 
 #include <Windows.h>
@@ -20,6 +21,7 @@
 
 namespace {
 
+namespace code_patch = cameraunlock::hooks::code_patch;
 namespace planted = cameraunlock::hooks::planted;
 
 int g_checks = 0;
@@ -144,11 +146,120 @@ void PlantedHook() {
 }
 #endif
 
+// ---- a call redirected and code swapped in one store
+
+__declspec(noinline) int __cdecl RedirectTarget() {
+    g_sink = g_sink + 1;
+    return 1;
+}
+__declspec(noinline) int __cdecl RedirectDetour() {
+    g_sink = g_sink + 1;
+    return 2;
+}
+
+void WriteCall(std::uint8_t* at, const void* to) {
+    at[0] = 0xE8;
+    const auto rel = static_cast<std::int32_t>(reinterpret_cast<std::uintptr_t>(to) - (reinterpret_cast<std::uintptr_t>(at) + 5));
+    std::memcpy(at + 1, &rel, 4);
+}
+
+void MakeExecutable(std::uint8_t* page, std::size_t size) {
+    DWORD old = 0;
+    if (!VirtualProtect(page, size, PAGE_EXECUTE_READ, &old)) throw std::runtime_error("the test's code page could not be made executable");
+    FlushInstructionCache(GetCurrentProcess(), page, size);
+}
+
+void Redirect() {
+    std::printf("-- a call pointed somewhere else in one store\n");
+    constexpr std::size_t kPage = 0x1000;
+#ifdef _WIN64
+    const auto exe = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    std::uint8_t* page = code_patch::AllocNear(exe, "the test's code");
+    CHECK(reinterpret_cast<std::uintptr_t>(page) < exe && exe - reinterpret_cast<std::uintptr_t>(page) < 0x80000000ull);
+    // sub rsp, 28h keeps the stack aligned for the call.
+    std::uint8_t* entry = page + 0xFF;
+    const std::uint8_t prologue[4] = {0x48, 0x83, 0xEC, 0x28};
+    std::memcpy(entry, prologue, 4);
+    std::uint8_t* site = page + 0x103;
+    WriteCall(site, reinterpret_cast<const void*>(&RedirectTarget));
+    const std::uint8_t epilogue[5] = {0x48, 0x83, 0xC4, 0x28, 0xC3};
+    std::memcpy(site + 5, epilogue, 5);
+
+    std::uint8_t jump[code_patch::kJumpBytes] = {};
+    code_patch::JumpAbsolute(jump, reinterpret_cast<const void*>(&RedirectDetour));
+    const void* to = nullptr;
+    std::memcpy(&to, jump + 6, sizeof(to));
+    CHECK(jump[0] == 0xFF && jump[1] == 0x25 && jump[2] == 0 && jump[5] == 0 && to == reinterpret_cast<const void*>(&RedirectDetour));
+#else
+    auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, kPage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (!page) throw std::runtime_error("no page for the test's code");
+    std::uint8_t* site = page + 0x103;
+    std::uint8_t* entry = site;
+    WriteCall(site, reinterpret_cast<const void*>(&RedirectTarget));
+    site[5] = 0xC3;
+#endif
+    // A call whose displacement crosses the block a store can write whole.
+    std::uint8_t* split = page + 0x20C;
+    WriteCall(split, reinterpret_cast<const void*>(&RedirectTarget));
+    split[5] = 0xC3;
+    // Not a call.
+    page[0x300] = 0x90;
+    MakeExecutable(page, kPage);
+
+    const auto run = reinterpret_cast<int(__cdecl*)()>(entry);
+    CHECK(run() == 1);
+    const auto target = reinterpret_cast<std::uintptr_t>(&RedirectTarget);
+    void* detour = reinterpret_cast<void*>(&RedirectDetour);
+    CHECK(Throws([&] { code_patch::PrepareRedirect(reinterpret_cast<std::uintptr_t>(site), detour, target + 1, "a call elsewhere"); }));
+    CHECK(Throws([&] { code_patch::PrepareRedirect(reinterpret_cast<std::uintptr_t>(page + 0x300), detour, target, "no call"); }));
+    CHECK(Throws([&] { code_patch::PrepareRedirect(reinterpret_cast<std::uintptr_t>(split), detour, target, "a split call"); }));
+    CHECK(run() == 1);
+
+    const code_patch::Redirect r = code_patch::PrepareRedirect(reinterpret_cast<std::uintptr_t>(site), detour, target, "the test call");
+    CHECK(run() == 1);
+    code_patch::ApplyRedirect(r, "the test call");
+    CHECK(run() == 2);
+    MEMORY_BASIC_INFORMATION info{};
+    CHECK(VirtualQuery(site, &info, sizeof info) && info.Protect == PAGE_EXECUTE_READ);
+    // Redirected once, the call no longer goes where discovery read.
+    CHECK(Throws([&] { code_patch::PrepareRedirect(reinterpret_cast<std::uintptr_t>(site), detour, target, "the test call again"); }));
+}
+
+void SwapCode() {
+    std::printf("-- code swapped in one store\n");
+    constexpr std::size_t kPage = 0x1000;
+    auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, kPage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (!page) throw std::runtime_error("no page for the test's code");
+    // mov eax, 1; ret
+    const std::uint8_t returnsOne[6] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3};
+    std::memcpy(page + 0x300, returnsOne, sizeof returnsOne);
+    MakeExecutable(page, kPage);
+    const auto run = reinterpret_cast<int(__cdecl*)()>(page + 0x300);
+    CHECK(run() == 1);
+
+    const std::uint8_t one[4] = {1, 0, 0, 0}, seven[4] = {7, 0, 0, 0}, nine[4] = {9, 0, 0, 0};
+    code_patch::SwapCode(page + 0x301, one, seven, 4, "the test's constant");
+    CHECK(run() == 7);
+    MEMORY_BASIC_INFORMATION info{};
+    CHECK(VirtualQuery(page, &info, sizeof info) && info.Protect == PAGE_EXECUTE_READ);
+    // It holds 7 now, not 1: nothing is written.
+    CHECK(Throws([&] { code_patch::SwapCode(page + 0x301, one, nine, 4, "the test's constant"); }));
+    CHECK(run() == 7);
+    code_patch::SwapCode(page + 0x301, seven, one, 4, "the test's constant");
+    CHECK(run() == 1);
+    // Four bytes across the edge of the block a store writes whole, and nothing at all.
+    CHECK(Throws([&] { code_patch::SwapCode(page + 0x30E, one, seven, 4, "a split constant"); }));
+    CHECK(Throws([&] { code_patch::SwapCode(page + 0x300, one, seven, 0, "nothing"); }));
+    VirtualFree(page, 0, MEM_RELEASE);
+}
+
 }  // namespace
 
 int main() {
     try {
         PlantedHook();
+        Redirect();
+        SwapCode();
     } catch (const std::exception& e) {
         ++g_failures;
         std::printf("  FAIL: a test threw: %s\n", e.what());

@@ -87,6 +87,9 @@
 #include "cameraunlock/gating/clock_gate.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/hooks/planted_jump.h"
+#ifdef _WIN32
+#include "cameraunlock/hooks/code_patch.h"
+#endif
 #include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/deferred_actions.h"
 #include "cameraunlock/input/hotkey_poller.h"
