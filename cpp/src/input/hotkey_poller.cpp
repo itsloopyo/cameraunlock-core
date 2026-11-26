@@ -262,6 +262,14 @@ void HotkeyPoller::DisarmPresses() {
 }
 
 void HotkeyPoller::DisarmPressesWith(KeyState isDown) {
+    {
+        // Taken apart from m_hotkeyMutex, as PollAt takes them, so the two never nest.
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        const int toggle = m_toggleKey.load();
+        if (toggle != 0 && isDown(toggle)) m_toggleKeyDown.store(true);
+        const int recenter = m_recenterKey.load();
+        if (recenter != 0 && isDown(recenter)) m_recenterKeyDown.store(true);
+    }
     std::lock_guard<std::mutex> lock(m_hotkeyMutex);
     for (auto& entry : m_hotkeys) {
         if (entry.vkCode != 0 && isDown(entry.vkCode)) entry.keyDown = true;

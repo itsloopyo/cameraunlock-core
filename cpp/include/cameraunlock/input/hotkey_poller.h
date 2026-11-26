@@ -102,7 +102,8 @@ public:
     // for less is late, and held up for longer it can miss a quick second press.
     static constexpr int kMaxHoldPollGapMs = 100;
 
-    // Every AddHotkey, AddHoldHotkey and AddTapHotkey key that is down now runs nothing
+    // Every SetToggleKey, SetRecenterKey, AddHotkey, AddHoldHotkey and AddTapHotkey key
+    // that is down now runs nothing
     // for this press, however it ends, and a tap waiting for its double tap time is
     // forgotten. The next press is a press like any other. For a caller that throws
     // away what was pressed while it was not acting on keys: a key that went down

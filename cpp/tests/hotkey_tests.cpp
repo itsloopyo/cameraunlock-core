@@ -637,6 +637,40 @@ void TestDisarmPlainKey() {
     g_down[Insert] = false;
 }
 
+void TestDisarmToggleAndRecenterKeys() {
+    using cameraunlock::input::VK::End;
+    using cameraunlock::input::VK::Home;
+    const auto poll = [](cameraunlock::input::HotkeyPoller& poller, int ms) {
+        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(ms), true, &FakeDown);
+    };
+    cameraunlock::input::HotkeyPoller poller;
+    int toggles = 0;
+    int recenters = 0;
+    poller.SetToggleKey(End, [&toggles] { ++toggles; });
+    poller.SetRecenterKey(Home, [&recenters] { ++recenters; });
+    g_down[End] = true;
+    g_down[Home] = true;
+    poller.DisarmPressesWith(&FakeDown);
+    poll(poller, 0);
+    poll(poller, 16);
+    Check(toggles == 0 && recenters == 0, "the toggle and recenter keys held through a disarm run nothing for that press");
+    g_down[End] = false;
+    g_down[Home] = false;
+    poll(poller, 32);
+    g_down[End] = true;
+    g_down[Home] = true;
+    poll(poller, 48);
+    Check(toggles == 1 && recenters == 1, "and run for the press after it");
+    g_down[End] = false;
+    g_down[Home] = false;
+    poll(poller, 64);
+    poller.DisarmPressesWith(&FakeDown);
+    g_down[End] = true;
+    poll(poller, 80);
+    Check(toggles == 2, "a disarm while the toggle key is up leaves its next press alone");
+    g_down[End] = false;
+}
+
 }  // namespace
 
 int RunHotkeyTests() {
@@ -648,5 +682,6 @@ int RunHotkeyTests() {
     TestTapDoubleTapAndHold();
     TestFourTaps();
     TestDisarmPlainKey();
+    TestDisarmToggleAndRecenterKeys();
     return g_failures;
 }
