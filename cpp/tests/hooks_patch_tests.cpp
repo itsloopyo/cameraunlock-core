@@ -269,6 +269,7 @@ public:
     virtual int Add(int x) { return x + 1; }
 };
 SlotProbe* volatile g_probe = nullptr;
+__declspec(noinline) int HookTargetElsewhere() { return 0; }
 
 #ifdef _WIN64
 using AddFn = int (*)(void* self, int x);
@@ -311,6 +312,14 @@ void VtableSlots() {
     swaps.Swap(slot, reinterpret_cast<void*>(&DetourAdd), "the probe's Add again");
     swaps.RestoreAll();
     CHECK(*slot == game);
+
+    // Another mod swaps the slot after us: putting ours back leaves theirs alone, and says so.
+    swaps.Swap(slot, reinterpret_cast<void*>(&DetourAdd), "the probe's Add");
+    void* const theirs = reinterpret_cast<void*>(&HookTargetElsewhere);
+    hooks::SwapSlot(slot, theirs, "another mod's Add");
+    CHECK(Throws([&] { swaps.RestoreAll(); }));
+    CHECK(*slot == theirs && swaps.Count() == 0);
+    hooks::SwapSlot(slot, game, "the probe's Add, put back by hand");
 
     // A slot on an executable page keeps execute while it is written.
     auto* page = static_cast<void**>(VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READ));

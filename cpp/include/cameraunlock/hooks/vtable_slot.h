@@ -25,8 +25,9 @@ public:
     // SwapSlot, remembered.
     void* Swap(void** slot, void* value, const std::string& what);
 
-    // Puts every slot back as it was, the latest swap first, and forgets them all. Every slot is tried; throws after
-    // that, naming each one that could not be written.
+    // Puts every slot back as it was, the latest swap first, and forgets them all. Each is put back by a
+    // compare-exchange from the value Swap wrote, so a slot that holds something else (another mod swapped it since)
+    // is left alone. Every slot is tried; throws after that, naming each one left alone or that could not be written.
     void RestoreAll();
 
     std::size_t Count() const { return entries_.size(); }
@@ -35,6 +36,7 @@ private:
     struct Entry {
         void** slot;
         void* held;
+        void* wrote;
         std::string what;
     };
     std::vector<Entry> entries_;
