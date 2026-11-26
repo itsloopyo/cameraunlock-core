@@ -67,6 +67,9 @@ public:
     // are not loaded.
     UmgCrosshairMover(const Reflection& refl, std::uintptr_t processEvent, const CrosshairWidgets& widgets);
 
+    // Update, See and Release throw std::out_of_range for a player outside 0 to
+    // kMaxPlayers - 1.
+
     // Game thread, once a frame for each player (0 to kMaxPlayers - 1) whose
     // view takes a head pose, after the view is decided: places `player`'s
     // crosshairs, drawn for `controller`, where `aim` lands in that player's
@@ -109,6 +112,7 @@ private:
         bool ownerSaid = false;
     };
 
+    static void CheckPlayer(int player);
     void Sweep();
     // A pass over the whole array is done: what it found is what is moved.
     void EndPass();

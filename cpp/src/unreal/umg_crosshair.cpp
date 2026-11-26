@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 #include <cameraunlock/logging/file_log.h>
 #include <cameraunlock/unreal/crosshair_split.h>
@@ -184,6 +185,12 @@ std::uintptr_t UmgCrosshairMover::Held(std::uintptr_t holder, std::uintptr_t cls
     return 0;
 }
 
+void UmgCrosshairMover::CheckPlayer(int player) {
+    if (player < 0 || player >= kMaxPlayers)
+        throw std::out_of_range("crosshair player " + std::to_string(player) + " is outside 0 to " +
+                                std::to_string(kMaxPlayers - 1));
+}
+
 int UmgCrosshairMover::PlayerOf(const Widget& w) const { return split_ ? split::OwningPlayer(w.owner, onScreen_) : 0; }
 
 void UmgCrosshairMover::Sweep() {
@@ -300,11 +307,13 @@ void UmgCrosshairMover::PutBack(Widget& w) {
 }
 
 void UmgCrosshairMover::Release(int player) {
+    CheckPlayer(player);
     for (Widget& w : widgets_)
         if (w.set && PlayerOf(w) == player && Live(objects_, w.object, w.index)) PutBack(w);
 }
 
 void UmgCrosshairMover::See(int player, std::uintptr_t controller) {
+    CheckPlayer(player);
     const double now = static_cast<double>(GetTickCount64());
     controllers_[static_cast<std::size_t>(player)] = controller;
     seenAtMs_[static_cast<std::size_t>(player)] = now;
@@ -405,6 +414,7 @@ void UmgCrosshairMover::Measure(std::uintptr_t controller, Widget& w) {
 }
 
 void UmgCrosshairMover::Update(int player, std::uintptr_t controller, const FVector& aim, const FVector& ahead) {
+    CheckPlayer(player);
     const std::size_t p = static_cast<std::size_t>(player);
     Sweep();
     if (widgets_.empty()) return;

@@ -181,8 +181,9 @@ public:
     // is loaded into before the engine has created its class defaults.
     // `natives` is how many of Actor's native functions exist, with Controller's
     // not made yet; -1 makes them all.
-    explicit World(const Generation& g, bool actorDefault = true, int natives = -1)
-        : g_(g), actorDefault_(actorDefault), natives_(natives) {
+    // `umg` adds the UMG and Slate types and functions the crosshair mover looks up.
+    explicit World(const Generation& g, bool actorDefault = true, int natives = -1, bool umg = false)
+        : g_(g), actorDefault_(actorDefault), natives_(natives), umg_(umg) {
         BuildNames();
         BuildObjects();
         SealNames();
@@ -423,6 +424,59 @@ private:
                                   {"ESlateVisibility::Collapsed", 1},
                                   {"ESlateVisibility::ESlateVisibility_MAX", 5}});
 
+        if (umg_) {
+            // UMG as the crosshair mover reads it: Vector2D, SlateCore's
+            // WidgetTransform under Widget.RenderTransform, and the functions
+            // it calls with their parameter blocks.
+            const std::uintptr_t umgPkg = NewObject("/Script/UMG", package, 0);
+            const std::uintptr_t slatePkg = NewObject("/Script/SlateCore", package, 0);
+            const std::uintptr_t vector2D = Struct("Vector2D", core);
+            Reals(vector2D, {"X", "Y"});
+            const std::uintptr_t widgetTransform = Struct("WidgetTransform", slatePkg);
+            p = Property(widgetTransform, 0, "Translation", "StructProperty", 0, 2 * e, vector2D);
+            p = Property(widgetTransform, p, "Scale", "StructProperty", 2 * e, 2 * e, vector2D);
+            p = Property(widgetTransform, p, "Shear", "StructProperty", 4 * e, 2 * e, vector2D);
+            Property(widgetTransform, p, "Angle", g_.realSize == 8 ? "DoubleProperty" : "FloatProperty", 6 * e, e);
+            const std::uintptr_t geometry = Struct("Geometry", slatePkg);
+            const std::uintptr_t widget = Cls("Widget", umgPkg, object);
+            Property(widget, 0, "RenderTransform", "StructProperty", 0x100, 7 * e, widgetTransform);
+            const std::uintptr_t userWidget = Cls("UserWidget", umgPkg, widget);
+            const std::uintptr_t layoutLibrary = Cls("WidgetLayoutLibrary", umgPkg, object);
+            const std::uintptr_t slateLibrary = Cls("SlateBlueprintLibrary", umgPkg, object);
+            NewObject("Default__WidgetLayoutLibrary", layoutLibrary, umgPkg);
+            NewObject("Default__SlateBlueprintLibrary", slateLibrary, umgPkg);
+            struct Param {
+                const char* name;
+                const char* type;
+                std::int32_t size;
+                std::uintptr_t extra;
+            };
+            const auto Func = [&](const char* name, std::uintptr_t owner, std::initializer_list<Param> params) {
+                const std::uintptr_t fn = NewObject(name, function, owner);
+                std::uintptr_t prev = 0;
+                std::int32_t at = 0;
+                for (const Param& q : params) {
+                    prev = Property(fn, prev, q.name, q.type, at, q.size, q.extra);
+                    at += q.size;
+                }
+                arena.Put<std::int32_t>(fn + g_.propsSize, at);
+            };
+            const auto v2 = [&](const char* n) { return Param{n, "StructProperty", 2 * e, vector2D}; };
+            const Param context{"WorldContextObject", "ObjectProperty", 8, 0};
+            const Param geo{"Geometry", "StructProperty", 0x38, geometry};
+            Func("SetRenderTranslation", widget, {v2("Translation")});
+            Func("GetCachedGeometry", widget, {{"ReturnValue", "StructProperty", 0x38, geometry}});
+            Func("GetOwningPlayer", userWidget, {{"ReturnValue", "ObjectProperty", 8, 0}});
+            Func("GetViewportSize", layoutLibrary, {context, v2("ReturnValue")});
+            Func("GetViewportScale", layoutLibrary, {context, {"ReturnValue", "FloatProperty", 4, 0}});
+            Func("LocalToViewport", slateLibrary,
+                 {context, geo, v2("LocalCoordinate"), v2("PixelPosition"), v2("ViewportPosition")});
+            Func("LocalToAbsolute", slateLibrary, {geo, v2("LocalCoordinate"), v2("ReturnValue")});
+            Func("ProjectWorldLocationToScreen", playerController,
+                 {{"WorldLocation", "StructProperty", 3 * e, obj["Vector"]}, v2("ScreenLocation"),
+                  {"bPlayerViewportRelative", "BoolProperty", 1, BoolBits(0x01)}, {"ReturnValue", "BoolProperty", 1, BoolBits(0x01)}});
+        }
+
         // A game's own classes and instances.
         const std::uintptr_t game = NewObject("/Script/TestGame", package, 0);
         const std::uintptr_t aim = Struct("TestAim", game);
@@ -569,6 +623,7 @@ private:
     const Generation& g_;
     const bool actorDefault_;
     const int natives_;
+    const bool umg_;
     std::uintptr_t countAt_ = 0;
     std::uintptr_t pastTheEnd_ = 0;
     std::map<std::string, std::uint32_t> nameIds_;
@@ -863,6 +918,42 @@ void TestCrosshairMoverNeedsUmg() {
     CHECK(what == "/Script/UMG.Widget:SetRenderTranslation is not loaded");
 }
 
+// A game with UMG: the mover is built off reflection alone, and refuses a
+// player outside the ones it keeps before it touches the game.
+void TestCrosshairMoverPlayers() {
+    std::cout << "  -- crosshair mover players\n";
+    for (const Generation* g : {&kUE427, &kUE5, &kUE418}) {
+        World w(*g, true, -1, true);
+        const ReflectionDiscoveryResult r = DiscoverReflection(w.arena, w.arena.module, w.arena);
+        CHECK(r.found.has_value());
+        if (!r.found) continue;
+        const Reflection refl(r.found->objects, r.found->layout);
+        const auto outOfRange = [](const std::function<void()>& fn) {
+            try {
+                fn();
+            } catch (const std::out_of_range&) {
+                return true;
+            }
+            return false;
+        };
+        std::string why;
+        try {
+            UmgCrosshairMover mover(refl, r.found->processEvent, CrosshairWidgets{});
+            for (int player : {-1, UmgCrosshairMover::kMaxPlayers}) {
+                CHECK(outOfRange([&] { mover.See(player, 0); }));
+                CHECK(outOfRange([&] { mover.Release(player); }));
+                CHECK(outOfRange([&] { mover.Update(player, 0, FVector{}, FVector{}); }));
+            }
+            CHECK(!outOfRange([&] { mover.See(UmgCrosshairMover::kMaxPlayers - 1, 0); }));
+            CHECK(!outOfRange([&] { mover.Release(0); }));
+        } catch (const std::runtime_error& e) {
+            why = e.what();
+        }
+        if (!why.empty()) std::cout << "     " << g->label << ": " << why << "\n";
+        CHECK(why.empty());
+    }
+}
+
 void TestObjectAt() {
     std::cout << "  -- object array slots\n";
     Arena a;
@@ -930,6 +1021,7 @@ int RunUnrealReflectionTests() {
     TestNetFunctionFlags();
     TestScriptFunction();
     TestCrosshairMoverNeedsUmg();
+    TestCrosshairMoverPlayers();
     TestTornObjectCount();
     TestObjectAt();
     std::cout << (g_failures ? "  [FAIL] " : "  [PASS] ") << "Unreal reflection, " << g_failures << " failed\n";
