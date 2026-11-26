@@ -1,0 +1,7 @@
+# Vertical tab and form feed are not trimmed: they stay in the key or value.
+status	Readable
+format	1
+stamp	false
+key	General	\x0BA	1	2	-
+key	General	B\x0C	2	3	-
+key	General	C	\x0C3\x0B	4	-

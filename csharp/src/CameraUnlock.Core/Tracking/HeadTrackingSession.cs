@@ -1,0 +1,541 @@
+using System;
+using System.Diagnostics;
+using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
+using CameraUnlock.Core.Processing;
+using CameraUnlock.Core.Protocol;
+
+namespace CameraUnlock.Core.Tracking
+{
+    /// <summary>
+    /// Complete per-frame head tracking pipeline with tracking-loss hold and
+    /// tracking-mode cycling:
+    ///
+    ///   rotation: ITrackingDataSource -> PoseInterpolator -> TrackingProcessor
+    ///   position: ITrackingDataSource -> PositionInterpolator -> PositionProcessor
+    ///
+    /// Framework-agnostic: call <see cref="Update"/> once per frame, then read
+    /// <see cref="Rotation"/> and <see cref="PositionOffset"/> and apply them to the
+    /// engine's camera however the mod requires.
+    ///
+    /// The session does not own the receiver's lifecycle - the caller starts and
+    /// disposes it.
+    /// </summary>
+    public sealed class HeadTrackingSession
+    {
+        private readonly ITrackingDataSource _receiver;
+        private readonly TrackingProcessor _processor;
+        private readonly PositionProcessor _positionProcessor;
+        private readonly PoseInterpolator _poseInterpolator = new PoseInterpolator();
+        private readonly PositionInterpolator _positionInterpolator = new PositionInterpolator();
+
+        private TrackingMode _mode = TrackingMode.RotationAndPosition;
+        private bool _wasFresh;
+        private int _freshFrames;
+        private bool _hasCentered;
+        private TrackingPose _heldRotation;
+        private Vec3 _heldPositionOffset;
+        private bool _hasPose;
+
+        private long _lastPacketTicks;
+        private bool _poseSeeded;
+        private bool _positionSeeded;
+        private float _lastRawYaw, _lastRawPitch, _lastRawRoll;
+        private float _lastRawX, _lastRawY, _lastRawZ;
+
+        // The session, not PositionSettings, is the owner of the two smoothing values.
+        // They still LIVE in PositionSettings (that is the shape mods are wired to), but
+        // a settings struct is assigned wholesale, so an ApplyPositionSettings after an
+        // ApplySmoothing used to silently reset position smoothing to the struct's
+        // defaults while rotation smoothing kept the value the user asked for. Owning the
+        // pair here and recomposing it onto every settings assignment - and again each
+        // Update, which also catches a write straight to the caller-held processor -
+        // makes call order irrelevant in both directions.
+        private float _localSmoothing;
+        private float _remoteSmoothing;
+
+        private const double CmPerMetre = 100.0;
+        private readonly AccelaFilter _accela = new AccelaFilter();
+        private bool _accelaOn;
+        private bool _accelaHasOutput;
+        private long _accelaLastTicks;
+        private AccelaPose _accelaOutput;
+
+        public HeadTrackingSession(ITrackingDataSource receiver, TrackingProcessor processor, PositionProcessor positionProcessor)
+        {
+            if (receiver == null) throw new ArgumentNullException("receiver");
+            if (processor == null) throw new ArgumentNullException("processor");
+            if (positionProcessor == null) throw new ArgumentNullException("positionProcessor");
+
+            _receiver = receiver;
+            _processor = processor;
+            _positionProcessor = positionProcessor;
+
+            _localSmoothing = processor.LocalSmoothing;
+            _remoteSmoothing = processor.RemoteSmoothing;
+            PushSmoothing();
+        }
+
+        /// <summary>
+        /// Active tracking mode. Switching position off resets position smoothing so
+        /// re-enabling it does not blend from stale values.
+        /// </summary>
+        public TrackingMode Mode
+        {
+            get { return _mode; }
+            set
+            {
+                if (_mode == value) return;
+                _mode = value;
+                if (!PositionActive)
+                {
+                    _positionProcessor.ResetSmoothing();
+                    _positionInterpolator.Reset();
+                    _positionSeeded = false;
+                }
+            }
+        }
+
+        /// <summary>Whether head rotation is part of the current mode.</summary>
+        public bool RotationActive
+        {
+            get { return _mode != TrackingMode.PositionOnly; }
+        }
+
+        /// <summary>Whether positional (6DOF) offset is part of the current mode.</summary>
+        public bool PositionActive
+        {
+            get { return _mode != TrackingMode.RotationOnly; }
+        }
+
+        /// <summary>
+        /// Consecutive fresh frames required after the first connection before the
+        /// automatic recenter fires, giving phone trackers time to settle. Fires once
+        /// per session; later tracking-loss gaps do not re-arm it. Only consulted when
+        /// <see cref="AutoRecenterOnConnect"/> is enabled.
+        /// </summary>
+        public int StabilizationFrames { get; set; } = 10;
+
+        /// <summary>
+        /// Whether to capture the incoming pose as the center once the connection
+        /// stabilizes. Off by default.
+        /// <para>
+        /// The pipeline assumes the tracker's stream is already centered: the tracker owns
+        /// the center and the mod consumes the pose as absolute. Headcam zeroes at tracking start and
+        /// on every CENTER press; opentrack centers on its own Center bind.
+        /// </para>
+        /// <para>
+        /// Capturing here as well puts a SECOND center in series with the tracker's, and
+        /// the two drift apart because each side recenters at moments the other cannot
+        /// see. A CENTER press on a tracker that sends no HCAM trailer then leaves the
+        /// view parked at the negated drift until the user also hits the mod's recenter
+        /// hotkey - two presses for one recenter.
+        /// </para>
+        /// <para>
+        /// Enable only for a tracker whose origin is arbitrary at startup and which
+        /// cannot zero itself. The recenter hotkey and the HCAM trailer are unaffected
+        /// either way.
+        /// </para>
+        /// </summary>
+        public bool AutoRecenterOnConnect { get; set; }
+
+        /// <summary>
+        /// User smoothing applied when the tracker runs on this machine (loopback).
+        /// Forwarded to both the rotation and the position processor. The getter reports
+        /// the session's own value, which is what both processors are actually running.
+        /// </summary>
+        public float LocalSmoothing
+        {
+            get { return _localSmoothing; }
+            set
+            {
+                _localSmoothing = value;
+                PushSmoothing();
+            }
+        }
+
+        /// <summary>
+        /// User smoothing applied when the tracker is a remote device on the network.
+        /// Forwarded to both the rotation and the position processor. The getter reports
+        /// the session's own value, which is what both processors are actually running.
+        /// </summary>
+        public float RemoteSmoothing
+        {
+            get { return _remoteSmoothing; }
+            set
+            {
+                _remoteSmoothing = value;
+                PushSmoothing();
+            }
+        }
+
+        /// <summary>
+        /// Position settings for this session. Assigning recomposes the session's two
+        /// smoothing values onto the incoming struct, so assigning settings can never
+        /// undo a <see cref="LocalSmoothing"/> / <see cref="RemoteSmoothing"/> change and
+        /// the two can be set in either order. To change smoothing, set those properties;
+        /// the smoothing fields carried by the assigned struct are ignored.
+        /// </summary>
+        public PositionSettings PositionSettings
+        {
+            get { return _positionProcessor.Settings; }
+            set { _positionProcessor.Settings = value.WithSmoothing(_localSmoothing, _remoteSmoothing); }
+        }
+
+        /// <summary>
+        /// Forward distance in metres from the neck pivot to the point the tracker
+        /// watches, forwarded to the position processor. See
+        /// <see cref="PositionProcessor.TrackerPivotForward"/> for what the value means and
+        /// why it defaults to 0.
+        /// </summary>
+        public float TrackerPivotForward
+        {
+            get { return _positionProcessor.TrackerPivotForward; }
+            set { _positionProcessor.TrackerPivotForward = value; }
+        }
+
+        /// <summary>
+        /// Upward distance in metres from the neck pivot to the point the tracker watches,
+        /// forwarded to the position processor. See
+        /// <see cref="PositionProcessor.TrackerPivotUp"/>.
+        /// </summary>
+        public float TrackerPivotUp
+        {
+            get { return _positionProcessor.TrackerPivotUp; }
+            set { _positionProcessor.TrackerPivotUp = value; }
+        }
+
+        private void PushSmoothing()
+        {
+            _processor.LocalSmoothing = _localSmoothing;
+            _processor.RemoteSmoothing = _remoteSmoothing;
+            _positionProcessor.Settings =
+                _positionProcessor.Settings.WithSmoothing(_localSmoothing, _remoteSmoothing);
+        }
+
+        /// <summary>
+        /// Whether the latest <see cref="Update"/> saw a remote connection. Read from
+        /// the receiver every update, so switching between a local tracker and a phone
+        /// on WiFi swaps the smoothing parameter without a restart.
+        /// </summary>
+        public bool IsRemoteConnection { get; private set; }
+
+        /// <summary>
+        /// Packets this many seconds apart start the Accela stage fresh: its steps are capped
+        /// at AccelaFilter.MaxDt, so one resumed after a long gap would ease slowly from where
+        /// the head was.
+        /// </summary>
+        public const double AccelaRestartSeconds = 5.0;
+
+        /// <summary>
+        /// The per-packet Accela stage between the receiver and the interpolators, for a
+        /// tracker that sends a raw signal. Off by default; turning it on starts it fresh from
+        /// the next packet. It steps once per new packet, so a frame with no new packet does
+        /// not move it, and it keeps easing toward a repeated pose. Matches HeadTrackingSession
+        /// in the C++ core. Set it, and AccelaAmount, on the thread that calls Update().
+        /// </summary>
+        public bool AccelaOn
+        {
+            get { return _accelaOn; }
+            set
+            {
+                if (value && !_accelaOn) _accelaHasOutput = false;
+                _accelaOn = value;
+            }
+        }
+
+        /// <summary>
+        /// The pose the latest fresh Update() handed to the interpolator: the receiver's, after
+        /// the Accela stage when it is on. Matches GetLastRaw() in the C++ core.
+        /// </summary>
+        public TrackingPose LastRaw { get; private set; }
+
+        /// <summary>The Accela stage's amount, 0 lightest to 1 heaviest. Keeps the stage's state.</summary>
+        public double AccelaAmount
+        {
+            get { return _accela.Amount; }
+            set { _accela.SetAmount(value); }
+        }
+
+        /// <summary>
+        /// Optional logging callback (auto-recenter notifications).
+        /// </summary>
+#if NULLABLE_ENABLED
+        public Action<string>? Log { get; set; }
+#else
+        public Action<string> Log { get; set; }
+#endif
+
+        /// <summary>
+        /// True when tracker data is stale and <see cref="Update"/> is returning the
+        /// held (last known) pose.
+        /// </summary>
+        public bool IsHolding { get; private set; }
+
+        /// <summary>
+        /// Processed head rotation from the latest <see cref="Update"/>.
+        /// Zero when rotation is not part of the current mode.
+        /// </summary>
+        public TrackingPose Rotation { get; private set; }
+
+        /// <summary>
+        /// Processed position offset in meters from the latest <see cref="Update"/>.
+        /// Zero when position is not part of the current mode.
+        /// </summary>
+        public Vec3 PositionOffset { get; private set; }
+
+        /// <summary>
+        /// Runs the pipeline for this frame. Fresh tracker data is interpolated and
+        /// processed; stale data holds the last pose (no snap to center).
+        /// </summary>
+        /// <param name="deltaTime">Frame delta time in seconds.</param>
+        /// <returns>True when a pose is available (fresh or held); false only when no tracker data has ever arrived.</returns>
+        public bool Update(float deltaTime)
+        {
+            if (_receiver.IsDataFresh())
+            {
+                // Re-assert rather than trust: the caller holds its own reference to the
+                // PositionProcessor this session was constructed with, so a settings
+                // assignment made straight on the processor would otherwise carry that
+                // struct's smoothing fields and quietly displace the session's.
+                PushSmoothing();
+
+                // Re-read every frame: the smoothing parameter is selected per
+                // connection, so a switch from a local tracker to a remote one
+                // must take effect without a restart.
+                IsRemoteConnection = _receiver.IsRemoteConnection;
+                _processor.IsRemoteConnection = IsRemoteConnection;
+                _positionProcessor.IsRemoteConnection = IsRemoteConnection;
+
+                HandleConnectionRecenter();
+
+                if (_receiver.TryConsumeRecenterRequest())
+                {
+                    // Counts as the connection recenter too: without this the
+                    // stabilization countdown fires a few frames later and
+                    // re-captures the center from wherever the head moved to,
+                    // wiping the press the user just made.
+                    _hasCentered = true;
+                    // The tracker app zeroes its own output before signaling, so
+                    // the packet carrying the counter already holds the new
+                    // center. Recenter() would fold the previous smoothed pose -
+                    // which the tracker just subtracted at its end - into the
+                    // offset a second time, parking the view mirrored from the
+                    // pre-press drift.
+                    _processor.RecenterTo(_receiver.GetLatestPose());
+                    RestartFromNewCenter();
+                    // The tracker zeroed its own output: the stage starts from the new pose
+                    // rather than easing across that step.
+                    _accelaHasOutput = false;
+                    Log?.Invoke("Recentered by tracker app");
+                }
+
+                TrackingPose rawPose = _receiver.GetLatestPose();
+                PositionData rawPosition = _receiver.GetLatestPosition();
+                if (_accelaOn)
+                {
+                    if (rawPose.TimestampTicks != _lastPacketTicks)
+                    {
+                        long ticks = rawPose.TimestampTicks;
+                        if (!_accelaHasOutput ||
+                            (_accelaLastTicks != 0 && (ticks - _accelaLastTicks) >= (long)(AccelaRestartSeconds * Stopwatch.Frequency)))
+                        {
+                            _accela.Reset();
+                        }
+                        _accelaLastTicks = ticks;
+                        // The receiver gives metres; the filter's position deadzone and gains are
+                        // in the centimetres OpenTrack sends, as Headstart's webcam filter runs them.
+                        _accelaOutput = _accela.Filter(
+                            new AccelaPose(rawPose.Yaw, rawPose.Pitch, rawPose.Roll,
+                                rawPosition.X * CmPerMetre, rawPosition.Y * CmPerMetre, rawPosition.Z * CmPerMetre),
+                            (double)ticks / Stopwatch.Frequency);
+                        _accelaHasOutput = true;
+                    }
+                    if (_accelaHasOutput)
+                    {
+                        rawPose = new TrackingPose((float)_accelaOutput.Yaw, (float)_accelaOutput.Pitch, (float)_accelaOutput.Roll,
+                            rawPose.TimestampTicks);
+                        rawPosition = new PositionData((float)(_accelaOutput.X / CmPerMetre), (float)(_accelaOutput.Y / CmPerMetre),
+                            (float)(_accelaOutput.Z / CmPerMetre), rawPosition.TimestampTicks);
+                    }
+                }
+
+                // New DATA, not merely a new packet. A sender can repeat a pose in more
+                // packets than its source produces, so deriving this from the receive timestamp alone
+                // collapses the interpolator's interval estimate onto the packet rate:
+                // every segment finishes within a frame or two of the sample that started
+                // it and the inter-sample frames the interpolator exists to generate become
+                // flat spots. docs/porting-the-pipeline.md section 2, and the
+                // duplicate-packets-track-the-source-rate conformance vector.
+                //
+                // The seed flags are what makes the filter safe in this port. Centering
+                // here happens at the PROCESSOR, so a recenter leaves the raw stream
+                // untouched: with no flag, a user holding perfectly still would never
+                // change a value, the interpolator that the recenter just Reset would never
+                // re-seed, and the output would sit at zero until they moved. Every path
+                // that Resets an interpolator clears the matching flag, and an unseeded
+                // interpolator re-seeds from the current pose on the very next frame -
+                // no new packet required, because a recenter can land between two of them.
+                LastRaw = rawPose;
+                bool isNewPacket = rawPose.TimestampTicks != _lastPacketTicks;
+                _lastPacketTicks = rawPose.TimestampTicks;
+
+                bool isNewSample = !_poseSeeded || (isNewPacket &&
+                    (rawPose.Yaw != _lastRawYaw || rawPose.Pitch != _lastRawPitch || rawPose.Roll != _lastRawRoll));
+                bool isNewPositionSample = !_positionSeeded || (isNewPacket &&
+                    (rawPosition.X != _lastRawX || rawPosition.Y != _lastRawY || rawPosition.Z != _lastRawZ));
+
+                if (isNewSample)
+                {
+                    _lastRawYaw = rawPose.Yaw;
+                    _lastRawPitch = rawPose.Pitch;
+                    _lastRawRoll = rawPose.Roll;
+                    _poseSeeded = true;
+                }
+
+                TrackingPose interpolated = _poseInterpolator.Update(rawPose, isNewSample, deltaTime);
+                TrackingPose rotation = _processor.Process(interpolated, deltaTime);
+
+                Vec3 positionOffset = Vec3.Zero;
+                if (PositionActive)
+                {
+                    // Committed here rather than beside the rotation half: the position
+                    // interpolator only runs in a mode that has position, so marking it
+                    // seeded on a frame it never saw would leave it holding zero the next
+                    // time the mode comes back and the head happens to be still.
+                    if (isNewPositionSample)
+                    {
+                        _lastRawX = rawPosition.X;
+                        _lastRawY = rawPosition.Y;
+                        _lastRawZ = rawPosition.Z;
+                        _positionSeeded = true;
+                    }
+
+                    PositionData interpolatedPosition =
+                        _positionInterpolator.Update(rawPosition, isNewPositionSample, deltaTime);
+
+                    // The PHYSICAL head rotation, not `rotation` - that one has per-axis
+                    // sensitivity and inversion applied. The pivot artifact is a property
+                    // of where the tracker's face point sits relative to the neck, so a
+                    // 2x sensitivity would have the compensation remove twice the arc that
+                    // is actually present, and an inverted axis would remove it backwards.
+                    float physYaw, physPitch, physRoll;
+                    _processor.GetSmoothedRotation(out physYaw, out physPitch, out physRoll);
+                    Quat4 physicalRotationQ = QuaternionUtils.FromYawPitchRoll(physYaw, physPitch, physRoll);
+
+                    positionOffset = _positionProcessor.Process(interpolatedPosition, physicalRotationQ, deltaTime);
+                }
+
+                Rotation = RotationActive ? rotation : NoRotation(rotation);
+                PositionOffset = positionOffset;
+                _heldRotation = rotation;
+                _heldPositionOffset = positionOffset;
+                _hasPose = true;
+                IsHolding = false;
+                return true;
+            }
+
+            _wasFresh = false;
+            _freshFrames = 0;
+
+            if (!_hasPose)
+            {
+                return false;
+            }
+
+            // Tracking loss: hold the last pose rather than snapping to center.
+            IsHolding = true;
+            Rotation = RotationActive ? _heldRotation : NoRotation(_heldRotation);
+            PositionOffset = PositionActive ? _heldPositionOffset : Vec3.Zero;
+            return true;
+        }
+
+        private static TrackingPose NoRotation(TrackingPose pose)
+        {
+            return new TrackingPose(0f, 0f, 0f, pose.TimestampTicks);
+        }
+
+        /// <summary>
+        /// Advances to the next tracking mode
+        /// (6DOF -> rotation only -> position only -> 6DOF) and returns it.
+        /// </summary>
+        public TrackingMode CycleMode()
+        {
+            Mode = (TrackingMode)(((int)_mode + 1) % 3);
+            return _mode;
+        }
+
+        /// <summary>
+        /// Sets the current head pose and position as the new center.
+        ///
+        /// Rotation centering happens ONLY in the processor (quaternion-based,
+        /// gimbal-safe). Never also call OpenTrackReceiver.Recenter() - centering at
+        /// both levels subtracts the offset twice and mirrors the pose instead of
+        /// zeroing it.
+        /// </summary>
+        public void Recenter()
+        {
+            // Disarms the settle-window capture, which matters only while
+            // AutoRecenterOnConnect is set. A deliberate recenter is the definitive
+            // answer to where centre is, and leaving the automatic one armed means it
+            // fires the moment the player next holds still for long enough and
+            // silently replaces the centre they just chose - the same trap the remote
+            // recenter path above already guards against.
+            _hasCentered = true;
+            _processor.Recenter();
+            RestartFromNewCenter();
+        }
+
+        private void RestartFromNewCenter()
+        {
+            _poseInterpolator.Reset();
+            _positionProcessor.SetCenter(_receiver.GetLatestPosition());
+            _positionInterpolator.Reset();
+            _poseSeeded = false;
+            _positionSeeded = false;
+        }
+
+        /// <summary>
+        /// Resets transient pipeline state (interpolators, smoothing, held pose) while
+        /// preserving center offsets. Call when tracking is re-enabled after being
+        /// toggled off, so the view does not blend from stale values.
+        /// </summary>
+        public void Reset()
+        {
+            _accelaHasOutput = false;
+            _poseInterpolator.Reset();
+            _processor.ResetSmoothing();
+            _positionInterpolator.Reset();
+            _positionProcessor.ResetSmoothing();
+            _poseSeeded = false;
+            _positionSeeded = false;
+            _hasPose = false;
+            IsHolding = false;
+        }
+
+        // Off unless AutoRecenterOnConnect is set. When on it fires once per session
+        // and is deliberately NOT re-armed by tracking-loss gaps: the tracker app
+        // stops sending while the face is lost, and recentering on packet resumption
+        // would capture whatever pose the user happens to hold while sitting back
+        // down. Re-acquisition recentering is the app's decision - it signals through
+        // the packet trailer after walking the user through its hold-still flow.
+        private void HandleConnectionRecenter()
+        {
+            if (!AutoRecenterOnConnect || _hasCentered) return;
+
+            if (!_wasFresh)
+            {
+                _freshFrames = 0;
+                _wasFresh = true;
+            }
+
+            _freshFrames++;
+            if (_freshFrames >= StabilizationFrames)
+            {
+                _hasCentered = true;
+                Recenter();
+                Log?.Invoke("Auto-recentered on tracker connection");
+            }
+        }
+    }
+}

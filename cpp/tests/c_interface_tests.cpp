@@ -1,0 +1,1462 @@
+// CameraUnlockCore.dll through cameraunlock/c/cameraunlock.h and nothing else of core's: real
+// OpenTrack datagrams to a loopback port, poses read back a frame at a time, and a config file
+// described, rendered, loaded, saved and read again in a scratch folder.
+
+#include "cameraunlock/c/cameraunlock.h"
+
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#include <windows.h>
+
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <string>
+#include <thread>
+#include <vector>
+
+extern "C" int CameraUnlockHeaderIsC(void);
+
+namespace {
+
+namespace fs = std::filesystem;
+
+int g_failures = 0;
+
+void Check(bool cond, const std::string& name) {
+    std::cout << (cond ? "  [PASS] " : "  [FAIL] ") << name << "\n";
+    if (!cond) ++g_failures;
+}
+
+bool Near(float a, float b, float eps = 1e-3f) {
+    return std::fabs(a - b) <= eps;
+}
+
+constexpr int kPort = 14311;
+constexpr int kHeldPort = 14312;
+constexpr int kViewPort = 14313;
+constexpr float kFrame = 1.0f / 60.0f;
+
+std::string LastError() {
+    char text[1024] = {};
+    cameraunlock_last_error(text, sizeof(text));
+    return text;
+}
+
+std::string TakeLog() {
+    const std::int32_t length = cameraunlock_log_take(nullptr, 0);
+    std::string text(static_cast<std::size_t>(length), '\0');
+    cameraunlock_log_take(text.data(), length);
+    return text;
+}
+
+// The whole of cameraunlock_config_schema's answer, or empty with the reason in LastError.
+std::string Schema() {
+    const std::int32_t length = cameraunlock_config_schema(nullptr, 0);
+    if (length < 0) return std::string();
+    std::string text(static_cast<std::size_t>(length), '\0');
+    cameraunlock_config_schema(text.data(), length + 1);
+    return text;
+}
+
+struct Sender {
+    SOCKET socket = INVALID_SOCKET;
+    sockaddr_in to = {};
+
+    Sender(const char* address, int port) {
+        socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        to.sin_family = AF_INET;
+        to.sin_port = htons(static_cast<u_short>(port));
+        inet_pton(AF_INET, address, &to.sin_addr);
+    }
+    ~Sender() { closesocket(socket); }
+
+    void Bytes(const char* data, int length) const {
+        sendto(socket, data, length, 0, reinterpret_cast<const sockaddr*>(&to), sizeof(to));
+    }
+
+    // x, y and z in the wire's centimetres, the angles in degrees.
+    void Pose(double yaw, double pitch = 0.0, double roll = 0.0, double x = 0.0, double y = 0.0, double z = 0.0) const {
+        const double values[6] = {x, y, z, yaw, pitch, roll};
+        Bytes(reinterpret_cast<const char*>(values), sizeof(values));
+    }
+};
+
+// One tracker for the session on kPort: the receiver follows the first sender it hears and
+// ignores a second while the first is still sending.
+const Sender& Tracker() {
+    static const Sender sender("127.0.0.1", kPort);
+    return sender;
+}
+
+// The host's clock, which the aim transitions run on: a frame's worth on from the last input.
+std::uint64_t g_now_ms = 1000;
+
+CameraUnlockFrameInput Input(std::uint32_t flags, float delta = kFrame) {
+    CameraUnlockFrameInput input = {};
+    input.struct_size = sizeof(input);
+    input.flags = flags;
+    g_now_ms += 17;
+    input.now_ms = g_now_ms;
+    input.delta_seconds = delta;
+    input.tan_half_fov = 0.5f;
+    input.tan_half_fov_base = 0.5f;
+    input.forward_stop = std::numeric_limits<float>::infinity();
+    input.aim_forward[2] = 1.0f;
+    input.tracker_to_world[0] = 1.0f;
+    input.tracker_to_world[4] = 1.0f;
+    input.tracker_to_world[8] = 1.0f;
+    return input;
+}
+
+CameraUnlockFrame Frame(const CameraUnlockFrameInput& input) {
+    CameraUnlockFrame frame = {};
+    frame.struct_size = sizeof(frame);
+    if (cameraunlock_session_frame(&input, &frame) != CAMERAUNLOCK_OK) {
+        Check(false, "cameraunlock_session_frame: " + LastError());
+    }
+    return frame;
+}
+
+// A second of frames, by which the pipeline is on the newest pose the receiver published.
+CameraUnlockFrame Settle(std::uint32_t flags = CAMERAUNLOCK_FRAME_ACTIVE) {
+    CameraUnlockFrame frame = {};
+    for (int i = 0; i < 60; ++i) frame = Frame(Input(flags));
+    return frame;
+}
+
+template <class Reached>
+bool WaitFor(Reached reached, int timeout_ms = 3000) {
+    for (int waited = 0; waited < timeout_ms; waited += 10) {
+        if (reached()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return reached();
+}
+
+bool WaitYaw(float yaw) {
+    return WaitFor([&] { return Near(Settle().head_yaw, yaw); });
+}
+
+CameraUnlockSettings Defaults() {
+    CameraUnlockSettings settings = {};
+    settings.struct_size = sizeof(settings);
+    cameraunlock_settings_defaults(&settings);
+    return settings;
+}
+
+std::string ReadFile(const fs::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+}
+
+// An IPv4 address of this machine that is not loopback, or empty.
+std::string OwnAddress() {
+    char name[256] = {};
+    gethostname(name, sizeof(name));
+    addrinfo hints = {};
+    hints.ai_family = AF_INET;
+    addrinfo* found = nullptr;
+    if (getaddrinfo(name, nullptr, &hints, &found) != 0) return std::string();
+    std::string address;
+    for (addrinfo* at = found; at != nullptr && address.empty(); at = at->ai_next) {
+        char text[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(at->ai_addr)->sin_addr, text, sizeof(text));
+        if (std::strncmp(text, "127.", 4) != 0) address = text;
+    }
+    freeaddrinfo(found);
+    return address;
+}
+
+void TestBoundary() {
+    std::cout << "\n[c interface: the boundary]\n";
+    Check(cameraunlock_abi() == CAMERAUNLOCK_ABI, "the library is the ABI this test was compiled against");
+    Check(CameraUnlockHeaderIsC() == 1, "the header compiles as C and calls through");
+    Check(cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_SETTINGS) == sizeof(CameraUnlockSettings) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_FRAME_INPUT) == sizeof(CameraUnlockFrameInput) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_FRAME) == sizeof(CameraUnlockFrame) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_OBSTRUCTION) == sizeof(CameraUnlockObstruction) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_LEAN) == sizeof(CameraUnlockLean) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_CONFIG) == sizeof(CameraUnlockConfig) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_OPTION) == sizeof(CameraUnlockOption),
+          "the library says how large each of its structs is");
+    Check(cameraunlock_struct_size(7) == CAMERAUNLOCK_ERROR, "and refuses a number that names none");
+
+    CameraUnlockSettings settings = {};
+    settings.struct_size = 4;
+    Check(cameraunlock_settings_defaults(&settings) == CAMERAUNLOCK_ERROR, "a struct of another size is refused");
+    Check(LastError().find("different builds") != std::string::npos &&
+              LastError().find("60 bytes") != std::string::npos,
+          "and the reason, as text, names both sizes: " + LastError());
+    char small[4] = {};
+    Check(cameraunlock_last_error(small, sizeof(small)) > 4 && small[0] == '\0',
+          "a buffer too small for the reason is left alone and told the length");
+    Check(cameraunlock_session_configure(nullptr) == CAMERAUNLOCK_ERROR, "NULL for a struct is refused, not read");
+
+    settings = Defaults();
+    Check(Near(settings.local_smoothing, 0.0f) && Near(settings.remote_smoothing, 0.15f) &&
+              Near(settings.limit_x, 0.30f) && Near(settings.limit_y, 0.20f) && Near(settings.limit_z, 0.40f) &&
+              Near(settings.limit_z_back, 0.10f) && Near(settings.light_multiplier, 1.5f) &&
+              settings.data_freshness_ms == 500,
+          "the defaults are core's");
+    settings.limit_y_down = -0.1f;
+    Check(cameraunlock_session_configure(&settings) == CAMERAUNLOCK_ERROR, "a negative limit is refused");
+    settings = Defaults();
+    settings.tracking_mode = 7;
+    Check(cameraunlock_session_configure(&settings) == CAMERAUNLOCK_ERROR, "a tracking mode that is none is refused");
+    Check(cameraunlock_aim_mode_label(9) == nullptr, "an aim mode that is none has no label");
+    Check(std::string(cameraunlock_aim_mode_label(CAMERAUNLOCK_AIM_STOCK_SIGHTS)) == "Aim mode: stock sights",
+          "an aim mode's label is core's");
+    Check(TakeLog().find("different builds") != std::string::npos, "every refusal is in the log as well");
+}
+
+void TestPortInUse() {
+    std::cout << "\n[c interface: a port another program holds]\n";
+    const SOCKET holder = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(kHeldPort);
+    address.sin_addr.s_addr = INADDR_ANY;
+    Check(bind(holder, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0, "another program holds the port");
+
+    Check(cameraunlock_session_start(kHeldPort) == CAMERAUNLOCK_OK, "starting on a held port is not an error");
+    const CameraUnlockFrame waiting = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((waiting.flags & CAMERAUNLOCK_STATE_LISTENING) == 0, "the session says it is not listening");
+    Check((waiting.flags & CAMERAUNLOCK_STATE_LOG) != 0, "and that the log has lines");
+    const std::string log = TakeLog();
+    Check(log.find("bind failed with error " + std::to_string(WSAEADDRINUSE)) != std::string::npos,
+          "the log carries the system's own reason for the bind");
+    Check(log.find("Listening for OpenTrack datagrams") == std::string::npos, "and does not say it is listening");
+    Check(cameraunlock_session_start(kHeldPort) == CAMERAUNLOCK_ERROR &&
+              LastError().find("already started") != std::string::npos,
+          "starting twice is refused: " + LastError());
+
+    closesocket(holder);
+    Check(WaitFor([] { return (Frame(Input(0)).flags & CAMERAUNLOCK_STATE_LISTENING) != 0; }),
+          "the port is bound soon after the other program lets it go");
+    const Sender sender("127.0.0.1", kHeldPort);
+    sender.Pose(3.0);
+    Check(WaitYaw(3.0f), "and poses arrive on it");
+    Check(cameraunlock_session_stop() == CAMERAUNLOCK_OK, "the session stops");
+    Check(cameraunlock_session_stop() == CAMERAUNLOCK_OK, "and stopping a stopped session is not an error");
+}
+
+void TestReceiving() {
+    std::cout << "\n[c interface: poses off the wire]\n";
+    CameraUnlockSettings settings = Defaults();
+    settings.data_freshness_ms = 200;
+    settings.limit_y = 0.25f;
+    settings.limit_y_down = 0.05f;
+    Check(cameraunlock_session_configure(&settings) == CAMERAUNLOCK_OK, "the settings are taken");
+    TakeLog();
+    Check(cameraunlock_session_start(kPort) == CAMERAUNLOCK_OK, "the session starts again after a stop");
+    Check(TakeLog().find("Listening for OpenTrack datagrams on UDP port " + std::to_string(kPort)) != std::string::npos,
+          "and a port bound at once is said so in the log");
+    const Sender& sender = Tracker();
+
+    CameraUnlockFrame frame = Settle();
+    Check((frame.flags & (CAMERAUNLOCK_STATE_POSE | CAMERAUNLOCK_STATE_FRESH)) == 0,
+          "there is no pose before the first packet, the last session's included");
+
+    sender.Bytes("short", 5);
+    const double not_a_number[6] = {0.0, 0.0, 0.0, std::nan(""), 0.0, 0.0};
+    sender.Bytes(reinterpret_cast<const char*>(not_a_number), sizeof(not_a_number));
+    const double too_large[6] = {0.0, 1e300, 0.0, 0.0, 0.0, 0.0};
+    sender.Bytes(reinterpret_cast<const char*>(too_large), sizeof(too_large));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    Check((Settle().flags & CAMERAUNLOCK_STATE_POSE) == 0,
+          "a short datagram, one holding a NaN and one past a float's range give no pose");
+
+    sender.Pose(20.0, -5.0, 2.0, 10.0, 0.0, -20.0);
+    Check(WaitYaw(20.0f), "the first pose arrives");
+    frame = Settle();
+    Check(Near(frame.head_pitch, -5.0f) && Near(frame.head_roll, 2.0f), "pitch and roll in degrees");
+    Check(Near(frame.head_x, 0.10f) && Near(frame.head_z, -0.20f), "the wire's centimetres arrive as metres");
+    Check((frame.flags & CAMERAUNLOCK_STATE_POSE) != 0 && (frame.flags & CAMERAUNLOCK_STATE_ROTATION) != 0 &&
+              (frame.flags & CAMERAUNLOCK_STATE_LISTENING) != 0,
+          "the frame says it has a pose, a rotation to apply and a bound port");
+    Check((frame.flags & CAMERAUNLOCK_STATE_REMOTE) == 0, "a sender on loopback is local");
+    Check(Near(frame.yaw, 20.0f) && Near(frame.pose_share, 1.0f) && Near(frame.zoom_factor, 1.0f),
+          "unzoomed and at the hip the view gets the head's own angles");
+    Check(Near(frame.light_yaw, 30.0f) && Near(frame.light_pitch, -7.5f), "the light's angles are the view's by light_multiplier");
+
+    // A relay repeating the pose faster than the tracker measures one.
+    for (int i = 0; i < 5; ++i) sender.Pose(20.0, -5.0, 2.0, 10.0, 0.0, -20.0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    Check(Near(Settle().head_yaw, 20.0f), "repeats of the published pose change nothing");
+
+    // The tracker loses the head and repeats centre.
+    for (int i = 0; i < 6; ++i) {
+        sender.Pose(0.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        Check(Near(Settle().head_yaw, 20.0f), "a jump to a pose that then repeats is never followed");
+    }
+    sender.Pose(20.5, -5.0, 2.0, 10.0, 0.0, -20.0);
+    Check(WaitYaw(20.5f), "the head coming back is followed at once");
+
+    // A fast turn: only its first step waits for the packet after it.
+    sender.Pose(31.0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    Check(Near(Settle().head_yaw, 20.5f), "the first large step of a turn is held one packet");
+    sender.Pose(42.0);
+    Check(WaitYaw(42.0f), "the packet after it differs, and the turn is followed");
+    sender.Pose(53.0);
+    Check(WaitYaw(53.0f), "the rest of the turn is not held");
+    sender.Pose(53.5);
+    Check(WaitYaw(53.5f), "the turn ends");
+
+    // The limits, in the tracker's axes: y up and down apart, z forward (negative) and back apart.
+    sender.Pose(53.5, 0.0, 0.0, 100.0, 100.0, -100.0);
+    Check(WaitFor([] { return Near(Settle().head_x, 0.30f); }), "x stops at limit_x");
+    frame = Settle();
+    Check(Near(frame.head_y, 0.25f), "y stops at limit_y going up");
+    Check(Near(frame.head_z, -0.40f), "z stops at limit_z leaning in");
+    sender.Pose(53.5, 0.0, 0.0, -100.0, -100.0, 100.0);
+    Check(WaitFor([] { return Near(Settle().head_x, -0.30f); }), "x stops at limit_x the other way");
+    frame = Settle();
+    Check(Near(frame.head_y, -0.05f), "y stops at limit_y_down going down");
+    Check(Near(frame.head_z, 0.10f), "z stops at limit_z_back leaning back");
+
+    // Silence.
+    Check((Settle().flags & CAMERAUNLOCK_STATE_FRESH) != 0, "a pose just received is fresh");
+    std::this_thread::sleep_for(std::chrono::milliseconds(350));
+    frame = Settle();
+    Check((frame.flags & CAMERAUNLOCK_STATE_FRESH) == 0, "past data_freshness_ms with no packet the tracker is quiet");
+    Check((frame.flags & CAMERAUNLOCK_STATE_POSE) != 0 && Near(frame.head_yaw, 53.5f) && Near(frame.head_x, -0.30f),
+          "and the tracker's last pose is still reported");
+    Check(Near(frame.tracker_share, 0.0f) && Near(frame.yaw, 0.0f) && Near(frame.roll, 0.0f) &&
+              Near(frame.light_yaw, 0.0f) && Near(frame.pose_share, 0.0f),
+          "but a second after it went quiet none of it reaches the view");
+
+    // A frame tracking does not apply on.
+    frame = Frame(Input(0));
+    Check((frame.flags & (CAMERAUNLOCK_STATE_POSE | CAMERAUNLOCK_STATE_ROTATION | CAMERAUNLOCK_STATE_LEAN)) == 0 &&
+              frame.yaw == 0.0f,
+          "an inactive frame carries no pose");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check(Near(frame.head_yaw, 53.5f) && frame.tracker_share == 0.0f && frame.yaw == 0.0f,
+          "a view that starts applying while the tracker is quiet gets nothing of its old pose");
+
+    sender.Pose(53.5, 0.0, 0.0, -100.0, -100.0, 100.0);
+    Check(WaitFor([] { return (Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_FRESH) != 0; }),
+          "the tracker sends again");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check(frame.tracker_share > 0.0f && frame.tracker_share < 0.1f && frame.yaw < 5.0f,
+          "and its pose eases back in rather than jumping");
+    for (int i = 0; i < 30; ++i) frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check(frame.tracker_share == 1.0f && Near(frame.yaw, 53.5f), "whole within half a second");
+    frame = Frame(Input(0));
+    Check(Near(Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).yaw, 53.5f),
+          "and a view that starts applying while the tracker sends is at its pose at once");
+}
+
+void TestModes() {
+    std::cout << "\n[c interface: the tracking mode and the aim mode]\n";
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_ROTATION_ONLY,
+          "the mode after rotation and position is rotation only");
+    CameraUnlockFrame frame = Settle(CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_LEAN);
+    Check(frame.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_ONLY &&
+              (frame.flags & CAMERAUNLOCK_STATE_ROTATION) != 0 && (frame.flags & CAMERAUNLOCK_STATE_LEAN) == 0 &&
+              frame.head_x == 0.0f,
+          "rotation only turns the view and asks for no lean");
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_POSITION_ONLY, "then position only");
+    frame = Settle();
+    Check((frame.flags & CAMERAUNLOCK_STATE_ROTATION) == 0 && frame.yaw == 0.0f && Near(frame.head_x, -0.30f),
+          "position only has a position and no rotation to apply");
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION, "then both again");
+
+    Check(cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_FREE_LOOK_MARKER &&
+              cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK &&
+              cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_STOCK_SIGHTS,
+          "the aim mode cycles in core's order");
+
+    // Stock sights: with the sights up, yaw and pitch ease out and roll stays.
+    const Sender& sender = Tracker();
+    sender.Pose(50.0, 4.0, 6.0);
+    Check(WaitYaw(50.0f), "a pose for the sights");
+    Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_AIMING));
+    g_now_ms += 1000;
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_AIMING));
+    Check(Near(frame.pose_share, 0.0f) && Near(frame.yaw, 0.0f) && Near(frame.pitch, 0.0f) && Near(frame.roll, 6.0f) &&
+              Near(frame.head_yaw, 50.0f),
+          "stock sights with the sights up leaves the view the head's roll alone");
+    Check(cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_SIGHTS_LOCKED, "and the cycle comes round");
+    Check(cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_TRUE_FREE_LOOK) == CAMERAUNLOCK_OK &&
+              Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK,
+          "a host with a cycle of its own puts the session in one mode");
+    Check(cameraunlock_session_set_aim_mode(4) == CAMERAUNLOCK_ERROR, "which has to be a mode");
+    Check(cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_SIGHTS_LOCKED) == CAMERAUNLOCK_OK, "and back");
+    g_now_ms += 1000;
+
+    // The zoom: a narrower field of view scales yaw and pitch, never roll.
+    for (int i = 0; i < 60; ++i) {
+        CameraUnlockFrameInput zoomed = Input(CAMERAUNLOCK_FRAME_ACTIVE);
+        zoomed.tan_half_fov = 0.25f;
+        frame = Frame(zoomed);
+    }
+    const float expected = std::atan(std::tan(50.0f * 3.14159265f / 180.0f) * 0.5f) * 180.0f / 3.14159265f;
+    Check(Near(frame.zoom_factor, 0.5f) && Near(frame.yaw, expected, 1e-2f) && Near(frame.roll, 6.0f),
+          "a zoom of two scales yaw by the tangent and leaves roll");
+    sender.Pose(57.0, 4.0, 6.0);
+    sender.Pose(64.0, 4.0, 6.0);
+    sender.Pose(120.0, 4.0, 6.0);
+    sender.Pose(120.5, 4.0, 6.0);
+    Check(WaitYaw(120.5f), "a yaw past a right angle, as a tracker's curve gives");
+    Check(Near(Settle().yaw, 120.5f, 1e-2f), "stays on its own side of the view unzoomed");
+}
+
+void TestLean() {
+    std::cout << "\n[c interface: the lean]\n";
+    CameraUnlockSettings settings = Defaults();
+    settings.collision_enabled = 1;
+    settings.collision_margin = 0.10f;
+    cameraunlock_session_configure(&settings);
+    const Sender& sender = Tracker();
+    sender.Pose(1.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_x, 0.20f); }), "a head 20 cm to one side");
+
+    const std::uint32_t leaning = CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_LEAN;
+    CameraUnlockFrame frame = Frame(Input(leaning));
+    Check((frame.flags & CAMERAUNLOCK_STATE_LEAN) != 0 && (frame.flags & CAMERAUNLOCK_STATE_LEAN_QUERY) != 0,
+          "the frame asks for the lean, and for the world to be measured first");
+    Check(Near(frame.query_direction[0], 1.0f) && Near(frame.query_direction[1], 0.0f) &&
+              Near(frame.query_direction[2], 0.0f) && Near(frame.query_reach, 0.30f),
+          "along the lean, for its length and the margin");
+
+    CameraUnlockFrame refused = {};
+    refused.struct_size = sizeof(refused);
+    const CameraUnlockFrameInput next = Input(leaning);
+    Check(cameraunlock_session_frame(&next, &refused) == CAMERAUNLOCK_ERROR &&
+              LastError().find("cameraunlock_session_lean") != std::string::npos,
+          "a frame whose lean was never finished is said so at the next one");
+
+    CameraUnlockLean lean = {};
+    lean.struct_size = sizeof(lean);
+    Check(cameraunlock_session_lean(nullptr, &lean) == CAMERAUNLOCK_ERROR, "and no lean is waiting after that");
+
+    CameraUnlockObstruction found = {};
+    found.struct_size = sizeof(found);
+    Frame(Input(leaning));
+    Check(cameraunlock_session_lean(&found, &lean) == CAMERAUNLOCK_OK &&
+              (lean.flags & CAMERAUNLOCK_LEAN_QUERY_FAILED) != 0 && Near(lean.given, 0.20f) && Near(lean.camera[0], 0.20f),
+          "a query that could not run passes the lean and says so");
+
+    found.queried = 1;
+    Frame(Input(leaning));
+    cameraunlock_session_lean(&found, &lean);
+    Check(lean.flags == 0 && Near(lean.asked, 0.20f) && Near(lean.given, 0.20f), "a clear path gives the whole lean");
+
+    found.blocked = 1;
+    found.distance = 0.15f;
+    Frame(Input(leaning));
+    cameraunlock_session_lean(&found, &lean);
+    Check((lean.flags & CAMERAUNLOCK_LEAN_CONTACT) != 0 && Near(lean.given, 0.05f) && Near(lean.camera[0], 0.05f) &&
+              Near(lean.rig[0], 0.0f),
+          "a wall 15 cm off holds the eye the margin short of it, at once");
+
+    found.blocked = 0;
+    Frame(Input(leaning));
+    cameraunlock_session_lean(&found, &lean);
+    Check(lean.given > 0.05f && lean.given < 0.10f, "and the lean opens again slowly once the wall is gone");
+
+    // Sights locked with the sights up: the lean across the aim goes over to the rig.
+    const std::uint32_t sights_up = leaning | CAMERAUNLOCK_FRAME_AIMING | CAMERAUNLOCK_FRAME_RIG_AVAILABLE;
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    g_now_ms += 1000;
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    Check(Near(lean.camera[0], 0.0f) && Near(lean.rig[0], lean.given) && lean.given > 0.05f,
+          "with the sights up the rig carries the lean across the aim");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((frame.flags & CAMERAUNLOCK_STATE_RELEASE_RIG) != 0 && (frame.flags & CAMERAUNLOCK_STATE_LEAN) == 0,
+          "and the first frame with no lean says the rig is to be put back");
+    Check((Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_RELEASE_RIG) == 0, "once");
+
+    // A lean that was asked for and never called lets go of the rig all the same.
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    g_now_ms += 1000;
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    Frame(Input(sights_up));
+    const CameraUnlockFrameInput after_missed = Input(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(lean.rig[0] > 0.05f && cameraunlock_session_frame(&after_missed, &refused) == CAMERAUNLOCK_ERROR,
+          "a rig carrying the lean, and a frame whose lean was never called");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((frame.flags & CAMERAUNLOCK_STATE_RELEASE_RIG) != 0, "the next frame that returns says the rig is to be put back");
+    Check((Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_RELEASE_RIG) == 0, "once");
+
+    // So does a stop.
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    g_now_ms += 1000;
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    Check(lean.rig[0] > 0.05f && cameraunlock_session_stop() == CAMERAUNLOCK_OK, "a rig carrying the lean, and a stop");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((frame.flags & CAMERAUNLOCK_STATE_RELEASE_RIG) != 0, "the frame after a stop says the rig is to be put back");
+    Check((Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_RELEASE_RIG) == 0, "once");
+    Check(cameraunlock_session_start(kPort) == CAMERAUNLOCK_OK, "and the session starts again");
+    sender.Pose(1.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_x, 0.20f); }), "with the head 20 cm to one side again");
+
+    // The host's axes: a matrix that turns the tracker's x into the world's -y.
+    CameraUnlockFrameInput turned = Input(leaning);
+    std::memset(turned.tracker_to_world, 0, sizeof(turned.tracker_to_world));
+    turned.tracker_to_world[3] = -1.0f;
+    turned.tracker_to_world[1] = 1.0f;
+    turned.tracker_to_world[8] = 1.0f;
+    found.blocked = 0;
+    g_now_ms += 1000;
+    for (int i = 0; i < 120; ++i) {
+        g_now_ms += 17;
+        turned.now_ms = g_now_ms;
+        frame = Frame(turned);
+        cameraunlock_session_lean(&found, &lean);
+    }
+    Check(Near(frame.query_direction[1], -1.0f) && Near(lean.camera[1], -0.20f) && Near(lean.camera[0], 0.0f),
+          "the lean comes back in the host's world axes");
+
+    turned.aim_forward[2] = 2.0f;
+    CameraUnlockFrame unused = {};
+    unused.struct_size = sizeof(unused);
+    Check(cameraunlock_session_frame(&turned, &unused) == CAMERAUNLOCK_ERROR, "an aim that is not unit length is refused");
+}
+
+void TestAbsurdPose() {
+    std::cout << "\n[c interface: a pose no tracker sends]\n";
+    const Sender& sender = Tracker();
+    sender.Pose(1.0, 2.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_pitch, 2.0f); }), "a pose to start from");
+
+    // Finite as floats, so the check for NaN and infinity passes them, and far enough apart that
+    // the step between them is not finite.
+    const double absurd[5][6] = {{1.0, 3e38, 0.0, 20.0, 0.0, 0.0},
+                                 {1.0, -3e38, 0.0, 20.0, 0.0, 0.0},
+                                 {1.0, 3e38, 0.0, 20.0, 0.0, 0.0},
+                                 {1.0, 0.0, 0.0, 3e38, -3e38, 3e38},
+                                 {100000.0, 0.0, 0.0, 20.0, 0.0, 0.0}};
+    CameraUnlockFrame frame = {};
+    for (const double* pose : absurd) {
+        sender.Pose(pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        frame = Settle();
+    }
+    Check(std::isfinite(frame.head_pitch) && std::isfinite(frame.pitch) && std::isfinite(frame.head_yaw),
+          "datagrams with angles at the ends of a float's range do not leave the view on a NaN");
+    Check(Near(frame.head_pitch, 2.0f) && Near(frame.head_yaw, 1.0f) && Near(frame.head_x, 0.20f),
+          "they are refused whole: the pose is the last real one");
+    sender.Pose(1.5, 2.5, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_pitch, 2.5f); }), "and the tracker's next pose is followed");
+
+    sender.Pose(1.5, 2.5, 0.0, 20.0, 0.0, 0.0);
+    sender.Pose(170.5, 80.5, -170.5, -500.0, 500.0, 500.0);
+    sender.Pose(170.0, 80.0, -170.0, -500.0, 500.0, 500.0);
+    Check(WaitFor([] { return Near(Settle().head_pitch, 80.0f, 0.05f) && Near(Settle().head_yaw, 170.0f, 0.05f); }),
+          "a pose at the far end of what a tracker sends is taken");
+    sender.Pose(1.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    sender.Pose(1.5, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitYaw(1.5f), "back to the middle");
+}
+
+void TestSmoothingByConnection() {
+    std::cout << "\n[c interface: the smoothing the connection selects]\n";
+    CameraUnlockSettings settings = Defaults();
+    settings.local_smoothing = 0.0f;
+    settings.remote_smoothing = 0.95f;
+    cameraunlock_session_configure(&settings);
+
+    const auto after_a_fifth_of_a_second = [](const char* address) {
+        cameraunlock_session_stop();
+        cameraunlock_session_start(kPort);
+        const Sender sender(address, kPort);
+        sender.Pose(0.0);
+        if (!WaitFor([] { return (Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE, 0.0f)).flags & CAMERAUNLOCK_STATE_POSE) != 0; })) {
+            Check(false, std::string("a pose arrives from ") + address);
+        }
+        Settle();
+        sender.Pose(6.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        CameraUnlockFrame frame = {};
+        for (int i = 0; i < 12; ++i) frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+        return frame;
+    };
+
+    const CameraUnlockFrame local = after_a_fifth_of_a_second("127.0.0.1");
+    Check((local.flags & CAMERAUNLOCK_STATE_REMOTE) == 0 && local.head_yaw > 5.5f,
+          "a loopback sender gets local_smoothing: 6 degrees is nearly reached in a fifth of a second");
+
+    const std::string own = OwnAddress();
+    if (own.empty()) {
+        std::cout << "  [SKIP] this machine has no IPv4 address but loopback, so no remote sender\n";
+    } else {
+        const CameraUnlockFrame remote = after_a_fifth_of_a_second(own.c_str());
+        Check((remote.flags & CAMERAUNLOCK_STATE_REMOTE) != 0,
+              "a sender on this machine's own network address (" + own + ") is remote");
+        Check(remote.head_yaw > 0.5f && remote.head_yaw < 4.0f,
+              "and gets remote_smoothing: the same turn is under way and far from done");
+    }
+    cameraunlock_session_stop();
+}
+
+CameraUnlockFrame ViewFrame(std::int32_t view, const CameraUnlockFrameInput& input) {
+    CameraUnlockFrame frame = {};
+    frame.struct_size = sizeof(frame);
+    if (cameraunlock_view_frame(view, &input, &frame) != CAMERAUNLOCK_OK) {
+        Check(false, "cameraunlock_view_frame: " + LastError());
+    }
+    return frame;
+}
+
+void TestViews() {
+    std::cout << "\n[c interface: more than one view]\n";
+    CameraUnlockSettings settings = Defaults();
+    settings.collision_enabled = 1;
+    settings.collision_margin = 0.10f;
+    cameraunlock_session_configure(&settings);
+    TakeLog();
+
+    Check(cameraunlock_view_start(0, kPort) == CAMERAUNLOCK_OK, "view 0 starts: " + LastError());
+    Check(cameraunlock_session_start(kPort) == CAMERAUNLOCK_ERROR && LastError().find("already started") != std::string::npos,
+          "and is the session, which is then started");
+    const std::string port = std::to_string(kPort);
+    Check(cameraunlock_view_start(1, kPort) == CAMERAUNLOCK_ERROR && LastError().find("view 1") != std::string::npos &&
+              LastError().find("view 0") != std::string::npos && LastError().find("UDP port " + port) != std::string::npos,
+          "a port another view listens on is refused, and the reason names both views and the port: " + LastError());
+    TakeLog();
+    Check(cameraunlock_view_start(1, kViewPort) == CAMERAUNLOCK_OK, "view 1 starts on a port of its own: " + LastError());
+    Check(TakeLog() == "Listening for OpenTrack datagrams on UDP port " + std::to_string(kViewPort) + " (view 1)\n",
+          "and its line in the log says which view it is");
+    Check(cameraunlock_view_start(1, kViewPort + 1) == CAMERAUNLOCK_ERROR &&
+              LastError().find("view 1 is already started") != std::string::npos,
+          "starting a started view is refused: " + LastError());
+
+    CameraUnlockFrame unused = {};
+    unused.struct_size = sizeof(unused);
+    CameraUnlockLean lean = {};
+    lean.struct_size = sizeof(lean);
+    const CameraUnlockFrameInput any = Input(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(cameraunlock_view_start(CAMERAUNLOCK_VIEWS, kViewPort + 1) == CAMERAUNLOCK_ERROR &&
+              LastError().find("there is no view " + std::to_string(CAMERAUNLOCK_VIEWS)) != std::string::npos,
+          "a view past the last is refused by its number: " + LastError());
+    Check(cameraunlock_view_start(-1, kViewPort + 1) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_view_stop(CAMERAUNLOCK_VIEWS) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_view_frame(CAMERAUNLOCK_VIEWS, &any, &unused) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_view_lean(-1, nullptr, &lean) == CAMERAUNLOCK_ERROR &&
+              LastError().find("there is no view -1") != std::string::npos,
+          "and one below 0, by every function that takes a view");
+
+    const Sender& first = Tracker();
+    const Sender second("127.0.0.1", kViewPort);
+    first.Pose(10.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    second.Pose(-25.0, 0.0, 0.0, -10.0, 0.0, 0.0);
+    CameraUnlockFrame one = {};
+    CameraUnlockFrame two = {};
+    const auto both = [&](std::uint32_t flags) {
+        for (int i = 0; i < 60; ++i) {
+            const CameraUnlockFrameInput input = Input(flags);
+            one = ViewFrame(0, input);
+            two = ViewFrame(1, input);
+        }
+    };
+    Check(WaitFor([&] {
+              both(CAMERAUNLOCK_FRAME_ACTIVE);
+              return Near(one.head_yaw, 10.0f) && Near(two.head_yaw, -25.0f);
+          }),
+          "two views drawn in one frame each have the pose of their own tracker");
+    Check(Near(one.head_x, 0.20f) && Near(two.head_x, -0.10f), "position included");
+    const CameraUnlockFrame third = ViewFrame(2, Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((third.flags & (CAMERAUNLOCK_STATE_LISTENING | CAMERAUNLOCK_STATE_POSE)) == 0 &&
+              (one.flags & two.flags & CAMERAUNLOCK_STATE_LISTENING) != 0,
+          "a view that was never started has no port and no pose, as a session that was never started has none");
+
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_ROTATION_ONLY, "the tracking mode is cycled once");
+    both(CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_LEAN);
+    Check(one.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_ONLY && two.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_ONLY &&
+              ((one.flags | two.flags) & CAMERAUNLOCK_STATE_LEAN) == 0 && one.head_x == 0.0f && two.head_x == 0.0f,
+          "and both views are in the new one");
+    cameraunlock_session_cycle_tracking_mode();
+    cameraunlock_session_cycle_tracking_mode();
+    Check(cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_TRUE_FREE_LOOK) == CAMERAUNLOCK_OK, "the aim mode is set once");
+    both(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(one.aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK && two.aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK &&
+              ViewFrame(2, Input(CAMERAUNLOCK_FRAME_ACTIVE)).aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK &&
+              one.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION &&
+              two.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION,
+          "and is every view's, one not started included");
+    cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_SIGHTS_LOCKED);
+    settings.light_multiplier = 2.0f;
+    cameraunlock_session_configure(&settings);
+    both(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(Near(one.light_yaw, 20.0f) && Near(two.light_yaw, -50.0f), "the settings are every view's");
+
+    // The frame and its lean are a pair in each view, and a wall beside one view is not beside the other.
+    const std::uint32_t leaning = CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_LEAN;
+    one = ViewFrame(0, Input(leaning));
+    two = ViewFrame(1, Input(leaning));
+    Check((one.flags & two.flags & CAMERAUNLOCK_STATE_LEAN_QUERY) != 0 && Near(one.query_direction[0], 1.0f) &&
+              Near(two.query_direction[0], -1.0f) && Near(one.query_reach, 0.30f) && Near(two.query_reach, 0.20f),
+          "each view asks for a lean of its own, along its own head");
+    CameraUnlockObstruction clear = {};
+    clear.struct_size = sizeof(clear);
+    clear.queried = 1;
+    CameraUnlockObstruction wall = clear;
+    wall.blocked = 1;
+    wall.distance = 0.15f;
+    CameraUnlockLean held = {};
+    held.struct_size = sizeof(held);
+    Check(cameraunlock_view_lean(1, &wall, &held) == CAMERAUNLOCK_OK && cameraunlock_view_lean(0, &clear, &lean) == CAMERAUNLOCK_OK,
+          "and each is answered: " + LastError());
+    Check((held.flags & CAMERAUNLOCK_LEAN_CONTACT) != 0 && Near(held.given, 0.05f) && Near(held.camera[0], -0.05f) &&
+              lean.flags == 0 && Near(lean.given, 0.20f),
+          "a wall beside one player holds that view and leaves the other its whole lean");
+
+    ViewFrame(0, Input(leaning));
+    ViewFrame(1, Input(leaning));
+    cameraunlock_view_lean(0, &clear, &lean);
+    const CameraUnlockFrameInput next = Input(leaning);
+    Check(cameraunlock_view_frame(0, &next, &unused) == CAMERAUNLOCK_OK, "a view whose lean was finished goes on to its next frame");
+    Check(cameraunlock_view_frame(1, &next, &unused) == CAMERAUNLOCK_ERROR &&
+              LastError().find("view 1") != std::string::npos && LastError().find("cameraunlock_view_lean") != std::string::npos,
+          "and the one whose lean was not is said so by name: " + LastError());
+    Check(cameraunlock_view_lean(1, &clear, &held) == CAMERAUNLOCK_ERROR &&
+              LastError().find("no lean is waiting for view 1") != std::string::npos,
+          "with no lean waiting in it after that: " + LastError());
+    Check(cameraunlock_session_lean(&clear, &lean) == CAMERAUNLOCK_OK, "while the lean of view 0 still waits, for the session's call");
+
+    const SOCKET holder = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(kHeldPort);
+    address.sin_addr.s_addr = INADDR_ANY;
+    bind(holder, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+    TakeLog();
+    Check(cameraunlock_view_start(2, kHeldPort) == CAMERAUNLOCK_OK, "a view starts on a port another program holds");
+    const std::string failed = TakeLog();
+    Check(failed.find("Failed to bind UDP port " + std::to_string(kHeldPort)) != std::string::npos &&
+              failed.find(" (view 2)\n") != std::string::npos,
+          "and the receiver's own line says which view could not bind: " + failed);
+    Check(cameraunlock_view_stop(2) == CAMERAUNLOCK_OK, "it stops while it waits for the port");
+    closesocket(holder);
+
+    Check(cameraunlock_view_stop(1) == CAMERAUNLOCK_OK, "one view stops");
+    both(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check((two.flags & (CAMERAUNLOCK_STATE_LISTENING | CAMERAUNLOCK_STATE_POSE)) == 0 &&
+              (one.flags & CAMERAUNLOCK_STATE_POSE) != 0 && Near(one.head_yaw, 10.0f),
+          "and the other keeps its tracker");
+    Check(cameraunlock_session_stop() == CAMERAUNLOCK_OK && cameraunlock_view_start(1, kPort) == CAMERAUNLOCK_OK &&
+              cameraunlock_view_stop(1) == CAMERAUNLOCK_OK,
+          "a port a stopped view listened on is another view's to take: " + LastError());
+    settings.light_multiplier = Defaults().light_multiplier;
+    cameraunlock_session_configure(&settings);
+}
+
+// After the modes and the yaw mode were saved: rotation only, free look with a marker, yaw false, Quality High.
+void TestOptions(const fs::path& scratch, std::int32_t quality) {
+    const auto text = [](std::int32_t option, std::int32_t which) {
+        char held[512] = {};
+        return cameraunlock_config_option_text(option, which, held, sizeof(held)) == CAMERAUNLOCK_ERROR ? std::string("(error)")
+                                                                                                         : std::string(held);
+    };
+    const auto value = [](std::int32_t option) {
+        double held = -1.0;
+        return cameraunlock_config_option_get(option, &held) == CAMERAUNLOCK_ERROR ? -1.0 : held;
+    };
+
+    Check(cameraunlock_config_option_count() == 7 && text(0, CAMERAUNLOCK_OPTION_TEXT_ID) == "WorldSpaceYaw" &&
+              text(1, CAMERAUNLOCK_OPTION_TEXT_ID) == "TrackingMode" && text(2, CAMERAUNLOCK_OPTION_TEXT_ID) == "AimMode" &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_ID) == "Quality",
+          "the options are the writable rows a control holds, each mode as one: " + LastError());
+    CameraUnlockOption option = {};
+    option.struct_size = sizeof(option);
+    Check(cameraunlock_config_option(3, &option) == CAMERAUNLOCK_OK && option.kind == CAMERAUNLOCK_OPTION_ENUM &&
+              option.source == CAMERAUNLOCK_OPTION_ROW && option.choices == 4 && option.min == 0.0 && option.max == 3.0 &&
+              option.step == 1.0 && text(3, CAMERAUNLOCK_OPTION_TEXT_LABEL) == "Quality" &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_SECTION) == "General" &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_COMMENT) == "The graphics mode." &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 2) == "Medium",
+          "an enum row is described, with its words: " + LastError());
+    Check(cameraunlock_config_option(1, &option) == CAMERAUNLOCK_OK && option.kind == CAMERAUNLOCK_OPTION_ENUM &&
+              option.source == CAMERAUNLOCK_OPTION_TRACKING_MODE && option.choices == 3 &&
+              text(1, CAMERAUNLOCK_OPTION_TEXT_LABEL) == "Tracking mode" &&
+              text(1, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 1) == "Rotation only" &&
+              cameraunlock_config_option(2, &option) == CAMERAUNLOCK_OK && option.source == CAMERAUNLOCK_OPTION_AIM_MODE &&
+              option.choices == 4 && cameraunlock_config_option(0, &option) == CAMERAUNLOCK_OK &&
+              option.kind == CAMERAUNLOCK_OPTION_BOOL && option.choices == 0 && option.max == 1.0,
+          "and the modes and a bool row");
+    char small[4] = {'x', 'x', 'x', 'x'};
+    Check(cameraunlock_config_option_text(3, CAMERAUNLOCK_OPTION_TEXT_ID, small, sizeof(small)) == 7 && small[0] == 'x',
+          "a text that does not fit answers its length and copies nothing");
+    Check(text(3, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 4) == "(error)" && text(0, CAMERAUNLOCK_OPTION_TEXT_CHOICE) == "(error)" &&
+              text(7, CAMERAUNLOCK_OPTION_TEXT_ID) == "(error)" && cameraunlock_config_option(-1, &option) == CAMERAUNLOCK_ERROR,
+          "a word or an option that is not there is refused");
+
+    Check(value(0) == 0.0 && value(1) == CAMERAUNLOCK_TRACKING_ROTATION_ONLY && value(2) == CAMERAUNLOCK_AIM_FREE_LOOK_MARKER &&
+              value(3) == 3.0,
+          "each reads as it was last saved");
+    Check(cameraunlock_config_option_save(0, 1.0) == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_option_save(1, CAMERAUNLOCK_TRACKING_POSITION_ONLY) == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_option_save(2, CAMERAUNLOCK_AIM_STOCK_SIGHTS) == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_option_save(3, 2.0) == CAMERAUNLOCK_SAVE_SAVED,
+          "each saves: " + LastError());
+    const std::string saved = ReadFile(scratch / "CameraUnlock.ini");
+    Check(saved.find("WorldSpaceYaw=true") != std::string::npos && saved.find("RotationEnabled=false") != std::string::npos &&
+              saved.find("PositionEnabled=true") != std::string::npos && saved.find("TrueFreeLook=false") != std::string::npos &&
+              saved.find("FreeLookMarker=false") != std::string::npos && saved.find("StockSights=true") != std::string::npos &&
+              saved.find("Quality=Medium") != std::string::npos,
+          "as its row, or every row of its mode");
+    std::int32_t number = -1;
+    Check(value(0) == 1.0 && value(1) == 2.0 && value(2) == 3.0 && value(3) == 2.0 &&
+              cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 2,
+          "and reads back as saved, as a local row's number does");
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION &&
+              cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_SIGHTS_LOCKED,
+          "a saved mode is the session's: the cycle goes on from it");
+    Check(value(1) == 0.0 && value(2) == 0.0, "and a mode a hotkey cycled reads as the session has it");
+    Check(cameraunlock_config_option_save(3, 7.0) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_option_save(1, 3.0) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_option_save(2, 0.5) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_option_save(9, 0.0) == CAMERAUNLOCK_ERROR && value(1) == 0.0 && value(2) == 0.0 &&
+              value(3) == 2.0 && ReadFile(scratch / "CameraUnlock.ini") == saved,
+          "a value an option does not hold is refused, and nothing takes it");
+}
+
+void TestConfig(const fs::path& scratch) {
+    std::cout << "\n[c interface: the config]\n";
+    const std::string file = (scratch / "CameraUnlock.ini").u8string();
+    const std::string defaults = (scratch / "defaults" / "Defaults.ini").u8string();
+    const std::string rendered = (scratch / "rendered.ini").u8string();
+
+    CameraUnlockConfig config = {};
+    config.struct_size = sizeof(config);
+    Check(cameraunlock_config_load(file.c_str(), defaults.c_str(), &config) == CAMERAUNLOCK_ERROR,
+          "a load before the rows are described is refused");
+
+    Check(cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK, "the description starts");
+    const char* plain[] = {"UdpPort", "EnableOnStartup", "DataFreshnessMs", "LocalSmoothing", "RemoteSmoothing",
+                           "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
+                           "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey", "CycleTrackingModeKey",
+                           "LightMultiplier"};
+    bool added = true;
+    for (const char* name : plain) added = cameraunlock_config_concept(name, 0, nullptr, nullptr) == CAMERAUNLOCK_OK && added;
+    const char* writable[] = {"WorldSpaceYaw", "RotationEnabled", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
+                              "StockSights"};
+    for (const char* name : writable) {
+        added = cameraunlock_config_concept(name, CAMERAUNLOCK_ROW_WRITABLE, nullptr, nullptr) == CAMERAUNLOCK_OK && added;
+    }
+    added = cameraunlock_config_concept("CollisionMargin", 0, "How far the view is held off a wall, in map tiles.",
+                                        "0.12") == CAMERAUNLOCK_OK && added;
+    added = cameraunlock_config_concept("TrueFreeLookKey", CAMERAUNLOCK_ROW_PER_GAME | CAMERAUNLOCK_ROW_WRITABLE, nullptr, "F4") ==
+                CAMERAUNLOCK_OK &&
+            added;
+    Check(added, "the fleet's rows are named by concept: " + LastError());
+    Check(cameraunlock_config_concept("FieldOfVision", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a canonical concept") != std::string::npos,
+          "a name that is no concept is refused");
+    Check(cameraunlock_config_concept("UdpPort", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR, "and a concept named twice");
+    Check(cameraunlock_config_concept("LocalSmoothing", 0, nullptr, "0.5") == CAMERAUNLOCK_ERROR,
+          "a global concept takes no default of the game's own without CAMERAUNLOCK_ROW_PER_GAME");
+
+    const std::int32_t fov = cameraunlock_config_local_float(
+        "General", "FieldOfView", "Field of view in degrees.", CAMERAUNLOCK_ROW_LIVE, 65.0f, 40.0f, 110.0f);
+    const std::int32_t quality = cameraunlock_config_local_enum(
+        "General", "Quality", "The graphics mode.", CAMERAUNLOCK_ROW_WRITABLE, "Automatic,Low,Medium,High", 1);
+    const std::int32_t arms = cameraunlock_config_local_bool("Content", "OwnArms", "The mod's own arms.", 0, 1);
+    const std::int32_t count = cameraunlock_config_local_int("Content", "Trees", "How many trees.", 0, 12, 0, 100);
+    const std::int32_t key =
+        cameraunlock_config_local_hotkey("GraphicsKey", "Goes to the next graphics mode.", CAMERAUNLOCK_ROW_WRITABLE, "f9", 0x100);
+    Check(fov == 0 && quality == 1 && arms == 2 && count == 3 && key == 4, "local rows are numbered as they are added: " + LastError());
+    Check(cameraunlock_config_local_enum("General", "Style", "The style.", 0, "vivid,Natural", 0) == CAMERAUNLOCK_ERROR,
+          "an enum word that is not PascalCase is refused, by core's own codec: " + LastError());
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x100) == CAMERAUNLOCK_ERROR,
+          "two key rows cannot share a bit");
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x8) == CAMERAUNLOCK_ERROR,
+          "and a local key row cannot take one of the fleet's bits");
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, nullptr, 0x8) == CAMERAUNLOCK_ERROR &&
+              LastError().find("default_keys is NULL") != std::string::npos,
+          "a key row with no keys at all is told that before anything about its bit: " + LastError());
+    Check(cameraunlock_config_local_float("General", "FieldOfView", "Again.", 0, 65.0f, 40.0f, 110.0f) == CAMERAUNLOCK_ERROR,
+          "a key used twice is refused");
+
+    const char* seat = "Tapped for the first player, held for the second.";
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x100, 0x400) == CAMERAUNLOCK_ERROR &&
+              LastError().find("hotkey_bit is another row's") != std::string::npos,
+          "a key row that tells a tap from a hold cannot tap another row's bit: " + LastError());
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x100) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is another row's") != std::string::npos,
+          "nor hold it: " + LastError());
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x200) == CAMERAUNLOCK_ERROR,
+          "nor answer one bit for both");
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x8) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x600) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x300, 0x400) == CAMERAUNLOCK_ERROR,
+          "and each of its two is one bit, not one of the fleet's");
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "delete", 0x200, 0x400) == 5,
+          "it is a row like any other key row, numbered after them: " + LastError());
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x400) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x800, 0x200) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x400, 0x800) == CAMERAUNLOCK_ERROR,
+          "and the bit it answers held is taken, as the one it answers tapped is");
+
+    const char* turn = "Tapped once to three times or held.";
+    const auto taps = [turn](const char* keys, std::vector<std::int32_t> bits, std::int32_t held) {
+        return cameraunlock_config_local_hotkey_taps("TurnKey", turn, 0, keys, bits.data(),
+                                                     static_cast<std::int32_t>(bits.size()), held);
+    };
+    Check(taps("Home", {0x100, 0x1000}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("a bit of tap_bits is another row's") != std::string::npos &&
+              taps("Home", {0x800, 0x1000, 0x400}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("a bit of tap_bits is another row's") != std::string::npos &&
+              taps("Home", {0x800, 0x1000}, 0x200) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is another row's") != std::string::npos,
+          "a key row that counts taps takes none of its bits from another row, tapped or held: " + LastError());
+    Check(taps("Home", {0x800, 0x800}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("two of tap_bits are one bit") != std::string::npos &&
+              taps("Home", {0x800, 0x1000}, 0x800) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is one of tap_bits") != std::string::npos,
+          "nor answers one bit for two of them");
+    Check(taps("Home", {0x800, 0x8}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("a bit of tap_bits is not one bit") != std::string::npos &&
+              taps("Home", {0x800, 0x3000}, 0x4000) == CAMERAUNLOCK_ERROR && taps("Home", {0x4, 0x1000}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              taps("Home", {0x800, 0x1000}, 0) == CAMERAUNLOCK_ERROR,
+          "and each is one bit, not one of the fleet's");
+    Check(taps("Home", {0x800}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("taps is not 2 to CAMERAUNLOCK_MOST_TAPS") != std::string::npos &&
+              taps("Home", {0x800, 0x1000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000, 0x400000}, 0x2000) ==
+                  CAMERAUNLOCK_ERROR,
+          "it counts two taps to CAMERAUNLOCK_MOST_TAPS: " + LastError());
+    Check(cameraunlock_config_local_hotkey_taps("TurnKey", turn, 0, "Home", nullptr, 2, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("tap_bits is NULL") != std::string::npos,
+          "and has to be given its bits");
+    Check(taps(nullptr, {0x8, 0x8}, 0x8) == CAMERAUNLOCK_ERROR && LastError().find("default_keys is NULL") != std::string::npos,
+          "with no keys at all it is told that first");
+    Check(taps("home", {0x800, 0x1000, 0x10000}, 0x2000) == 6,
+          "it is a row like any other key row, numbered after them: " + LastError());
+    const auto conceptTaps = [](const char* name, std::uint32_t flags, const char* keys, std::vector<std::int32_t> bits,
+                                std::int32_t held) {
+        return cameraunlock_config_concept_hotkey_taps(name, flags, nullptr, keys, bits.data(),
+                                                       static_cast<std::int32_t>(bits.size()), held);
+    };
+    const std::uint32_t perGame = CAMERAUNLOCK_ROW_PER_GAME | CAMERAUNLOCK_ROW_WRITABLE;
+    Check(conceptTaps("CycleTrackingModeKey", 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("answers its CAMERAUNLOCK_HOTKEY_* bit") != std::string::npos,
+          "a fleet key row that answers a bit of its own is not one of the concept key rows that count taps: " + LastError());
+    Check(conceptTaps("LocalSmoothing", 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a key list concept") != std::string::npos &&
+              conceptTaps("FirstPersonView", 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              conceptTaps(nullptr, 0, nullptr, {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR,
+          "nor is a concept that is no key list, or none: " + LastError());
+    Check(conceptTaps("FirstPersonKey", CAMERAUNLOCK_ROW_WRITABLE, "Delete", {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR,
+          "a global key row takes keys of the game's own only with CAMERAUNLOCK_ROW_PER_GAME, as any global concept does");
+    Check(conceptTaps("FirstPersonKey", perGame, "Delete", {0x800, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("a bit of tap_bits is another row's") != std::string::npos &&
+              conceptTaps("FirstPersonKey", perGame, "Delete", {0x40000, 0x80000}, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is another row's") != std::string::npos &&
+              conceptTaps("FirstPersonKey", perGame, "Delete", {0x40000}, 0x100000) == CAMERAUNLOCK_ERROR &&
+              conceptTaps("FirstPersonKey", perGame, "Delete, Banana", {0x40000, 0x80000}, 0x100000) == CAMERAUNLOCK_ERROR,
+          "its bits follow a local tap row's rules, and its keys are keys: " + LastError());
+    Check(conceptTaps("FirstPersonKey", perGame, "delete, ScrollLock, ctrl+shift+b", {0x40000, 0x80000}, 0x100000) ==
+              CAMERAUNLOCK_OK,
+          "FirstPersonKey counts taps with the game's own keys: " + LastError());
+    Check(conceptTaps("FirstPersonKey", perGame, "Delete", {0x200000, 0x400000}, 0x800000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_concept("FirstPersonKey", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR,
+          "once");
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x40000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x200000, 0x100000) == CAMERAUNLOCK_ERROR,
+          "and a local row cannot take its bits either");
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x1000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x10000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x4000, 0x1000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x2000, 0x4000) == CAMERAUNLOCK_ERROR &&
+              taps("F10", {0x4000, 0x8000}, 0x1000) == CAMERAUNLOCK_ERROR,
+          "and each of its bits is taken, for a row of any kind");
+
+    const std::int32_t microphone =
+        cameraunlock_config_local_text("Voice", "Microphone", "Which microphone.",
+                                       CAMERAUNLOCK_ROW_WRITABLE | CAMERAUNLOCK_ROW_LIVE, "Default");
+    Check(microphone == 7, "a text row is numbered like any other: " + LastError());
+    Check(cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, " Default") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, "Default\n") == CAMERAUNLOCK_ERROR,
+          "a default the file cannot hold as it is is refused: " + LastError());
+    Check(cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, nullptr) == CAMERAUNLOCK_ERROR &&
+              LastError().find("default_text is NULL") != std::string::npos,
+          "and so is none at all");
+    const std::int32_t ready = cameraunlock_config_local_bool("Batch", "Ready", "Whether it is ready.", CAMERAUNLOCK_ROW_WRITABLE, 1);
+    const std::int32_t amount = cameraunlock_config_local_int("Batch", "Amount", "How many.", CAMERAUNLOCK_ROW_WRITABLE, 5, 0, 10);
+    const std::int32_t scale =
+        cameraunlock_config_local_float("Batch", "Scale", "How large.", CAMERAUNLOCK_ROW_WRITABLE, 1.0f, 0.5f, 2.0f);
+    Check(ready == 8 && amount == 9 && scale == 10, "writable rows of each kind follow it: " + LastError());
+
+    Check(cameraunlock_config_render(rendered.c_str()) == CAMERAUNLOCK_OK, "the description renders: " + LastError());
+    const std::string fresh = ReadFile(scratch / "rendered.ini");
+    Check(fresh.find("[CameraUnlock]") != std::string::npos && fresh.find("FieldOfView=65") != std::string::npos &&
+              fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos && fresh.find("SeatKey=Delete") != std::string::npos && fresh.find("TurnKey=Home") != std::string::npos &&
+              fresh.find("\r\nFirstPersonKey=Delete, ScrollLock, Ctrl+Shift+B\r\n") != std::string::npos &&
+              fresh.find("CollisionMargin=0.12") != std::string::npos && fresh.find("LocalSmoothing=default") != std::string::npos &&
+              fresh.find("[Voice]") != std::string::npos && fresh.find("Microphone=Default") != std::string::npos,
+          "the render holds the stamp, the local rows at their defaults and the global concepts as default");
+
+    const std::string schema = Schema();
+    Check(schema.find("{\"section\":\"Hotkeys\",\"key\":\"FirstPersonKey\",\"label\":\"First person key\"") != std::string::npos,
+          "the description gives its rows as JSON before a file is loaded: " + LastError());
+
+    fs::create_directories(scratch / "defaults");
+    Check(cameraunlock_config_load(file.c_str(), defaults.c_str(), &config) == CAMERAUNLOCK_LOAD_CREATED,
+          "a first load creates the file: " + LastError());
+    Check(Schema() == schema, "and the same JSON once one is");
+    Check(ReadFile(scratch / "CameraUnlock.ini") == fresh, "with the bytes the render wrote");
+    Check(fs::exists(scratch / "defaults" / "Defaults.ini"), "and Defaults.ini where the load was told it is");
+    Check(config.udp_port == 4242 && config.enable_on_startup == 1 && config.world_space_yaw == 1 &&
+              config.settings.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION &&
+              config.settings.aim_mode == CAMERAUNLOCK_AIM_SIGHTS_LOCKED && config.settings.collision_enabled == 1 &&
+              Near(config.settings.collision_margin, 0.12f) && Near(config.settings.remote_smoothing, 0.15f),
+          "the fleet's rows come back as one struct");
+    Check(cameraunlock_session_configure(&config.settings) == CAMERAUNLOCK_OK, "whose settings the session takes as they are");
+    Check(cameraunlock_config_concept("AimDecoupling", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR,
+          "the rows are settled once the file is loaded");
+
+    float degrees = 0.0f;
+    std::int32_t number = -1;
+    Check(cameraunlock_config_get_float(fov, &degrees) == CAMERAUNLOCK_OK && degrees == 65.0f, "a float row reads back");
+    Check(cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 1, "an enum row as its word's place");
+    Check(cameraunlock_config_get_int(arms, &number) == CAMERAUNLOCK_OK && number == 1, "a bool row as 1");
+    Check(cameraunlock_config_get_int(count, &number) == CAMERAUNLOCK_OK && number == 12, "an int row");
+    Check(cameraunlock_config_get_int(fov, &number) == CAMERAUNLOCK_ERROR, "a float row is not read as an int");
+    Check(cameraunlock_config_get_int(99, &number) == CAMERAUNLOCK_ERROR, "and a row that is none is refused");
+
+    Check(cameraunlock_config_save_int(quality, 3) == CAMERAUNLOCK_SAVE_SAVED, "a writable row saves: " + LastError());
+    Check(ReadFile(scratch / "CameraUnlock.ini").find("Quality=High") != std::string::npos, "as its word");
+    Check(cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 3, "and reads back as saved");
+    Check(cameraunlock_config_save_int(arms, 0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("Writable") != std::string::npos,
+          "a row not marked writable does not: " + LastError());
+    Check(cameraunlock_config_save_int(quality, 9) == CAMERAUNLOCK_ERROR, "nor a value that names no word");
+
+    const std::int32_t all[] = {quality, ready, amount, scale};
+    const double changed[] = {2.0, 0.0, 7.0, 1.5};
+    Check(cameraunlock_config_save_rows(all, changed, 4) == CAMERAUNLOCK_SAVE_SAVED, "rows of each kind save together: " + LastError());
+    const std::string together = ReadFile(scratch / "CameraUnlock.ini");
+    float large = 0.0f;
+    std::int32_t is_ready = -1;
+    std::int32_t how_many = -1;
+    Check(together.find("Quality=Medium") != std::string::npos && together.find("Ready=false") != std::string::npos &&
+              together.find("Amount=7") != std::string::npos && together.find("Scale=1.5") != std::string::npos,
+          "and are written: " + together.substr(together.find("[Batch]") == std::string::npos ? 0 : together.find("[Batch]")));
+    Check(cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 2 &&
+              cameraunlock_config_get_int(ready, &is_ready) == CAMERAUNLOCK_OK && is_ready == 0 &&
+              cameraunlock_config_get_int(amount, &how_many) == CAMERAUNLOCK_OK && how_many == 7 &&
+              cameraunlock_config_get_float(scale, &large) == CAMERAUNLOCK_OK && large == 1.5f,
+          "and read back as saved");
+    const auto refused = [&](std::vector<std::int32_t> rows, std::vector<double> values, const char* reason) {
+        return cameraunlock_config_save_rows(rows.data(), values.data(), static_cast<std::int32_t>(rows.size())) ==
+                   CAMERAUNLOCK_ERROR &&
+               LastError().find(reason) != std::string::npos;
+    };
+    Check(refused({amount, arms}, {3.0, 0.0}, "not marked Writable"), "a row among them not marked writable refuses them all: " + LastError());
+    Check(refused({amount, microphone}, {3.0, 0.0}, "not a bool, an int, a float or an enum row"), "and so does a text row: " + LastError());
+    Check(refused({amount, amount}, {3.0, 4.0}, "in rows twice"), "and one row given twice: " + LastError());
+    Check(refused({amount, ready}, {3.0, 0.5}, "saved as 0 or 1") && refused({ready, amount}, {1.0, 3.5}, "whole number from 0 to 10") &&
+              refused({ready, amount}, {1.0, 11.0}, "whole number from 0 to 10") &&
+              refused({amount, scale}, {3.0, 2.5}, "number from 0.5") &&
+              refused({amount, scale}, {3.0, std::numeric_limits<double>::quiet_NaN()}, "number from 0.5") &&
+              refused({amount, scale}, {3.0, 1e300}, "number from 0.5") && refused({amount, quality}, {3.0, 4.0}, "names no token") &&
+              refused({amount, 99}, {3.0, 1.0}, "no local row 99"),
+          "and a value a row does not hold, and a row that is none: " + LastError());
+    Check(cameraunlock_config_save_rows(all, changed, 0) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_rows(nullptr, changed, 1) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_rows(all, nullptr, 1) == CAMERAUNLOCK_ERROR,
+          "and no rows at all");
+    Check(ReadFile(scratch / "CameraUnlock.ini") == together && cameraunlock_config_get_int(amount, &how_many) == CAMERAUNLOCK_OK &&
+              how_many == 7,
+          "each refusal writes nothing and changes no row");
+    const std::int32_t one[] = {quality};
+    const double high[] = {3.0};
+    Check(cameraunlock_config_save_rows(one, high, 1) == CAMERAUNLOCK_SAVE_SAVED, "and one row saves alone: " + LastError());
+
+    char text[64] = {};
+    Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == 7 && std::string(text) == "Default",
+          "a text row reads back as its bytes, its length answered: " + LastError());
+    char small[4] = {'x', 'x', 'x', 'x'};
+    Check(cameraunlock_config_get_text(microphone, small, sizeof(small)) == 7 && small[0] == 'x',
+          "a buffer too small for it is told the length and left alone");
+    Check(cameraunlock_config_get_text(fov, text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_get_int(microphone, &number) == CAMERAUNLOCK_ERROR,
+          "a float row is not read as text, nor a text row as a number");
+    const std::int32_t keyLength = cameraunlock_config_get_text(key, text, sizeof(text));
+    Check(keyLength > 0 && ReadFile(scratch / "CameraUnlock.ini").find(std::string("\r\nGraphicsKey=") + text + "\r\n") != std::string::npos,
+          "a key list row reads back as the keys the file names, for a host to tell the player: " + std::string(text));
+    const std::int32_t cycleLength = cameraunlock_config_get_concept_keys("CycleTrackingModeKey", text, sizeof(text));
+    Check(cycleLength > 0 && cycleLength == static_cast<std::int32_t>(std::strlen(text)) &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nCycleTrackingModeKey=default\r\n") != std::string::npos &&
+              ReadFile(scratch / "defaults" / "Defaults.ini").find(std::string("\r\nCycleTrackingModeKey=") + text + "\r\n") !=
+                  std::string::npos,
+          "one of the fleet's key rows reads back as its keys, from Defaults.ini where the file says default: " + std::string(text));
+    const std::string cycleKeys = text;
+    Check(cameraunlock_config_get_concept_keys("TrueFreeLookKey", text, sizeof(text)) == 2 && std::string(text) == "F4",
+          "and one the game gives keys of its own reads back as those, not the schema's");
+    Check(cameraunlock_config_get_concept_keys("CycleTrackingModeKey", small, sizeof(small)) == cycleLength && small[0] == 'x',
+          "a buffer too small for them is told the length and left alone");
+    Check(cameraunlock_config_get_concept_keys("YawModeKey", text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a concept row of the description") != std::string::npos,
+          "a fleet key row the description did not add is refused");
+    Check(cameraunlock_config_get_concept_keys("LocalSmoothing", text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a key list row") != std::string::npos &&
+              cameraunlock_config_get_concept_keys(nullptr, text, sizeof(text)) == CAMERAUNLOCK_ERROR,
+          "and so are a row that is no key list and no name at all");
+    const char* named = "Microphone (USB Audio Device) \xc3\xa9";
+    Check(cameraunlock_config_save_text(microphone, named) == CAMERAUNLOCK_SAVE_SAVED, "a writable text row saves: " + LastError());
+    Check(ReadFile(scratch / "CameraUnlock.ini").find(std::string("Microphone=") + named) != std::string::npos,
+          "as its bytes, a character past ASCII included");
+    Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == static_cast<std::int32_t>(std::strlen(named)) &&
+              std::string(text) == named,
+          "and reads back as saved");
+    Check(cameraunlock_config_save_text(microphone, "two\nlines") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_text(microphone, "spaced ") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_text(microphone, nullptr) == CAMERAUNLOCK_ERROR,
+          "text the file cannot hold as it is is refused");
+    Check(cameraunlock_config_save_text(fov, "65") == CAMERAUNLOCK_ERROR, "and a row that is not text takes none");
+
+    cameraunlock_session_cycle_tracking_mode();
+    cameraunlock_session_cycle_aim_mode();
+    Check(cameraunlock_config_save_tracking_mode() == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_save_aim_mode() == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_save_world_space_yaw(0) == CAMERAUNLOCK_SAVE_SAVED,
+          "the session's modes and the yaw mode save: " + LastError());
+    std::string saved = ReadFile(scratch / "CameraUnlock.ini");
+    Check(saved.find("PositionEnabled=false") != std::string::npos && saved.find("RotationEnabled=true") != std::string::npos &&
+              saved.find("TrueFreeLook=true") != std::string::npos && saved.find("FreeLookMarker=true") != std::string::npos &&
+              saved.find("WorldSpaceYaw=false") != std::string::npos,
+          "as the rows core's encoders give");
+
+    TestOptions(scratch, quality);
+
+    Check(cameraunlock_config_reload() == CAMERAUNLOCK_RELOAD_UNCHANGED, "a file nobody touched is not read again");
+    const auto attributes_time = [](const fs::path& path) {
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        Check(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data) != 0, "Windows reads the write time");
+        return (static_cast<std::uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+    };
+    const auto watched = [](std::int32_t which, std::uint64_t& recorded) {
+        const std::int32_t length = cameraunlock_config_watched(which, nullptr, 0, &recorded);
+        Check(length > 0, "a watched path has a length: " + LastError());
+        std::vector<std::uint16_t> path(static_cast<std::size_t>(length) + 1, u'?');
+        Check(cameraunlock_config_watched(which, path.data(), length + 1, &recorded) == length && path.back() == 0,
+              "and is copied with its NUL");
+        return fs::path(std::wstring(path.begin(), path.end() - 1));
+    };
+    std::uint64_t recorded = 0;
+    Check(fs::equivalent(watched(CAMERAUNLOCK_WATCHED_FILE, recorded), scratch / "CameraUnlock.ini") &&
+              recorded == attributes_time(scratch / "CameraUnlock.ini"),
+          "the reload watches the file, at the write time Windows reads now");
+    Check(fs::equivalent(watched(CAMERAUNLOCK_WATCHED_DEFAULTS, recorded), scratch / "defaults" / "Defaults.ini") &&
+              recorded == attributes_time(scratch / "defaults" / "Defaults.ini"),
+          "and Defaults.ini where the load found it");
+    Check(cameraunlock_config_watched(2, nullptr, 0, &recorded) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_watched(CAMERAUNLOCK_WATCHED_FILE, nullptr, 0, nullptr) == CAMERAUNLOCK_ERROR,
+          "a file that is neither, and no time to fill, are refused");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    saved.replace(saved.find("FieldOfView=65"), 14, "FieldOfView=90");
+    saved.replace(saved.find("Trees=12"), 8, "Trees=40");
+    saved.replace(saved.find("CycleTrackingModeKey=default"), 28, "CycleTrackingModeKey=F6");
+    const std::string held = std::string("Microphone=") + named;
+    saved.replace(saved.find(held), held.size(), "Microphone=None");
+    std::ofstream(scratch / "CameraUnlock.ini", std::ios::binary | std::ios::trunc) << saved;
+    Check(cameraunlock_config_reload() == CAMERAUNLOCK_RELOAD_APPLIED, "a file the player saved is: " + LastError());
+    Check(cameraunlock_config_watched(CAMERAUNLOCK_WATCHED_FILE, nullptr, 0, &recorded) > 0 &&
+              recorded == attributes_time(scratch / "CameraUnlock.ini"),
+          "and its write time is the one watched from then");
+    Check(cameraunlock_config_get_float(fov, &degrees) == CAMERAUNLOCK_OK && degrees == 90.0f, "a live row holds the new value");
+    Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == 4 && std::string(text) == "None",
+          "a live text row too");
+    Check(cameraunlock_config_get_int(count, &number) == CAMERAUNLOCK_OK && number == 12,
+          "a row not marked live keeps what the load gave it");
+    Check(cameraunlock_config_get_concept_keys("CycleTrackingModeKey", text, sizeof(text)) == cycleLength && text == cycleKeys,
+          "and a fleet key row keeps the keys the load gave it, which the poller listens for");
+
+    const auto keysOf = [&](std::int32_t row) {
+        const std::int32_t length = cameraunlock_config_get_text(row, text, sizeof(text));
+        return length < 0 ? std::string("(error)") : std::string(text, static_cast<std::size_t>(length));
+    };
+    const auto conceptKeysOf = [&](const char* name) {
+        const std::int32_t length = cameraunlock_config_get_concept_keys(name, text, sizeof(text));
+        return length < 0 ? std::string("(error)") : std::string(text, static_cast<std::size_t>(length));
+    };
+    Check(cameraunlock_config_save_keys(key, "f8, ctrl+shift+g") == CAMERAUNLOCK_SAVE_SAVED &&
+              keysOf(key) == "F8, Ctrl+Shift+G" &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nGraphicsKey=F8, Ctrl+Shift+G\r\n") != std::string::npos,
+          "a writable key row saves its keys as the file writes them, before the poller runs: " + LastError());
+    Check(cameraunlock_config_save_concept_keys("TrueFreeLookKey", "f6") == CAMERAUNLOCK_SAVE_SAVED &&
+              conceptKeysOf("TrueFreeLookKey") == "F6" &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nTrueFreeLookKey=F6\r\n") != std::string::npos,
+          "and so does one of the fleet's, by its name: " + LastError());
+    Check(conceptKeysOf("FirstPersonKey") == "Delete, ScrollLock, Ctrl+Shift+B" &&
+              cameraunlock_config_save_concept_keys("FirstPersonKey", "delete, scrolllock, ctrl+shift+b, f12") == CAMERAUNLOCK_SAVE_SAVED &&
+              conceptKeysOf("FirstPersonKey") == "Delete, ScrollLock, Ctrl+Shift+B, F12" &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nFirstPersonKey=Delete, ScrollLock, Ctrl+Shift+B, F12\r\n") != std::string::npos,
+          "a concept key row that counts taps is read and saved by its name: " + LastError());
+    const std::string beforeRefusals = ReadFile(scratch / "CameraUnlock.ini");
+    Check(cameraunlock_config_save_keys(5, "Home") == CAMERAUNLOCK_ERROR && LastError().find("not marked Writable") != std::string::npos,
+          "a key row not marked writable does not: " + LastError());
+    Check(cameraunlock_config_save_concept_keys("CycleTrackingModeKey", "F6") == CAMERAUNLOCK_ERROR &&
+              LastError().find("not marked Writable") != std::string::npos,
+          "nor a fleet key row not marked writable: " + LastError());
+    Check(cameraunlock_config_save_keys(quality, "F6") == CAMERAUNLOCK_ERROR && LastError().find("not a key list row") != std::string::npos &&
+              cameraunlock_config_save_concept_keys("LocalSmoothing", "F6") == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a key list row") != std::string::npos,
+          "a row that is no key list is refused either way: " + LastError());
+    Check(cameraunlock_config_save_keys(key, "F6, Banana") == CAMERAUNLOCK_ERROR && LastError().find("GraphicsKey=F6, Banana") != std::string::npos &&
+              cameraunlock_config_save_keys(key, "LeftShift") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_concept_keys("TrueFreeLookKey", "F6, F6") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_keys(key, nullptr) == CAMERAUNLOCK_ERROR,
+          "and so are keys the file cannot hold, and none at all: " + LastError());
+    Check(cameraunlock_config_save_keys(99, "F6") == CAMERAUNLOCK_ERROR && cameraunlock_config_save_concept_keys("YawModeKey", "F6") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_concept_keys(nullptr, "F6") == CAMERAUNLOCK_ERROR,
+          "and rows that are none");
+    Check(ReadFile(scratch / "CameraUnlock.ini") == beforeRefusals && keysOf(key) == "F8, Ctrl+Shift+G" && conceptKeysOf("TrueFreeLookKey") == "F6",
+          "each refusal writes nothing and changes no keys");
+
+    Check(cameraunlock_hotkeys_leave_out("Ctrl+Delete") == CAMERAUNLOCK_ERROR && LastError().find("keys alone") != std::string::npos &&
+              cameraunlock_hotkeys_leave_out("Banana") == CAMERAUNLOCK_ERROR && cameraunlock_hotkeys_leave_out(nullptr) == CAMERAUNLOCK_ERROR,
+          "keys are left out by the key alone, and only keys are: " + LastError());
+    TakeLog();
+    Check(cameraunlock_hotkeys_leave_out("delete") == CAMERAUNLOCK_OK && TakeLog().find("Delete left out of every key list") != std::string::npos,
+          "before the poller starts a key is left out for its start, and the log says so: " + LastError());
+    Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_OK, "the key lists go on the poller: " + LastError());
+    Check(cameraunlock_hotkeys_leave_out("") == CAMERAUNLOCK_OK && cameraunlock_hotkeys_leave_out("Delete, F9") == CAMERAUNLOCK_OK &&
+              conceptKeysOf("FirstPersonKey") == "Delete, ScrollLock, Ctrl+Shift+B, F12" && keysOf(key) == "F8, Ctrl+Shift+G",
+          "with the poller running keys are left out and listened for again, and the rows' keys are as they were: " + LastError());
+    Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_ERROR, "once");
+    Check(cameraunlock_config_save_keys(key, "F9") == CAMERAUNLOCK_SAVE_SAVED && keysOf(key) == "F9" &&
+              cameraunlock_config_save_concept_keys("TrueFreeLookKey", "") == CAMERAUNLOCK_SAVE_SAVED && conceptKeysOf("TrueFreeLookKey").empty() &&
+              cameraunlock_config_save_concept_keys("TrueFreeLookKey", "Insert") == CAMERAUNLOCK_SAVE_SAVED &&
+              conceptKeysOf("TrueFreeLookKey") == "Insert",
+          "with the poller running a key row saves and its new keys go on the poller in place of the old, none included: " + LastError());
+    cameraunlock_hotkeys_drop();
+    Check(cameraunlock_hotkeys_take() == 0, "with no key pressed nothing is taken");
+}
+
+void TestWindow() {
+    std::cout << "\n[c interface: the game's window]\n";
+    const HWND window = CreateWindowExW(0, L"STATIC", L"cameraunlock c interface test", WS_OVERLAPPEDWINDOW, 13, 17, 640,
+                                        480, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    Check(window != nullptr, "a bordered window that is never shown");
+    TakeLog();
+    const std::uint64_t handle = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(window));
+    Check(cameraunlock_window_center(handle) == 1, "the window is centred: " + LastError());
+    RECT placed = {};
+    GetWindowRect(window, &placed);
+    MONITORINFO monitor = {};
+    monitor.cbSize = sizeof(monitor);
+    GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+    const int left_gap = placed.left - monitor.rcWork.left;
+    const int right_gap = monitor.rcWork.right - placed.right;
+    Check(left_gap - right_gap >= -1 && left_gap - right_gap <= 1 && !(placed.left == 13 && placed.top == 17),
+          "in the work area of its monitor, where it was not before");
+    Check(!TakeLog().empty(), "and the move is in the log");
+    Check(cameraunlock_window_center(handle) == 1 && TakeLog().empty(),
+          "a second call finds it centred and logs nothing");
+    DestroyWindow(window);
+    Check(cameraunlock_window_center(handle) == 0 && !TakeLog().empty(),
+          "a window that is gone is left alone, with the reason in the log");
+}
+
+// Its own process (the --saves-without-rows run): a description is settled at the load,
+// and the main run's describes every row these saves write.
+void TestSavesWithoutRows(const fs::path& scratch) {
+    std::cout << "\n[c interface: a save with no row to write]\n";
+    const std::string file = (scratch / "CameraUnlock.ini").u8string();
+    const std::string defaults = (scratch / "defaults" / "Defaults.ini").u8string();
+    CameraUnlockConfig config = {};
+    config.struct_size = sizeof(config);
+    Check(cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK &&
+              cameraunlock_config_concept("UdpPort", 0, nullptr, nullptr) == CAMERAUNLOCK_OK &&
+              cameraunlock_config_load(file.c_str(), defaults.c_str(), &config) >= 0,
+          "a config of one row loads: " + LastError());
+    const std::string before = ReadFile(scratch / "CameraUnlock.ini");
+    Check(cameraunlock_config_save_tracking_mode() == CAMERAUNLOCK_ERROR &&
+              LastError().find("did not describe the RotationEnabled row") != std::string::npos,
+          "the tracking mode does not save without its rows: " + LastError());
+    Check(cameraunlock_config_save_aim_mode() == CAMERAUNLOCK_ERROR &&
+              LastError().find("did not describe the TrueFreeLook row") != std::string::npos,
+          "nor the aim mode: " + LastError());
+    Check(cameraunlock_config_save_world_space_yaw(0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("did not describe the WorldSpaceYaw row") != std::string::npos,
+          "nor the yaw mode: " + LastError());
+    Check(ReadFile(scratch / "CameraUnlock.ini") == before, "and the file is as it was");
+}
+
+// Its own process (the --schema run): it describes more than one table and loads no file.
+void TestSchema() {
+    std::cout << "\n[c interface: the rows as JSON]\n";
+    Check(cameraunlock_config_schema(nullptr, 0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("cameraunlock_config_describe has not run") != std::string::npos,
+          "there are no rows to give before the description starts");
+
+    const std::uint32_t writable = CAMERAUNLOCK_ROW_WRITABLE, live = CAMERAUNLOCK_ROW_LIVE;
+    const std::int32_t tap_bits[] = {0x1000, 0x2000};
+    const std::int32_t view_bits[] = {0x4000, 0x8000};
+    bool described = cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK;
+    described = cameraunlock_config_concept("WorldSpaceYaw", writable, "Whether a turn of the head is about the world's up.",
+                                            nullptr) == CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_concept("UdpPort", CAMERAUNLOCK_ROW_PER_GAME, "The port.", "4300") == CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_concept("CollisionMargin", 0, "How far the view is held off a wall, in map tiles.", "0.12") ==
+                    CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_concept("CollisionChannel", 0, nullptr, nullptr) == CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_concept("ToggleKey", 0, "Turns head tracking on and off.", nullptr) == CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_concept("LightMultiplier", CAMERAUNLOCK_ROW_PER_GAME, "How far the torch turns.", nullptr) ==
+                    CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_concept_hotkey_taps("FirstPersonKey", writable, "Tapped or held for the view.", nullptr, view_bits,
+                                                        2, 0x10000) == CAMERAUNLOCK_OK && described;
+    described = cameraunlock_config_local_float("General", "FieldOfView", "Field of view in degrees.\nSay \"wide\" for C:\\wide.", live,
+                                                65.0f, 40.0f, 110.0f) == 0 && described;
+    described = cameraunlock_config_local_enum("General", "Quality", "The graphics mode.", writable, "Automatic,Low,RotationOnly", 1) == 1 &&
+                described;
+    described = cameraunlock_config_local_bool("Content", "OwnArms", "The mod's own arms.", 0, 1) == 2 && described;
+    described = cameraunlock_config_local_int("Content", "Trees", "", writable | live, 12, -5, 100) == 3 && described;
+    described = cameraunlock_config_local_text("Voice", "Microphone", "Which microphone.", writable | live,
+                                               "Mikrofon \xC3\xA9\tUSB") == 4 && described;
+    described = cameraunlock_config_local_hotkey("GraphicsKey", "Goes to the next graphics mode.", writable, "f9, ctrl+shift+g",
+                                                 0x100) == 5 && described;
+    described = cameraunlock_config_local_hotkey_held("SeatKey", "Tapped or held.", 0, "Delete", 0x200, 0x400) == 6 && described;
+    described = cameraunlock_config_local_hotkey_taps("TurnKey", "Tapped once, twice or held.", live, "", tap_bits, 2, 0x800) == 7 &&
+                described;
+    Check(described, "a table of every kind of row is described: " + LastError());
+
+    // In the order of the file. CollisionChannel is an Engine row, which a fresh file holds as a comment.
+    const std::string expected =
+        R"({"schema":1,"file":"CameraUnlock.ini","rows":[)"
+        R"({"section":"Network","key":"UdpPort","label":"Udp port","help":"The port.","kind":"int","default":"4300",)"
+        R"("follows_defaults":false,"live":false,"writable":false,"min":1,"max":65535},)"
+        R"({"section":"General","key":"WorldSpaceYaw","label":"World space yaw",)"
+        R"("help":"Whether a turn of the head is about the world's up.","kind":"bool","default":"true",)"
+        R"("follows_defaults":true,"live":false,"writable":true},)"
+        R"({"section":"General","key":"FieldOfView","label":"Field of view",)"
+        R"("help":"Field of view in degrees.\nSay \"wide\" for C:\\wide.","kind":"float","default":"65.0",)"
+        R"("follows_defaults":false,"live":true,"writable":false,"min":40,"max":110},)"
+        R"({"section":"General","key":"Quality","label":"Quality","help":"The graphics mode.","kind":"enum","default":"Low",)"
+        R"("follows_defaults":false,"live":false,"writable":true,"choices":["Automatic","Low","RotationOnly"]},)"
+        R"({"section":"Position","key":"CollisionMargin","label":"Collision margin",)"
+        R"("help":"How far the view is held off a wall, in map tiles.","kind":"float","default":"0.12",)"
+        R"("follows_defaults":false,"live":false,"writable":false,"min":0,"max":3.4028235e+38},)"
+        R"({"section":"Hotkeys","key":"ToggleKey","label":"Toggle key","help":"Turns head tracking on and off.",)"
+        R"("kind":"hotkeys","default":"End, Ctrl+Shift+Y","follows_defaults":true,"live":false,"writable":false},)"
+        R"({"section":"Hotkeys","key":"FirstPersonKey","label":"First person key","help":"Tapped or held for the view.",)"
+        R"("kind":"hotkeys","default":"ScrollLock, Ctrl+Shift+B","follows_defaults":true,"live":false,"writable":true},)"
+        R"({"section":"Hotkeys","key":"GraphicsKey","label":"Graphics key","help":"Goes to the next graphics mode.",)"
+        R"("kind":"hotkeys","default":"F9, Ctrl+Shift+G","follows_defaults":false,"live":false,"writable":true},)"
+        R"({"section":"Hotkeys","key":"SeatKey","label":"Seat key","help":"Tapped or held.",)"
+        R"("kind":"hotkeys","default":"Delete","follows_defaults":false,"live":false,"writable":false},)"
+        R"({"section":"Hotkeys","key":"TurnKey","label":"Turn key","help":"Tapped once, twice or held.",)"
+        R"("kind":"hotkeys","default":"","follows_defaults":false,"live":true,"writable":false},)"
+        R"({"section":"Light","key":"LightMultiplier","label":"Light multiplier","help":"How far the torch turns.",)"
+        R"("kind":"float","default":"1.5","follows_defaults":false,"live":false,"writable":false,"min":0,"max":5},)"
+        R"({"section":"Content","key":"OwnArms","label":"Own arms","help":"The mod's own arms.","kind":"bool","default":"true",)"
+        R"("follows_defaults":false,"live":false,"writable":false},)"
+        R"({"section":"Content","key":"Trees","label":"Trees","help":"","kind":"int","default":"12",)"
+        R"("follows_defaults":false,"live":true,"writable":true,"min":-5,"max":100},)"
+        R"({"section":"Voice","key":"Microphone","label":"Microphone","help":"Which microphone.","kind":"text",)"
+        R"("default":"Mikrofon )" "\xC3\xA9" R"(\tUSB","follows_defaults":false,"live":true,"writable":true})"
+        R"(]})";
+    const std::string schema = Schema();
+    Check(schema == expected, "the rows come back as the JSON docs/c-interface.md gives, with no file loaded");
+    if (schema != expected) std::cout << schema << "\n";
+    std::string small(8, '#');
+    Check(cameraunlock_config_schema(small.data(), 8) == static_cast<std::int32_t>(expected.size()) && small == "########",
+          "a buffer too small for it is left alone and told the length");
+
+    Check(cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK &&
+              cameraunlock_config_concept("AccelaPlayers", 0, nullptr, nullptr) == CAMERAUNLOCK_OK &&
+              cameraunlock_config_schema(nullptr, 0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("[Smoothing] AccelaPlayers holds neither") != std::string::npos,
+          "a list of players is a kind of row the JSON has no word for, and is refused by name");
+    Check(cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK &&
+              cameraunlock_config_concept("RotationEnabled", 0, nullptr, nullptr) == CAMERAUNLOCK_OK &&
+              cameraunlock_config_schema(nullptr, 0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("without [Position] PositionEnabled") != std::string::npos,
+          "a description that renders no file has no rows to give");
+    Check(cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK &&
+              cameraunlock_config_concept("UdpPort", 0, nullptr, nullptr) == CAMERAUNLOCK_OK &&
+              cameraunlock_config_local_text("Voice", "Microphone", "Which microphone.", 0, "Mikrofon \xE9") == 0 &&
+              cameraunlock_config_schema(nullptr, 0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("the default of [Voice] Microphone is not UTF-8") != std::string::npos,
+          "nor has one whose text is not UTF-8, which JSON is");
+}
+
+void TestLog(const fs::path& scratch) {
+    std::cout << "\n[c interface: the log]\n";
+    Check(cameraunlock_log_write("too early") == CAMERAUNLOCK_ERROR, "a line for the file log before it is open is refused");
+    Check(!TakeLog().empty(), "until it is open the lines wait to be taken");
+    Check(cameraunlock_log_take(nullptr, 0) == 0, "and are forgotten once taken");
+    cameraunlock_session_configure(nullptr);
+    const std::string nowhere = (scratch / "no such folder" / "Mod.log").u8string();
+    Check(cameraunlock_log_open(nowhere.c_str()) == CAMERAUNLOCK_ERROR &&
+              LastError().find("could not be created") != std::string::npos,
+          "a log file that cannot be created is an error: " + LastError());
+    const std::string file = (scratch / "Mod.log").u8string();
+    Check(cameraunlock_log_open(file.c_str()) == CAMERAUNLOCK_OK, "the file log opens at a full path: " + LastError());
+    Check(cameraunlock_log_write("the host's own line") == CAMERAUNLOCK_OK, "the host writes a line");
+    const std::string trace = std::string(3000, 'a') + "\r\n\tat the end of a long stack trace";
+    Check(cameraunlock_log_write(trace.c_str()) == CAMERAUNLOCK_OK &&
+              ReadFile(scratch / "Mod.log").find(trace) != std::string::npos,
+          "an entry longer than a line, with line breaks in it, is written whole");
+    for (int i = 0; i < 50; ++i) cameraunlock_session_configure(nullptr);
+    const std::string repeated = ReadFile(scratch / "Mod.log");
+    std::size_t refusals = 0;
+    for (std::size_t at = repeated.find("CameraUnlockSettings is NULL"); at != std::string::npos;
+         at = repeated.find("CameraUnlockSettings is NULL", at + 1)) {
+        ++refusals;
+    }
+    Check(refusals >= 2 && refusals <= 3, "a call that fails the same way over and over is in the log once a second, not every time: " +
+                                              std::to_string(refusals));
+    cameraunlock_session_start(-1);
+    const std::string text = ReadFile(scratch / "Mod.log");
+    Check(text.find("cameraunlock_session_configure: CameraUnlockSettings is NULL") != std::string::npos,
+          "a line that was waiting when the file opened is in it");
+    Check(text.find("the host's own line") != std::string::npos, "the host's line is in it");
+    Check(text.find("udp_port is outside 1 to 65535") != std::string::npos, "and core's lines from then on, each flushed");
+    Check(cameraunlock_log_take(nullptr, 0) == 0, "with nothing left to take");
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    const fs::path scratch = fs::temp_directory_path() / ("cameraunlock-c-tests-" + std::to_string(GetCurrentProcessId()));
+    fs::remove_all(scratch);
+    fs::create_directories(scratch);
+
+    if (argc > 1 && std::string(argv[1]) == "--saves-without-rows") {
+        TestSavesWithoutRows(scratch);
+        std::cout << (g_failures == 0 ? "\nAll tests passed!\n" : "\n" + std::to_string(g_failures) + " test(s) FAILED\n");
+        return g_failures == 0 ? 0 : 1;
+    }
+
+    if (argc > 1 && std::string(argv[1]) == "--schema") {
+        TestSchema();
+        std::cout << (g_failures == 0 ? "\nAll tests passed!\n" : "\n" + std::to_string(g_failures) + " test(s) FAILED\n");
+        return g_failures == 0 ? 0 : 1;
+    }
+
+    TestBoundary();
+    TestPortInUse();
+    TestReceiving();
+    TestModes();
+    TestLean();
+    TestAbsurdPose();
+    TestSmoothingByConnection();
+    TestViews();
+    TestConfig(scratch);
+    TestWindow();
+    TestLog(scratch);
+
+    std::cout << (g_failures == 0 ? "\nAll tests passed!\n" : "\n" + std::to_string(g_failures) + " test(s) FAILED\n");
+    // The log file is open in this process until it ends, so the folder goes at the next run.
+    return g_failures == 0 ? 0 : 1;
+}

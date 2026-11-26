@@ -1,0 +1,2 @@
+# A final line with no terminator still has none after replacement.
+set	General	B	3

@@ -1,0 +1,213 @@
+#pragma once
+
+// The mark that says where the rounds are going, for any overlay backend.
+//
+// For games with no aim indicator the mod can move: head tracking takes the view
+// off the aim, and with no crosshair of the game's own to reposition there is
+// nothing on screen saying where the shot lands, so the mod owes the player one.
+// Not for aiming down sights: there the weapon's own sights stay on the aim and
+// are the indicator (see the shooter-ads-handling skill).
+//
+// This is the drawing half only. The projection is NOT here and must never be
+// re-derived here: the caller hands over the same clean-aim screen position its
+// existing reticle compensation already computes, because two projections drift
+// apart and only one of them can be right.
+//
+// What it owns:
+//   - the fixed marker style (small, high contrast, translucent - the mode is
+//     the on/off switch and nothing here earns a config entry),
+//   - the publish/consume handoff between the mod's render hook and Present,
+//   - a staleness cut-off, so a marker cannot sit frozen on a loading screen,
+//   - a lazy one-shot install on a worker thread, so a mod only patches the swap
+//     chain once it actually has a marker to draw.
+//
+// It is written once against OverlayDrawList::DrawCross and parameterised on the
+// backend, so a mod running on Direct3D 12 gets the same mark, in the same place,
+// as one running on Direct3D 11. Use the aliases in aim_marker_dx11.h /
+// aim_marker_dx12.h rather than naming the template.
+//
+// Ensure() answers false until the overlay is up, so a mod whose marker never
+// came up simply draws none. That is the honest degradation: a marker that
+// half-draws is worse than no marker.
+
+#include "cameraunlock/rendering/overlay_draw_list.h"
+
+namespace cameraunlock::rendering {
+
+// Fixed style. A black cross behind a white one so the mark reads against snow
+// and against a night sky without either being opaque.
+struct AimMarkerStyle {
+    float arm_pixels = 9.0f;
+    float gap_pixels = 3.0f;
+    float thickness_pixels = 2.0f;
+    Rgba ink = 0xE6FFFFFF;      // AABBGGRR, white
+    Rgba outline = 0x99000000;  // black, softer
+};
+
+// A colour with its alpha scaled by `opacity`, which is held to 0..1. The marker
+// fades in and out with the sights (ads/aim_mode.h, AimMarkerOpacity) through
+// this, so both crosses fade together and neither pops.
+constexpr Rgba FadeRgba(Rgba color, float opacity) {
+    const float held = opacity < 0.0f ? 0.0f : opacity > 1.0f ? 1.0f : opacity;
+    const Rgba alpha = static_cast<Rgba>(static_cast<float>(color >> 24) * held + 0.5f);
+    return (color & 0x00FFFFFFu) | (alpha << 24);
+}
+
+// The mark itself, centred on a pixel of the draw list. AimMarker draws through
+// this. A mod whose overlay draws something else as well (Dying Light 2 keeps a
+// hip dot on the same overlay) calls it from its own render callback, so the
+// mark is the same one in every mod.
+inline void DrawAimMark(OverlayDrawList& dc, float px, float py, const AimMarkerStyle& style, float opacity) {
+    if (!(opacity > 0.0f)) return;
+    dc.DrawCross(px, py, style.arm_pixels + 1.0f, FadeRgba(style.outline, opacity),
+                 style.thickness_pixels + 2.0f, style.gap_pixels - 1.0f);
+    dc.DrawCross(px, py, style.arm_pixels, FadeRgba(style.ink, opacity), style.thickness_pixels, style.gap_pixels);
+}
+
+// `Traits` binds one graphics backend:
+//
+//   using Overlay     = <the backend's overlay class>;
+//   using DrawContext = <the backend's draw context>;
+//   static void SetLogger(OverlayLogFn fn);
+//
+// See DX11AimMarkerTraits / DX12AimMarkerTraits.
+template <typename Traits>
+class AimMarker {
+public:
+    // Starts the install the first time it is called and returns false until the
+    // overlay is drawing. Idempotent, and safe to call from a render frame: the
+    // work - a window class, a probe device, a few MinHook detours - happens on a
+    // worker thread, never inside the frame that asked.
+    bool Ensure();
+
+    bool Ready() const;
+
+    // The aim in the drawn frame, x right, y up, -1..1. `visible` is the
+    // caller's per-frame decision and is never latched here: an invalid
+    // projection must publish false rather than leave the last position
+    // standing, which would put a mark where the rounds are not going.
+    // `opacity` scales the whole mark, 0 drawing nothing and 1 the fixed style.
+    void Publish(bool visible, float ndcX, float ndcY, float opacity = 1.0f);
+
+    // Singleton-by-design, like the overlay underneath it: there is one HUD per
+    // process. Both of these write shared state without a lock, so set them from
+    // the mod thread BEFORE Ensure() rather than from a frame.
+    void SetStyle(const AimMarkerStyle& style);
+    void SetLogger(OverlayLogFn fn);
+
+    // How old a published aim may be before the marker stops drawing. Present
+    // keeps running when the player's view stops being rendered - a loading
+    // screen, a full-screen menu - and a marker left frozen on one of those is
+    // pointing at nothing.
+    static constexpr unsigned long long kStaleMs = 200;
+};
+
+#ifdef CAMERAUNLOCK_AIM_MARKER_IMPLEMENTATION
+
+}  // namespace cameraunlock::rendering - re-opened after includes
+
+#include <Windows.h>
+
+#include <atomic>
+#include <thread>
+
+namespace cameraunlock::rendering {
+
+namespace detail {
+
+template <typename Traits>
+struct AimMarkerState {
+    // Written by the mod's render hook, read in Present. Those are the same
+    // thread in every engine we have shipped against, but they are different
+    // call stacks reached through different hooks, so the handful of bytes
+    // between them are atomics rather than an assumption.
+    std::atomic<bool> visible{false};
+    std::atomic<float> ndcX{0.0f};
+    std::atomic<float> ndcY{0.0f};
+    std::atomic<float> opacity{1.0f};
+    std::atomic<unsigned long long> stampMs{0};
+
+    std::atomic<bool> installStarted{false};
+    std::atomic<bool> ready{false};
+
+    AimMarkerStyle style;
+
+    // Leaked, never destroyed. A destructor at process exit would tear down
+    // MinHook detours under the loader lock, on threads ExitProcess has already
+    // killed - the same reason every mod in the fleet leaks its plugin.
+    typename Traits::Overlay* overlay = nullptr;
+};
+
+template <typename Traits>
+inline AimMarkerState<Traits>& MarkerState() {
+    static AimMarkerState<Traits> s;
+    return s;
+}
+
+template <typename Traits>
+inline void DrawMarker(typename Traits::DrawContext& dc) {
+    auto& s = MarkerState<Traits>();
+    if (!s.visible.load(std::memory_order_acquire)) return;
+    if (GetTickCount64() - s.stampMs.load(std::memory_order_acquire)
+            > AimMarker<Traits>::kStaleMs) {
+        return;
+    }
+
+    const float ndcX = s.ndcX.load(std::memory_order_relaxed);
+    const float ndcY = s.ndcY.load(std::memory_order_relaxed);
+    // NDC y is up, the back buffer's is down.
+    const float px = (ndcX * 0.5f + 0.5f) * dc.Width();
+    const float py = (0.5f - ndcY * 0.5f) * dc.Height();
+
+    DrawAimMark(dc, px, py, s.style, s.opacity.load(std::memory_order_relaxed));
+}
+
+template <typename Traits>
+inline void InstallMarkerOverlay() {
+    auto& s = MarkerState<Traits>();
+    s.overlay = new typename Traits::Overlay();
+    s.overlay->SetRenderCallback(&DrawMarker<Traits>);
+    if (!s.overlay->Install()) return;
+    s.ready.store(true, std::memory_order_release);
+}
+
+}  // namespace detail
+
+template <typename Traits>
+inline bool AimMarker<Traits>::Ensure() {
+    auto& s = detail::MarkerState<Traits>();
+    if (s.ready.load(std::memory_order_acquire)) return true;
+    if (!s.installStarted.exchange(true, std::memory_order_acq_rel)) {
+        std::thread(&detail::InstallMarkerOverlay<Traits>).detach();
+    }
+    return false;
+}
+
+template <typename Traits>
+inline bool AimMarker<Traits>::Ready() const {
+    return detail::MarkerState<Traits>().ready.load(std::memory_order_acquire);
+}
+
+template <typename Traits>
+inline void AimMarker<Traits>::Publish(bool visible, float ndcX, float ndcY, float opacity) {
+    auto& s = detail::MarkerState<Traits>();
+    s.ndcX.store(ndcX, std::memory_order_relaxed);
+    s.ndcY.store(ndcY, std::memory_order_relaxed);
+    s.opacity.store(opacity, std::memory_order_relaxed);
+    s.stampMs.store(GetTickCount64(), std::memory_order_release);
+    s.visible.store(visible, std::memory_order_release);
+}
+
+template <typename Traits>
+inline void AimMarker<Traits>::SetStyle(const AimMarkerStyle& style) {
+    detail::MarkerState<Traits>().style = style;
+}
+
+template <typename Traits>
+inline void AimMarker<Traits>::SetLogger(OverlayLogFn fn) {
+    Traits::SetLogger(fn);
+}
+
+#endif  // CAMERAUNLOCK_AIM_MARKER_IMPLEMENTATION
+
+}  // namespace cameraunlock::rendering

@@ -1,0 +1,1240 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
+
+namespace CameraUnlock.Core.Config
+{
+    /// <summary>
+    /// The rows of one game's canonical config file, each bound to a property or field of
+    /// <typeparamref name="TConfig"/>: <see cref="Apply(CanonicalIni, TConfig)"/> reads a parsed file
+    /// into a config, <see cref="Render"/> writes a config as a canonical file and
+    /// <see cref="RenderFresh"/> writes the file a game starts with. The C++ twin is
+    /// cameraunlock::config::ConfigTable, and data/fixtures/canonical-ini/table holds both to the
+    /// same bytes.
+    /// <para>
+    /// Concept rows take their section, key, codec, range and comment from
+    /// <see cref="ConfigConcepts"/>; local rows name their own. A row's default is its value in the
+    /// defaults instance. Modifiers apply to the last row added, or to the concept row
+    /// <see cref="Select"/> names.
+    /// </para>
+    /// <para>
+    /// Every check throws from the call that breaks it, ArgumentException for what the row
+    /// declares: two rows with one key name anywhere in the file (ASCII case-insensitive), counting
+    /// the ConfigFormat key core writes in [CameraUnlock]; a local section or key that is not
+    /// PascalCase ASCII letters and digits; a local row in [CameraUnlock], or in a schema section
+    /// that holds no canonical concept ([Sensitivity], [Inversion], [Reticle]) or that a
+    /// non_canonical_keys group lists ([Deadzone]), or in a section
+    /// spelled like a schema section or an earlier local section with other letter case; a local key
+    /// that is a concept's key or alias, canonical, non-canonical or retired, under the schema's
+    /// normalisation (<see cref="ConfigKeySchema.Resolve"/>), or a spelling the schema's
+    /// non_canonical_keys lists; a local row with no comment that
+    /// follows no local row of its section; a default its row cannot write; RotationEnabled and
+    /// PositionEnabled both defaulting to false. <see cref="EnumCodec{TEnum}"/> already refuses a token that is
+    /// not PascalCase. A modifier used on a row it does not apply to throws
+    /// InvalidOperationException. A row that fails a check is not added.
+    /// </para>
+    /// </summary>
+    /// <typeparam name="TConfig">A class, since a setter on a struct writes to a copy.</typeparam>
+    public sealed class ConfigTable<TConfig> where TConfig : class
+    {
+        private const string StampSection = "CameraUnlock";
+        private static readonly byte[] StampSectionBytes = Encoding.ASCII.GetBytes(StampSection);
+        private static readonly byte[] Empty = new byte[0];
+        private static readonly byte[] Crlf = { (byte)'\r', (byte)'\n' };
+        private static readonly byte[] DefaultToken = Encoding.ASCII.GetBytes("default");
+
+        private static readonly string[] DefaultsIniHeader =
+        {
+            "; A setting set to default takes its value from Defaults.ini, which every head tracking mod",
+            "; that keeps its settings in CameraUnlock.ini reads: %AppData%\\CameraUnlock\\Defaults.ini on",
+            "; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on",
+            "; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini",
+            "; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in",
+            "; every game that has it set to default, or write a value here instead of default to change it",
+            "; for this game only.",
+        };
+
+        // How a render writes a row: as Render does (an Engine row at its default commented), as
+        // its value, or as the default token.
+        private enum RowForm
+        {
+            AsRender = 0,
+            Value = 1,
+            Default = 2,
+        }
+
+        private readonly Func<TConfig> defaults;
+        private readonly TConfig checkDefaults;
+        private readonly List<Row> rows = new List<Row>();
+        private readonly List<KeyValuePair<Row, byte[]>> perGameDefaults = new List<KeyValuePair<Row, byte[]>>();
+        private int last = -1;
+
+        /// <param name="defaults">Makes a new config holding the defaults. It is called when the
+        /// table is built and again by every Apply and Render, and must return a new instance with
+        /// the same values each time.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="defaults"/> is null.</exception>
+        /// <exception cref="InvalidOperationException"><paramref name="defaults"/> returned null.</exception>
+        public ConfigTable(Func<TConfig> defaults)
+        {
+            if (defaults == null) throw new ArgumentNullException("defaults");
+            this.defaults = defaults;
+            checkDefaults = NewDefaults();
+        }
+
+        /// <summary>
+        /// A concept row. The accessors' type is the concept's, so a field of another type does
+        /// not compile. The row of a concept that is not <see cref="ConceptDescriptor.Global"/>
+        /// (CollisionMargin, CollisionChannel) defaults to the table's own value: Defaults.ini never
+        /// reaches it.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">A check above fails.</exception>
+        public ConfigTable<TConfig> Concept<T>(ConceptDescriptor<T> concept, Func<TConfig, T> get, Action<TConfig, T> set)
+        {
+            if (concept == null) throw new ArgumentNullException("concept");
+            if (get == null) throw new ArgumentNullException("get");
+            if (set == null) throw new ArgumentNullException("set");
+
+            var row = new CodecRow<T>(concept.Section, concept.Key, ToArray(concept.FileComment), concept,
+                concept.Family == ConceptValueFamily.Hotkey, concept.Codec, get, set);
+            CheckUniqueKey(row);
+            ConceptDescriptor descriptor = concept;
+            if (descriptor == ConfigConcepts.RotationEnabled || descriptor == ConfigConcepts.PositionEnabled)
+            {
+                ConceptDescriptor other = descriptor == ConfigConcepts.RotationEnabled
+                    ? (ConceptDescriptor)ConfigConcepts.PositionEnabled
+                    : ConfigConcepts.RotationEnabled;
+                foreach (Row earlier in rows)
+                {
+                    if (earlier.Concept == other && earlier.IsFalse(checkDefaults) && row.IsFalse(checkDefaults))
+                    {
+                        throw new ArgumentException(
+                            "RotationEnabled and PositionEnabled both default to false, which is not a tracking mode", "concept");
+                    }
+                }
+            }
+            Add(row);
+            return this;
+        }
+
+        /// <summary>
+        /// A game-local row. The comment is written above the row; '\n' separates its lines. An
+        /// empty comment is allowed when an earlier local row of the section is written above this
+        /// one, whose comment covers both.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">A check above fails.</exception>
+        public ConfigTable<TConfig> Local<T>(string section, string key, Func<TConfig, T> get, Action<TConfig, T> set,
+            IValueCodec<T> codec, string comment)
+        {
+            if (section == null) throw new ArgumentNullException("section");
+            if (key == null) throw new ArgumentNullException("key");
+            if (get == null) throw new ArgumentNullException("get");
+            if (set == null) throw new ArgumentNullException("set");
+            if (codec == null) throw new ArgumentNullException("codec");
+            if (comment == null) throw new ArgumentNullException("comment");
+
+            string name = "[" + section + "] " + key;
+            var row = new CodecRow<T>(section, key, CommentLines(comment, name), null, codec is HotkeyCodec, codec, get, set);
+            CheckLocalRow(row);
+            Add(row);
+            return this;
+        }
+
+        /// <summary>
+        /// Replaces the schema's comment on a concept row, where the game's unit or behaviour
+        /// differs. '\n' separates lines; the text may not be empty.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">There is no row, or it is a local row.</exception>
+        /// <exception cref="ArgumentException">The text breaks the comment rules.</exception>
+        public ConfigTable<TConfig> Comment(string text)
+        {
+            Row row = Last("Comment");
+            if (row.Concept == null)
+            {
+                throw new InvalidOperationException(row.Name + " is a local row, which carries its comment in Local");
+            }
+            if (text == null) throw new ArgumentNullException("text");
+            string[] lines = CommentLines(text, row.Name);
+            if (lines.Length == 0) throw new ArgumentException(row.Name + " needs a comment", "text");
+            row.Comment = lines;
+            return this;
+        }
+
+        /// <summary>
+        /// An inclusive range for an int, float or double local row: a value outside it is invalid,
+        /// never clamped. A concept row has the schema's range.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">There is no row, or it is a concept row or
+        /// not an int, float or double row.</exception>
+        /// <exception cref="ArgumentException">The bounds do not suit the row, or exclude its default.</exception>
+        public ConfigTable<TConfig> Range(double min, double max)
+        {
+            Row row = Last("Range");
+            if (row.Concept != null)
+            {
+                throw new InvalidOperationException(row.Name + " is a concept row, which has the schema's range");
+            }
+            Row ranged;
+            try
+            {
+                ranged = row.WithRange(min, max);
+            }
+            catch (ArgumentException e)
+            {
+                throw new ArgumentException(row.Name + ": " + e.Message, e);
+            }
+            CheckDefault(ranged);
+            rows[last] = ranged;
+            return this;
+        }
+
+        /// <summary>
+        /// Marks the row as data about the game rather than a taste: at its default it is written
+        /// as a comment, <c>; Key=value</c>, so a later build's corrected default reaches everyone
+        /// who never set it.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">There is no row.</exception>
+        public ConfigTable<TConfig> Engine()
+        {
+            Last("Engine").Engine = true;
+            return this;
+        }
+
+        /// <summary>
+        /// Marks the concept row as one this game keeps: its default is the table's own and never
+        /// Defaults.ini's, so <c>default</c>, a missing key and an invalid value all read the table's
+        /// default, and <see cref="RenderFresh"/> writes the row's value. Each use needs an entry,
+        /// approved by the owner, in the repo's <c>per_game</c> list in data/config-format.json.
+        /// RotationEnabled and PositionEnabled are one setting, the tracking mode, so a table that
+        /// binds both marks both or neither; Apply and RenderFresh throw on one without the other.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">There is no row, it is a local row, or its
+        /// concept is not <see cref="ConceptDescriptor.Global"/>, so every game keeps it already.</exception>
+        public ConfigTable<TConfig> PerGame()
+        {
+            Row row = Last("PerGame");
+            if (row.Concept == null)
+            {
+                throw new InvalidOperationException(row.Name + " is a local row, which never takes a value from Defaults.ini");
+            }
+            if (!row.Concept.Global)
+            {
+                throw new InvalidOperationException(row.Name + " is not global in data/config-schema.json, so every game "
+                    + "keeps its own value and Defaults.ini never reaches it; PerGame() is for a global concept");
+            }
+            row.PerGame = true;
+            return this;
+        }
+
+        /// <summary>
+        /// <see cref="PerGame()"/>, with the game's own default read from <paramref name="value"/> as
+        /// the row's codec reads it, for a table another function built with the schema's default on
+        /// the row (<see cref="HeadTrackingConfigTable"/>).
+        /// </summary>
+        /// <exception cref="InvalidOperationException">As <see cref="PerGame()"/>, or the codec
+        /// refuses <paramref name="value"/>.</exception>
+        public ConfigTable<TConfig> PerGame(string value)
+        {
+            PerGame();
+            Row row = rows[last];
+            byte[] text = Encoding.ASCII.GetBytes(value);
+            var error = row.Apply(text, checkDefaults);
+            if (error != null)
+            {
+                throw new InvalidOperationException(row.Name + " cannot default to " + value + ": " + error);
+            }
+            perGameDefaults.Add(new KeyValuePair<Row, byte[]>(row, text));
+            return this;
+        }
+
+        /// <summary>Marks the row as one the config owner's Save may change.</summary>
+        /// <exception cref="InvalidOperationException">There is no row.</exception>
+        public ConfigTable<TConfig> Writable()
+        {
+            Last("Writable").Writable = true;
+            return this;
+        }
+
+        /// <summary>
+        /// Makes the concept's row the one the next modifier applies to, for a table another
+        /// method built.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="concept"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">The table has no row for the concept.</exception>
+        public ConfigTable<TConfig> Select(ConceptDescriptor concept)
+        {
+            if (concept == null) throw new ArgumentNullException("concept");
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].Concept == concept)
+                {
+                    last = i;
+                    return this;
+                }
+            }
+            throw new InvalidOperationException("the table has no row for " + concept.Id);
+        }
+
+        /// <summary>
+        /// Reads a parsed canonical file into the table's rows of <paramref name="config"/>; members
+        /// no row binds are left as they are. Every row starts from its default, so a key the file
+        /// leaves out reads as the default with no diagnostic, and so does <c>default</c> on a concept
+        /// row: the value, after the reader's trimming, equal to <c>default</c> in any ASCII letter
+        /// case. On a local row the word is a value like any other. A value its codec does not read
+        /// keeps the default and draws <see cref="CanonicalDiagnosticKind.InvalidValue"/>. A section
+        /// the table has no row in draws one UnknownSection, a key no row of a read section names one
+        /// UnknownKey, and none is drawn in [CameraUnlock]. A key that names a row of the table in
+        /// another section, or a concept row by an alias, draws MisplacedKey naming the row; one that
+        /// names a retired concept draws RetiredKey, and one that names a concept the canonical format
+        /// does not write, or is a spelling the schema's non_canonical_keys lists (a deadzone, a
+        /// response curve), draws NonCanonicalConcept with the schema's reason; all three in any
+        /// section. Any other key in a section a non_canonical_keys group lists ([Sensitivity],
+        /// [Inversion], [Deadzone]) draws NonCanonicalConcept with that group's reason, beside the
+        /// section's UnknownSection.
+        /// No key takes its value from another. When the table binds RotationEnabled and
+        /// PositionEnabled and both read false, both take their defaults and one NoTrackingMode names
+        /// the lines that set them.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable, or the table
+        /// marks one of RotationEnabled and PositionEnabled PerGame and not the other.</exception>
+        public ApplyReport Apply(CanonicalIni doc, TConfig config)
+        {
+            return Apply(doc, config, NewDefaults(), new ConceptDescriptor[0]).Report;
+        }
+
+        /// <summary>
+        /// <see cref="Apply(CanonicalIni, TConfig)"/> over effective defaults. A global concept row
+        /// that is not PerGame starts from its value in <paramref name="effective"/>, every other row from the
+        /// table's defaults; <c>default</c>, a missing key and an invalid value leave a row at its
+        /// start, and a pair naming no tracking mode takes both starts. <paramref name="fromDefaultsIni"/>
+        /// names the concepts whose effective default Defaults.ini gave, which the result reports as
+        /// the source of such a row left at its start.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable; the table marks
+        /// one of RotationEnabled and PositionEnabled PerGame and not the other;
+        /// <paramref name="fromDefaultsIni"/> names a concept that is not a row of the table following
+        /// Defaults.ini; or the starts of RotationEnabled and PositionEnabled are both false.</exception>
+        internal TableApplyResult Apply(CanonicalIni doc, TConfig config, TConfig effective,
+            ICollection<ConceptDescriptor> fromDefaultsIni)
+        {
+            if (doc == null) throw new ArgumentNullException("doc");
+            if (config == null) throw new ArgumentNullException("config");
+            if (effective == null) throw new ArgumentNullException("effective");
+            if (fromDefaultsIni == null) throw new ArgumentNullException("fromDefaultsIni");
+            if (!doc.IsReadable)
+            {
+                throw new ArgumentException("Apply needs a readable document, and this one is " + doc.Status, "doc");
+            }
+            CheckPairPerGame();
+
+            TConfig fresh = NewDefaults();
+            var starts = new TConfig[rows.Count];
+            var startSources = new ConfigValueSource[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                starts[i] = rows[i].FollowsDefaultsIni ? effective : fresh;
+                startSources[i] = ConfigValueSource.BuiltIn;
+            }
+            foreach (ConceptDescriptor concept in fromDefaultsIni)
+            {
+                if (concept == null) throw new ArgumentNullException("fromDefaultsIni", "an item is null");
+                int i = IndexOf(concept);
+                if (i < 0 || !rows[i].FollowsDefaultsIni)
+                {
+                    throw new ArgumentException(concept.Id + " is not a row of this table that follows Defaults.ini",
+                        "fromDefaultsIni");
+                }
+                startSources[i] = ConfigValueSource.DefaultsIni;
+            }
+            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
+            int position = IndexOf(ConfigConcepts.PositionEnabled);
+            if (rotation >= 0 && position >= 0 && rows[rotation].IsFalse(starts[rotation])
+                && rows[position].IsFalse(starts[position]))
+            {
+                throw new ArgumentException("RotationEnabled and PositionEnabled both start false, which is not a tracking mode",
+                    "effective");
+            }
+
+            var sources = new ConfigValueSource[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                rows[i].Assign(config, starts[i]);
+                sources[i] = startSources[i];
+            }
+
+            var diagnostics = new List<CanonicalDiagnostic>();
+            var readFrom = new int[rows.Count];
+            foreach (CanonicalSection section in doc.Sections)
+            {
+                if (CanonicalIni.EqualsAsciiIgnoreCase(section.Name, StampSectionBytes)) continue;
+                bool known = false;
+                foreach (Row row in rows)
+                {
+                    if (CanonicalIni.EqualsAsciiIgnoreCase(section.Name, row.SectionBytes)) known = true;
+                }
+                if (!known)
+                {
+                    diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.UnknownSection, new[] { section.Line },
+                        section.Name, Empty, Empty));
+                }
+                foreach (CanonicalValue value in section.Values)
+                {
+                    int found = -1;
+                    for (int i = 0; known && i < rows.Count; i++)
+                    {
+                        if (CanonicalIni.EqualsAsciiIgnoreCase(section.Name, rows[i].SectionBytes)
+                            && CanonicalIni.EqualsAsciiIgnoreCase(value.Key, rows[i].KeyBytes))
+                        {
+                            found = i;
+                        }
+                    }
+                    if (found < 0)
+                    {
+                        ReportUnread(section, value, known, diagnostics);
+                        continue;
+                    }
+                    if (rows[found].Concept != null && CanonicalIni.EqualsAsciiIgnoreCase(value.Value, DefaultToken)) continue;
+#if NULLABLE_ENABLED
+                    string? error = rows[found].Apply(value.Value, config);
+#else
+                    string error = rows[found].Apply(value.Value, config);
+#endif
+                    if (error == null)
+                    {
+                        readFrom[found] = value.Line;
+                        sources[found] = ConfigValueSource.File;
+                    }
+                    else
+                    {
+                        diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.InvalidValue, new[] { value.Line },
+                            section.Name, value.Key, value.Value, error));
+                    }
+                }
+            }
+
+            if (rotation >= 0 && position >= 0 && rows[rotation].IsFalse(config) && rows[position].IsFalse(config))
+            {
+                var lines = new List<int>();
+                if (readFrom[rotation] != 0) lines.Add(readFrom[rotation]);
+                if (readFrom[position] != 0) lines.Add(readFrom[position]);
+                lines.Sort();
+                foreach (int i in new[] { rotation, position })
+                {
+                    rows[i].Assign(config, starts[i]);
+                    sources[i] = startSources[i];
+                }
+                diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.NoTrackingMode, lines.ToArray(), Empty,
+                    Empty, Empty));
+            }
+
+            return new TableApplyResult(new ApplyReport(Sorted(diagnostics)), sources);
+        }
+
+        /// <summary>
+        /// Writes <paramref name="values"/> as a canonical file: the header comments, [CameraUnlock]
+        /// with ConfigFormat, the schema sections the table has rows in, in the schema's order, each
+        /// with its concept rows in the schema's concepts order and then its local rows in table
+        /// order, then the local sections in table order. Each row is its comment lines as
+        /// <c>; text</c>, then <c>Key=value</c>, or <c>; Key=value</c> for an Engine row holding its
+        /// default. A blank line separates sections. CRLF line endings with a final CRLF, no byte
+        /// order mark. When the table has a global concept row that is not PerGame, seven header lines
+        /// say what <c>default</c> means, where Defaults.ini is, and where to change a setting for
+        /// every game or for this one.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">A value its codec cannot write, naming the row; or a
+        /// display name that is empty, has a leading or trailing space, or holds a character outside
+        /// printable ASCII.</exception>
+        public byte[] Render(TConfig values, RenderHeader header)
+        {
+            if (values == null) throw new ArgumentNullException("values");
+            if (header == null) throw new ArgumentNullException("header");
+            return RenderRows(values, GameFileHeader(header), new RowForm[rows.Count]);
+        }
+
+        /// <summary>
+        /// Writes the file a game starts with: <see cref="Render"/> of the defaults, except that every
+        /// global concept row that is not PerGame is written <c>Key=default</c>, an Engine row
+        /// included. Every other row is written as Render writes it, so the row of a concept that is
+        /// not global holds the game's own default, commented only when it is an Engine row.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="header"/> is null.</exception>
+        /// <exception cref="ArgumentException">A global concept row that is not PerGame defaults to a
+        /// value other than the schema's, naming the row; the table binds RotationEnabled without
+        /// PositionEnabled, or marks one of them PerGame and not the other; or the display name breaks
+        /// <see cref="Render"/>'s rule.</exception>
+        public byte[] RenderFresh(RenderHeader header)
+        {
+            if (header == null) throw new ArgumentNullException("header");
+            foreach (Row row in rows)
+            {
+                var concept = row.Concept;
+                if (concept == null || !row.FollowsDefaultsIni) continue;
+                string schema;
+                if (row.Holds(checkDefaults, concept.DefaultText, out schema)) continue;
+                throw new ArgumentException(row.Name + " defaults to " + Encoding.ASCII.GetString(row.Render(checkDefaults))
+                    + ", and the schema to " + schema + ". A fresh file writes default on this row, which takes "
+                    + "Defaults.ini's value, so the row's own default must be the schema's, or the row must be marked "
+                    + "PerGame().");
+            }
+            if (IndexOf(ConfigConcepts.RotationEnabled) >= 0 && IndexOf(ConfigConcepts.PositionEnabled) < 0)
+            {
+                throw new ArgumentException("the table binds [General] RotationEnabled without [Position] PositionEnabled, "
+                    + "and the tracking mode is the two of them together");
+            }
+            CheckPairPerGame();
+            var forms = new RowForm[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].FollowsDefaultsIni) forms[i] = RowForm.Default;
+            }
+            return RenderRows(NewDefaults(), GameFileHeader(header), forms);
+        }
+
+        /// <summary>
+        /// Writes a migrated file: <see cref="Render"/> of <paramref name="values"/>, except that a
+        /// global concept row that is not PerGame is written <c>Key=default</c> when its value equals its
+        /// value in <paramref name="effective"/>, and otherwise as its value, never in the commented
+        /// form of an Engine row, which would read back as the effective default. RotationEnabled and
+        /// PositionEnabled are written default only when both equal their effective values, and
+        /// TrueFreeLook, FreeLookMarker and StockSights only when all three of those that follow
+        /// Defaults.ini do.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">As <see cref="Render"/>, or the table marks one of
+        /// RotationEnabled and PositionEnabled PerGame and not the other.</exception>
+        internal byte[] RenderMigration(TConfig values, TConfig effective, RenderHeader header)
+        {
+            if (values == null) throw new ArgumentNullException("values");
+            if (effective == null) throw new ArgumentNullException("effective");
+            if (header == null) throw new ArgumentNullException("header");
+            CheckPairPerGame();
+            var forms = new RowForm[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].FollowsDefaultsIni) forms[i] = rows[i].Equal(values, effective) ? RowForm.Default : RowForm.Value;
+            }
+            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
+            int position = IndexOf(ConfigConcepts.PositionEnabled);
+            if (rotation >= 0 && position >= 0 && (forms[rotation] == RowForm.Value || forms[position] == RowForm.Value))
+            {
+                if (forms[rotation] == RowForm.Default) forms[rotation] = RowForm.Value;
+                if (forms[position] == RowForm.Default) forms[position] = RowForm.Value;
+            }
+            bool aimValue = false;
+            for (int i = 0; i < rows.Count; i++) aimValue |= rows[i].AimMode && forms[i] == RowForm.Value;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (aimValue && rows[i].AimMode && forms[i] == RowForm.Default) forms[i] = RowForm.Value;
+            }
+            return RenderRows(values, GameFileHeader(header), forms);
+        }
+
+        /// <summary>
+        /// Writes <paramref name="values"/> as <see cref="Render"/> does, except that every row is
+        /// written as its value, an Engine row at its default included, and the header is
+        /// <paramref name="header"/>, each line written as it is.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">A value its codec cannot write, naming the row.</exception>
+        internal byte[] RenderValues(TConfig values, IList<string> header)
+        {
+            if (values == null) throw new ArgumentNullException("values");
+            if (header == null) throw new ArgumentNullException("header");
+            var forms = new RowForm[rows.Count];
+            for (int i = 0; i < rows.Count; i++) forms[i] = RowForm.Value;
+            return RenderRows(values, header, forms);
+        }
+
+        private List<string> GameFileHeader(RenderHeader header)
+        {
+            string name = header.DisplayName;
+            if (name.Length == 0 || !IsPrintableAscii(name) || name[0] == ' ' || name[name.Length - 1] == ' ')
+            {
+                throw new ArgumentException("display name '" + name
+                    + "' is not printable ASCII without a leading or trailing space", "header");
+            }
+
+            var lines = new List<string>
+            {
+                "; " + name + " head tracking settings.",
+                "; Comments start with ; and go on their own line. Text after a value is part of the value.",
+            };
+            bool hotkeys = false;
+            bool followsDefaultsIni = false;
+            foreach (Row row in rows)
+            {
+                hotkeys |= row.Hotkey;
+                followsDefaultsIni |= row.FollowsDefaultsIni;
+            }
+            if (hotkeys)
+            {
+                lines.Add("; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
+                    + "leave empty for none.");
+            }
+            if (followsDefaultsIni) lines.AddRange(DefaultsIniHeader);
+            return lines;
+        }
+
+        private byte[] RenderRows(TConfig values, IList<string> header, RowForm[] forms)
+        {
+            TConfig fresh = NewDefaults();
+            var output = new List<byte>();
+            foreach (string line in header) Line(output, line);
+            Line(output, string.Empty);
+            Line(output, "[" + StampSection + "]");
+            Line(output, "; Written by the mod. Leave this section in place.");
+            Line(output, CanonicalIni.FormatKeyText + "=" + CanonicalIni.ConfigFormat.ToString(CultureInfo.InvariantCulture));
+
+            foreach (string section in ConfigConcepts.Sections)
+            {
+                var order = new List<int>();
+                foreach (ConceptDescriptor concept in ConfigConcepts.All)
+                {
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        if (rows[i].Concept == concept && rows[i].Section == section) order.Add(i);
+                    }
+                }
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    if (rows[i].Concept == null && rows[i].Section == section) order.Add(i);
+                }
+                if (order.Count == 0) continue;
+                Line(output, string.Empty);
+                Line(output, "[" + section + "]");
+                foreach (int i in order) AppendRow(output, rows[i], forms[i], values, fresh);
+            }
+
+            var localSections = new List<string>();
+            foreach (Row row in rows)
+            {
+                if (Array.IndexOf(ConfigConcepts.Sections, row.Section) < 0 && !localSections.Contains(row.Section))
+                {
+                    localSections.Add(row.Section);
+                }
+            }
+            foreach (string section in localSections)
+            {
+                Line(output, string.Empty);
+                Line(output, "[" + section + "]");
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    if (rows[i].Section == section) AppendRow(output, rows[i], forms[i], values, fresh);
+                }
+            }
+            return output.ToArray();
+        }
+
+        internal TConfig CreateDefaults()
+        {
+            return NewDefaults();
+        }
+
+        internal int RowCount
+        {
+            get { return rows.Count; }
+        }
+
+        internal string RowName(int row)
+        {
+            return rows[row].Name;
+        }
+
+        internal string RowSection(int row)
+        {
+            return rows[row].Section;
+        }
+
+        internal string RowKey(int row)
+        {
+            return rows[row].Key;
+        }
+
+        internal bool RowWritable(int row)
+        {
+            return rows[row].Writable;
+        }
+
+        internal bool RowEqual(int row, TConfig a, TConfig b)
+        {
+            return rows[row].Equal(a, b);
+        }
+
+        /// <exception cref="ArgumentException">The row's codec cannot write the value.</exception>
+        internal byte[] RowRender(int row, TConfig config)
+        {
+            return rows[row].Render(config);
+        }
+
+        /// <summary>The row's value as a message shows it: its canonical text, or the value as .NET
+        /// prints it when the codec cannot write it.</summary>
+        internal string RowValueText(int row, TConfig config)
+        {
+            try
+            {
+                return Encoding.UTF8.GetString(rows[row].Render(config));
+            }
+            catch (ArgumentException)
+            {
+                return rows[row].Display(config);
+            }
+        }
+
+        internal int RowOf(ConceptDescriptor concept)
+        {
+            return IndexOf(concept);
+        }
+
+        /// <summary>The row's concept, or null for a local row.</summary>
+#if NULLABLE_ENABLED
+        internal ConceptDescriptor? RowConcept(int row)
+#else
+        internal ConceptDescriptor RowConcept(int row)
+#endif
+        {
+            return rows[row].Concept;
+        }
+
+        /// <summary>A global concept row not marked PerGame, whose default is the effective default.</summary>
+        internal bool RowFollowsDefaultsIni(int row)
+        {
+            return rows[row].FollowsDefaultsIni;
+        }
+
+        /// <summary>Reads <paramref name="text"/> into the row's field through its codec and setter;
+        /// the codec's error, or null when it was read.</summary>
+#if NULLABLE_ENABLED
+        internal string? RowApply(int row, byte[] text, TConfig config)
+#else
+        internal string RowApply(int row, byte[] text, TConfig config)
+#endif
+        {
+            return rows[row].Apply(text, config);
+        }
+
+        internal void RowAssign(int row, TConfig to, TConfig from)
+        {
+            rows[row].Assign(to, from);
+        }
+
+        private TConfig NewDefaults()
+        {
+            TConfig made = defaults();
+            if (made == null) throw new InvalidOperationException("the defaults factory returned null");
+            foreach (KeyValuePair<Row, byte[]> perGame in perGameDefaults) perGame.Key.Apply(perGame.Value, made);
+            return made;
+        }
+
+        private void Add(Row row)
+        {
+            CheckDefault(row);
+            rows.Add(row);
+            last = rows.Count - 1;
+        }
+
+        private void CheckDefault(Row row)
+        {
+            try
+            {
+                row.Render(checkDefaults);
+            }
+            catch (ArgumentException e)
+            {
+                throw new ArgumentException(row.Name + " has a default it cannot write: " + e.Message, e);
+            }
+        }
+
+        private Row Last(string modifier)
+        {
+            if (last < 0) throw new InvalidOperationException(modifier + " needs a row: add or Select one first");
+            return rows[last];
+        }
+
+        // One PerGame half would start the pair from two sources, which can name no tracking mode
+        // from a Defaults.ini pair that is valid on its own.
+        private void CheckPairPerGame()
+        {
+            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
+            int position = IndexOf(ConfigConcepts.PositionEnabled);
+            if (rotation < 0 || position < 0 || rows[rotation].PerGame == rows[position].PerGame) return;
+            Row marked = rows[rotation].PerGame ? rows[rotation] : rows[position];
+            Row other = rows[rotation].PerGame ? rows[position] : rows[rotation];
+            throw new ArgumentException(marked.Name + " is marked PerGame() and " + other.Name + " is not. The two are "
+                + "one setting, the tracking mode, so PerGame() marks both or neither.");
+        }
+
+        private int IndexOf(ConceptDescriptor concept)
+        {
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].Concept == concept) return i;
+            }
+            return -1;
+        }
+
+        private void CheckUniqueKey(Row row)
+        {
+            foreach (Row earlier in rows)
+            {
+                if (CanonicalIni.EqualsAsciiIgnoreCase(earlier.KeyBytes, row.KeyBytes))
+                {
+                    throw new ArgumentException(row.Name + ": " + earlier.Name
+                        + " already has that key, and a key name is used once in the file");
+                }
+            }
+        }
+
+        private void CheckLocalRow(Row row)
+        {
+            if (!CodecText.IsPascalCase(row.Section))
+            {
+                throw new ArgumentException(row.Name + ": the section name is not PascalCase ASCII letters and digits", "section");
+            }
+            if (!CodecText.IsPascalCase(row.Key))
+            {
+                throw new ArgumentException(row.Name + ": the key is not PascalCase ASCII letters and digits", "key");
+            }
+            if (CanonicalIni.EqualsAsciiIgnoreCase(row.SectionBytes, StampSectionBytes))
+            {
+                throw new ArgumentException(row.Name + ": [CameraUnlock] belongs to core, so a game-local row goes elsewhere",
+                    "section");
+            }
+            foreach (string section in ConfigConcepts.Sections)
+            {
+                if (!CodecText.EqualsAsciiIgnoreCase(row.Section, section)) continue;
+                if (row.Section != section)
+                {
+                    throw new ArgumentException(row.Name + ": the schema spells this section [" + section + "]", "section");
+                }
+                bool canonical = false;
+                foreach (ConceptDescriptor concept in ConfigConcepts.All)
+                {
+                    if (concept.Section == section) canonical = true;
+                }
+                if (!canonical)
+                {
+                    throw new ArgumentException(row.Name + ": [" + section
+                        + "] holds none of the settings a canonical file writes, so it has no rows", "section");
+                }
+            }
+            foreach (KeyValuePair<string, string> other in ConfigConcepts.NonCanonicalSectionReasons)
+            {
+                if (CodecText.EqualsAsciiIgnoreCase(row.Section, other.Key))
+                {
+                    throw new ArgumentException(row.Name + ": [" + row.Section + "] holds only settings a canonical file "
+                        + "does not carry, so it has no rows: " + other.Value, "section");
+                }
+            }
+            foreach (Row earlier in rows)
+            {
+                if (CodecText.EqualsAsciiIgnoreCase(earlier.Section, row.Section) && earlier.Section != row.Section)
+                {
+                    throw new ArgumentException(row.Name + ": " + earlier.Name + " spells this section [" + earlier.Section + "]",
+                        "section");
+                }
+            }
+#if NULLABLE_ENABLED
+            string? canonicalKey = ConfigKeySchema.Resolve(row.Key);
+#else
+            string canonicalKey = ConfigKeySchema.Resolve(row.Key);
+#endif
+            if (canonicalKey != null)
+            {
+                throw new ArgumentException(row.Name + ": " + row.Key + " is the key or an alias of the schema concept '"
+                    + canonicalKey + "', so a game-local row cannot use it", "key");
+            }
+            string nonCanonicalReason;
+            if (ConfigConcepts.NonCanonicalKeyReasons.TryGetValue(ConfigKeySchema.Normalize(row.Key), out nonCanonicalReason))
+            {
+                throw new ArgumentException(row.Name + ": " + row.Key + " names a setting a canonical file does not carry, so a "
+                    + "game-local row cannot use it: " + nonCanonicalReason, "key");
+            }
+            if (CanonicalIni.EqualsAsciiIgnoreCase(row.KeyBytes, CanonicalIni.FormatKey))
+            {
+                throw new ArgumentException(row.Name + ": [CameraUnlock] ConfigFormat already has that key, and a key name is "
+                    + "used once in the file", "key");
+            }
+            CheckUniqueKey(row);
+            if (row.Comment.Length == 0)
+            {
+                bool covered = false;
+                foreach (Row earlier in rows)
+                {
+                    if (earlier.Concept == null && earlier.Section == row.Section) covered = true;
+                }
+                if (!covered)
+                {
+                    throw new ArgumentException(row.Name + " needs a comment: only a row written below a game-local row of its "
+                        + "section may share that row's comment", "comment");
+                }
+            }
+        }
+
+        // The row a key names outside its own section or spelling: a row's key in any section, or
+        // a concept row's key or alias. Every key name is used once in a file, so there is at most one.
+#if NULLABLE_ENABLED
+        private Row? MisplacedRow(byte[] key, string? canonical)
+#else
+        private Row MisplacedRow(byte[] key, string canonical)
+#endif
+        {
+            foreach (Row row in rows)
+            {
+                if (CanonicalIni.EqualsAsciiIgnoreCase(row.KeyBytes, key)) return row;
+                if (canonical != null && row.Concept != null && ConfigKeySchema.Normalize(row.Key) == canonical) return row;
+            }
+            return null;
+        }
+
+        private void ReportUnread(CanonicalSection section, CanonicalValue value, bool reportUnknown,
+            List<CanonicalDiagnostic> diagnostics)
+        {
+#if NULLABLE_ENABLED
+            string? canonical = ConfigKeySchema.Resolve(Encoding.UTF8.GetString(value.Key));
+            string? reason = null;
+            Row? misplaced = MisplacedRow(value.Key, canonical);
+#else
+            string canonical = ConfigKeySchema.Resolve(Encoding.UTF8.GetString(value.Key));
+            string reason = null;
+            Row misplaced = MisplacedRow(value.Key, canonical);
+#endif
+            if (misplaced != null)
+            {
+                diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.MisplacedKey, new[] { value.Line },
+                    section.Name, value.Key, value.Value, misplaced.Name));
+                return;
+            }
+            if (canonical != null && ConfigKeySchema.IsRetired(canonical))
+            {
+                diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.RetiredKey, new[] { value.Line }, section.Name,
+                    value.Key, value.Value));
+                return;
+            }
+            bool nonCanonical = canonical != null
+                ? ConfigConcepts.NonCanonicalReasons.TryGetValue(canonical, out reason)
+                : ConfigConcepts.NonCanonicalKeyReasons.TryGetValue(ConfigKeySchema.Normalize(Encoding.UTF8.GetString(value.Key)), out reason);
+            if (!nonCanonical)
+            {
+                foreach (KeyValuePair<string, string> other in ConfigConcepts.NonCanonicalSectionReasons)
+                {
+                    if (!CodecText.EqualsAsciiIgnoreCase(section.Name, other.Key)) continue;
+                    reason = other.Value;
+                    nonCanonical = true;
+                }
+            }
+            if (nonCanonical)
+            {
+                diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.NonCanonicalConcept, new[] { value.Line },
+                    section.Name, value.Key, value.Value, reason));
+                return;
+            }
+            if (reportUnknown)
+            {
+                diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.UnknownKey, new[] { value.Line }, section.Name,
+                    value.Key, value.Value));
+            }
+        }
+
+        // Stable: List<T>.Sort is not, so the index each diagnostic was added at breaks ties.
+        private static CanonicalDiagnostic[] Sorted(List<CanonicalDiagnostic> diagnostics)
+        {
+            var order = new List<KeyValuePair<int, CanonicalDiagnostic>>();
+            for (int i = 0; i < diagnostics.Count; i++)
+            {
+                order.Add(new KeyValuePair<int, CanonicalDiagnostic>(i, diagnostics[i]));
+            }
+            order.Sort((a, b) =>
+            {
+                int byLine = a.Value.Lines[0].CompareTo(b.Value.Lines[0]);
+                if (byLine != 0) return byLine;
+                int byKind = ((int)a.Value.Kind).CompareTo((int)b.Value.Kind);
+                return byKind != 0 ? byKind : a.Key.CompareTo(b.Key);
+            });
+            var sorted = new CanonicalDiagnostic[order.Count];
+            for (int i = 0; i < order.Count; i++) sorted[i] = order[i].Value;
+            return sorted;
+        }
+
+        private static void AppendRow(List<byte> output, Row row, RowForm form, TConfig values, TConfig fresh)
+        {
+            foreach (string line in row.Comment) Line(output, "; " + line);
+            byte[] value;
+            try
+            {
+                value = form == RowForm.Default ? DefaultToken : row.Render(values);
+            }
+            catch (ArgumentException e)
+            {
+                throw new ArgumentException(row.Name + ": " + e.Message, "values", e);
+            }
+            if (form == RowForm.AsRender && row.Engine && row.Equal(values, fresh)) output.AddRange(Encoding.ASCII.GetBytes("; "));
+            output.AddRange(row.KeyBytes);
+            output.Add((byte)'=');
+            output.AddRange(value);
+            output.AddRange(Crlf);
+        }
+
+        private static void Line(List<byte> output, string ascii)
+        {
+            output.AddRange(Encoding.ASCII.GetBytes(ascii));
+            output.AddRange(Crlf);
+        }
+
+        private static string[] CommentLines(string text, string row)
+        {
+            if (text.Length == 0) return new string[0];
+            string[] lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string number = (i + 1).ToString(CultureInfo.InvariantCulture);
+                string line = lines[i];
+                if (line.Length == 0) throw new ArgumentException(row + ": comment line " + number + " is empty", "comment");
+                if (!IsPrintableAscii(line))
+                {
+                    throw new ArgumentException(row + ": comment line " + number
+                        + " holds a character outside printable ASCII, and a canonical file is ASCII", "comment");
+                }
+                if (line[0] == ' ' || line[line.Length - 1] == ' ')
+                {
+                    throw new ArgumentException(row + ": comment line " + number + " starts or ends with a space", "comment");
+                }
+            }
+            return lines;
+        }
+
+        private static string[] ToArray(IList<string> lines)
+        {
+            var array = new string[lines.Count];
+            lines.CopyTo(array, 0);
+            return array;
+        }
+
+        private static bool IsPrintableAscii(string text)
+        {
+            foreach (char c in text)
+            {
+                if (c < 0x20 || c > 0x7E) return false;
+            }
+            return true;
+        }
+
+        private abstract class Row
+        {
+            protected Row(string section, string key, string[] comment,
+#if NULLABLE_ENABLED
+                ConceptDescriptor? concept,
+#else
+                ConceptDescriptor concept,
+#endif
+                bool hotkey)
+            {
+                Section = section;
+                Key = key;
+                SectionBytes = Encoding.ASCII.GetBytes(section);
+                KeyBytes = Encoding.ASCII.GetBytes(key);
+                Comment = comment;
+                Concept = concept;
+                Hotkey = hotkey;
+            }
+
+            public string Section { get; }
+
+            public string Key { get; }
+
+            public byte[] SectionBytes { get; }
+
+            public byte[] KeyBytes { get; }
+
+            public string[] Comment { get; set; }
+
+#if NULLABLE_ENABLED
+            public ConceptDescriptor? Concept { get; }
+#else
+            public ConceptDescriptor Concept { get; }
+#endif
+
+            public bool Hotkey { get; }
+
+            public bool Engine { get; set; }
+
+            public bool Writable { get; set; }
+
+            public bool PerGame { get; set; }
+
+            // A global concept row that is not PerGame, whose default is the effective default.
+            public bool FollowsDefaultsIni
+            {
+                get { return Concept != null && Concept.Global && !PerGame; }
+            }
+
+            public bool AimMode
+            {
+                get
+                {
+                    return Concept == ConfigConcepts.TrueFreeLook || Concept == ConfigConcepts.FreeLookMarker
+                        || Concept == ConfigConcepts.StockSights;
+                }
+            }
+
+            public string Name
+            {
+                get { return "[" + Section + "] " + Key; }
+            }
+
+            // The codec's error, or null when the text was read into the config.
+#if NULLABLE_ENABLED
+            public abstract string? Apply(byte[] text, TConfig config);
+#else
+            public abstract string Apply(byte[] text, TConfig config);
+#endif
+
+            public abstract byte[] Render(TConfig config);
+
+            public abstract string Display(TConfig config);
+
+            public abstract bool Equal(TConfig a, TConfig b);
+
+            // Whether the row's value in the config is the text as the row's codec reads it; the
+            // text as the codec writes it comes back in canonical.
+            public abstract bool Holds(TConfig config, string text, out string canonical);
+
+            public abstract void Assign(TConfig to, TConfig from);
+
+            public abstract bool IsFalse(TConfig config);
+
+            public abstract Row WithRange(double min, double max);
+        }
+
+        private sealed class CodecRow<T> : Row
+        {
+            // Range on an int row takes whole numbers no larger in size than 2^53, which a double
+            // holds exactly.
+            private const double LargestExactWhole = 9007199254740992.0;
+
+            private readonly IValueCodec<T> codec;
+            private readonly Func<TConfig, T> get;
+            private readonly Action<TConfig, T> set;
+
+            public CodecRow(string section, string key, string[] comment,
+#if NULLABLE_ENABLED
+                ConceptDescriptor? concept,
+#else
+                ConceptDescriptor concept,
+#endif
+                bool hotkey, IValueCodec<T> codec, Func<TConfig, T> get, Action<TConfig, T> set)
+                : base(section, key, comment, concept, hotkey)
+            {
+                this.codec = codec;
+                this.get = get;
+                this.set = set;
+            }
+
+#if NULLABLE_ENABLED
+            public override string? Apply(byte[] text, TConfig config)
+#else
+            public override string Apply(byte[] text, TConfig config)
+#endif
+            {
+                T value;
+#if NULLABLE_ENABLED
+                string? error;
+#else
+                string error;
+#endif
+                if (!codec.TryParse(text, out value, out error)) return error;
+                set(config, value);
+                return null;
+            }
+
+            public override byte[] Render(TConfig config)
+            {
+                return codec.Render(get(config));
+            }
+
+            public override string Display(TConfig config)
+            {
+                T held = get(config);
+                if (held == null) return "null";
+                object value = held;
+                var items = value as System.Collections.IEnumerable;
+                if (items != null && !(value is string))
+                {
+                    var parts = new List<string>();
+                    foreach (object item in items) parts.Add(Convert.ToString(item, CultureInfo.InvariantCulture));
+                    return string.Join(", ", parts.ToArray());
+                }
+                return Convert.ToString(value, CultureInfo.InvariantCulture);
+            }
+
+            public override bool Equal(TConfig a, TConfig b)
+            {
+                return codec.Equal(get(a), get(b));
+            }
+
+            public override bool Holds(TConfig config, string text, out string canonical)
+            {
+                T value;
+#if NULLABLE_ENABLED
+                string? error;
+#else
+                string error;
+#endif
+                if (!codec.TryParse(Encoding.ASCII.GetBytes(text), out value, out error))
+                {
+                    throw new InvalidOperationException(Name + ": '" + text + "' does not read: " + error);
+                }
+                canonical = Encoding.ASCII.GetString(codec.Render(value));
+                return codec.Equal(get(config), value);
+            }
+
+            public override void Assign(TConfig to, TConfig from)
+            {
+                set(to, get(from));
+            }
+
+            public override bool IsFalse(TConfig config)
+            {
+                if (get(config) is bool flag) return !flag;
+                throw new InvalidOperationException(Name + " does not hold a bool");
+            }
+
+            public override Row WithRange(double min, double max)
+            {
+                object ranged;
+                if (codec is IntCodec)
+                {
+                    bool representable = min >= -LargestExactWhole && min <= LargestExactWhole
+                        && max >= -LargestExactWhole && max <= LargestExactWhole;
+                    if (!representable || min != System.Math.Floor(min) || max != System.Math.Floor(max)
+                        || min < int.MinValue || max > int.MaxValue)
+                    {
+                        throw new ArgumentException("Range(" + min.ToString(CultureInfo.InvariantCulture) + ", "
+                            + max.ToString(CultureInfo.InvariantCulture) + ") is not two whole numbers the field's type holds");
+                    }
+                    ranged = new IntCodec((int)min, (int)max);
+                }
+                else if (codec is FloatCodec)
+                {
+                    ranged = new FloatCodec((float)min, (float)max);
+                }
+                else if (codec is DoubleCodec)
+                {
+                    ranged = new DoubleCodec(min, max);
+                }
+                else
+                {
+                    throw new InvalidOperationException(Name + ": Range applies to an int, float or double row");
+                }
+                var row = new CodecRow<T>(Section, Key, Comment, Concept, Hotkey, (IValueCodec<T>)ranged, get, set);
+                row.Engine = Engine;
+                row.Writable = Writable;
+                return row;
+            }
+        }
+    }
+}

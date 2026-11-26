@@ -1,0 +1,4 @@
+# UTF-16 BE with its mark is unreadable.
+status	Utf16
+format	0
+stamp	false

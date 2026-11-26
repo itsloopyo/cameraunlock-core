@@ -1,0 +1,176 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include "cameraunlock/data/tracking_pose.h"
+#include "cameraunlock/protocol/pose_jump_gate.h"
+#include "cameraunlock/protocol/socket_types.h"
+#include "cameraunlock/protocol/udp_socket.h"
+#include "cameraunlock/protocol/udp_receiver.h"
+
+namespace cameraunlock {
+
+/// Polling-based UDP receiver for OpenTrack protocol.
+/// Designed for single-threaded game loops where Poll() is called each frame.
+/// This is an alternative to the threaded UdpReceiver for engines that prefer
+/// explicit polling over background threads.
+class PollingUdpReceiver {
+public:
+    /// Default OpenTrack UDP port.
+    static constexpr uint16_t kDefaultPort = 4242;
+
+    /// Connection timeout in milliseconds.
+    /// Higher than UdpReceiver (1000 vs 500) because the polling receiver must
+    /// tolerate variable frame intervals in the game loop.
+    static constexpr int kConnectionTimeoutMs = 1000;
+
+    // See UdpReceiver::kRecenterRearmMs - the trailer re-arm window is a wire-contract
+    // constant (~5s of silence), not the connection-liveness timeout.
+    static constexpr int kRecenterRearmMs = 5000;
+
+    /// As UdpReceiver: the receiver follows the first source that sends, and another
+    /// takes over only once that one has been silent this long.
+    static constexpr int kSourceHandoverMs = UdpReceiver::kSourceHandoverMs;
+
+    /// Maximum receive buffer size.
+    static constexpr size_t kMaxBufferSize = 256;
+
+    PollingUdpReceiver() = default;
+    ~PollingUdpReceiver();
+
+    // Non-copyable, non-movable
+    PollingUdpReceiver(const PollingUdpReceiver&) = delete;
+    PollingUdpReceiver& operator=(const PollingUdpReceiver&) = delete;
+    PollingUdpReceiver(PollingUdpReceiver&&) = delete;
+    PollingUdpReceiver& operator=(PollingUdpReceiver&&) = delete;
+
+    /// Diagnostic sink, mirroring UdpReceiver::SetLog. Defaults to the shared
+    /// file log. Set it BEFORE Initialize so the bind result is captured.
+    void SetLog(std::function<void(const std::string&)> log) { m_log = std::move(log); }
+
+    /// Initializes the UDP socket on the specified port.
+    /// @param port The UDP port to listen on.
+    /// @return True if initialization succeeded.
+    bool Initialize(uint16_t port = kDefaultPort);
+
+    /// Shuts down the receiver and releases resources.
+    void Shutdown();
+
+    /// Polls for incoming data (non-blocking).
+    /// Drains all pending packets and keeps only the latest. Like UdpReceiver, it
+    /// follows one source and holds back a jump that the next packet does not
+    /// corroborate (PoseJumpGate).
+    /// Should be called once per frame from the main game loop.
+    /// @return True if a new pose was taken this frame.
+    bool Poll();
+
+    /// Gets the latest tracking pose (rotation only, with offset applied).
+    /// @param pose Output pose if data is available.
+    /// @return True if valid data is available.
+    bool GetPose(TrackingPose& pose) const;
+
+    /// Gets the raw rotation values without offset applied.
+    /// @return True if valid data is available.
+    bool GetRawRotation(float& yaw, float& pitch, float& roll) const;
+
+    /// Gets the rotation values with offset applied.
+    /// @return True if valid data is available.
+    bool GetRotation(float& yaw, float& pitch, float& roll) const;
+
+    /// Gets the latest position values with offset applied.
+    /// @return True if position data is available.
+    bool GetPosition(float& x, float& y, float& z) const;
+
+    /// Sets the current rotation and position as the new center point.
+    void Recenter();
+
+    /// Resets the center offset to zero.
+    void ResetOffset();
+
+    /// Always false. The HCAM trailer is still parsed, but it no longer raises a
+    /// recenter request: Headcam zeroes its own output on CENTER and the pipeline's
+    /// centre is identity, so the zeroed stream is already correct. Kept on the API
+    /// because mods call it; they simply never see a press.
+    bool TryConsumeRecenterRequest() {
+        bool requested = m_recenterRequested;
+        m_recenterRequested = false;
+        return requested;
+    }
+
+    /// True if the receiver is properly initialized.
+    bool IsInitialized() const { return m_initialized; }
+
+    /// True if data has been received recently (within timeout).
+    bool IsConnected() const;
+
+    /// True if the data source is from a remote (non-localhost) address.
+    bool IsRemoteConnection() const { return m_isRemoteConnection; }
+
+    /// Gets statistics about received data.
+    uint64_t GetPacketsReceived() const { return m_packetsReceived; }
+    uint64_t GetBytesReceived() const { return m_bytesReceived; }
+
+private:
+    bool ParsePacket(const char* buffer, int bytesReceived, const sockaddr_in& sender, int64_t nowMs);
+    int64_t GetCurrentTimeMs() const;
+
+    UdpSocket m_socket;
+    bool m_initialized = false;
+
+    std::function<void(const std::string&)> m_log = DefaultLogSink();
+    bool m_firstPacketLogged = false;
+
+    // Initialize() is caller-driven, and a mod that retries a busy port calls it
+    // on a timer for as long as the bind keeps failing. The threaded receiver
+    // rate-limits its equivalent line inside its own supervisor loop; this one
+    // has no loop to hang a timer on, so it reports the failure once per run of
+    // failures and stays quiet until the port actually comes back.
+    bool m_bindFailureLogged = false;
+
+    // Latest received data (rotation in degrees)
+    float m_yaw = 0.0f;
+    float m_pitch = 0.0f;
+    float m_roll = 0.0f;
+    bool m_hasData = false;
+
+    // Latest received position data (metres)
+    float m_posX = 0.0f;
+    float m_posY = 0.0f;
+    float m_posZ = 0.0f;
+    bool m_hasPosition = false;
+
+    // Center offset for recentering
+    float m_yawOffset = 0.0f;
+    float m_pitchOffset = 0.0f;
+    float m_rollOffset = 0.0f;
+    float m_posXOffset = 0.0f;
+    float m_posYOffset = 0.0f;
+    float m_posZOffset = 0.0f;
+    bool m_hasOffset = false;
+
+    // Headcam trailer counter, latched and never acted on: the tracker owns the
+    // centre, so m_recenterRequested stays false.
+    uint8_t m_lastRecenterCounter = 0;
+    bool m_hasRecenterCounter = false;
+    bool m_recenterRequested = false;
+
+    // The source followed, packed as (s_addr << 16) | port, and when it last sent.
+    uint64_t m_primarySource = 0;
+    int64_t m_primaryLastSeenMs = 0;
+    bool m_secondSourceLogged = false;
+    PoseJumpGate m_poseGate;
+
+    // Connection state
+    int64_t m_lastReceiveTimeMs = 0;
+    bool m_isRemoteConnection = false;
+
+    // Statistics
+    uint64_t m_packetsReceived = 0;
+    uint64_t m_bytesReceived = 0;
+
+    // Receive buffer
+    char m_receiveBuffer[kMaxBufferSize];
+};
+
+}  // namespace cameraunlock

@@ -1,0 +1,3 @@
+# No [CameraUnlock]: read as a game file is, with no line, since nobody saves this file.
+value	UdpPort	accepted	2	5000
+value	WorldSpaceYaw	accepted	4	false

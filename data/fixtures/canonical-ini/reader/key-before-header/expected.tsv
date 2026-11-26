@@ -1,0 +1,7 @@
+# Keys above the first header are reported and skipped.
+status	Readable
+format	1
+stamp	false
+key	General	C	3	5	-
+diagnostic	KeyOutsideSection	1
+diagnostic	KeyOutsideSection	3

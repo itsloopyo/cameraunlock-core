@@ -1,0 +1,7 @@
+# TrueFreeLook=off reads as false. A change to true writes TrueFreeLook alone, as true.
+binds	three-state
+preference	tracking_mode	both	both
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true
+change	true_free_look	true

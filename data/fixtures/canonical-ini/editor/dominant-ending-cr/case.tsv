@@ -1,0 +1,2 @@
+# Two lone CRs to one CRLF: the new line ends CR.
+set_or_insert	General	C	3

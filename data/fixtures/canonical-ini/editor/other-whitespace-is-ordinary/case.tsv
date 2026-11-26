@@ -1,0 +1,4 @@
+# No-break and ideographic spaces are ordinary bytes: inside a key, around a value
+# (replaced with it), in a comment, and after a header's ']'.
+set	General	Name	b
+set	Other	Key	3

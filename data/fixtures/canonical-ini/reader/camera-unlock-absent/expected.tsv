@@ -1,0 +1,5 @@
+# No [CameraUnlock]: unstamped, read as the current format, no diagnostic.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	3	-

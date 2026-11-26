@@ -1,0 +1,310 @@
+#include "cameraunlock/protocol/polling_udp_receiver.h"
+#include "cameraunlock/protocol/opentrack_packet.h"
+#include "cameraunlock/data/position_data.h"
+
+#include <cstring>
+#include <chrono>
+#include <string>
+
+namespace cameraunlock {
+
+PollingUdpReceiver::~PollingUdpReceiver() {
+    Shutdown();
+}
+
+bool PollingUdpReceiver::Initialize(uint16_t port) {
+    if (m_initialized) {
+        return true;
+    }
+
+    if (!m_socket.Open(port)) {
+        if (m_log && !m_bindFailureLogged) {
+            m_bindFailureLogged = true;
+            m_log("Failed to bind UDP port " + std::to_string(port) + ": " +
+                  m_socket.LastError());
+        }
+        return false;
+    }
+
+    if (m_log) {
+        m_log("UDP receiver listening on port " + std::to_string(port));
+    }
+    m_bindFailureLogged = false;
+
+    m_initialized = true;
+    m_firstPacketLogged = false;
+    m_lastReceiveTimeMs = 0;
+    m_packetsReceived = 0;
+    m_bytesReceived = 0;
+    m_isRemoteConnection = false;
+    m_hasData = false;
+    m_hasPosition = false;
+    ResetOffset();
+    m_primarySource = 0;
+    m_primaryLastSeenMs = 0;
+    m_secondSourceLogged = false;
+    m_poseGate.Reset();
+    m_lastRecenterCounter = 0;
+    m_hasRecenterCounter = false;
+    m_recenterRequested = false;
+    std::memset(m_receiveBuffer, 0, sizeof(m_receiveBuffer));
+
+    return true;
+}
+
+void PollingUdpReceiver::Shutdown() {
+    if (!m_initialized) {
+        return;
+    }
+
+    m_socket.Close();
+    m_initialized = false;
+}
+
+bool PollingUdpReceiver::Poll() {
+    if (!m_initialized || !m_socket.IsOpen()) {
+        return false;
+    }
+
+    bool receivedAny = false;
+    int packetsThisFrame = 0;
+    constexpr int kMaxPacketsPerFrame = 1000;  // Safety limit
+
+    // Re-arm first-sighting after a tracking gap: the tracker app restarting
+    // resets its counter to zero, so a value latched from the old session
+    // would swallow the first CENTER press of the new one.
+    if (m_lastReceiveTimeMs != 0 &&
+        GetCurrentTimeMs() - m_lastReceiveTimeMs >= kRecenterRearmMs) {
+        m_hasRecenterCounter = false;
+    }
+
+    SOCKET sock = m_socket.GetHandle();
+
+    // Drain ALL pending packets, keeping only the latest
+    // This prevents lag from buffered packets when sender is faster than game fps
+    while (packetsThisFrame < kMaxPacketsPerFrame) {
+        sockaddr_in senderAddr;
+#ifdef _WIN32
+        int senderAddrLen = sizeof(senderAddr);
+#else
+        socklen_t senderAddrLen = sizeof(senderAddr);
+#endif
+
+        int bytesReceived = recvfrom(
+            sock,
+            m_receiveBuffer,
+            static_cast<int>(sizeof(m_receiveBuffer)),
+            0,
+            reinterpret_cast<sockaddr*>(&senderAddr),
+            &senderAddrLen
+        );
+
+        if (bytesReceived == SOCKET_ERROR) {
+#ifdef _WIN32
+            int error = WSAGetLastError();
+            if (error == WSAEWOULDBLOCK) {
+                break;  // No more data available
+            }
+            // The datagram was larger than m_receiveBuffer. It has already been consumed,
+            // so this is not the end of the queue: breaking here let one oversized packet
+            // from any LAN host discard every tracker packet still queued behind it.
+            // Counted so the kMaxPacketsPerFrame bound still advances.
+            if (error == WSAEMSGSIZE) {
+                packetsThisFrame++;
+                continue;
+            }
+#else
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                break;  // No more data available
+            }
+#endif
+            break;  // Other error
+        }
+
+        if (bytesReceived == 0) {
+            break;
+        }
+
+        packetsThisFrame++;
+
+        if (ParsePacket(m_receiveBuffer, bytesReceived, senderAddr, GetCurrentTimeMs())) {
+            m_packetsReceived++;
+            m_bytesReceived += static_cast<uint64_t>(bytesReceived);
+            receivedAny = true;
+
+            // Latched on an ACCEPTED packet, not on any datagram. The latch is
+            // one-shot, so logging before validation lets a stray keepalive or a
+            // LAN broadcast consume it and the real tracker packet then never
+            // reports - the exact false split this line exists to prevent.
+            if (!m_firstPacketLogged && m_log) {
+                m_firstPacketLogged = true;
+                m_log("First tracker packet accepted: " + std::to_string(bytesReceived) +
+                      " bytes");
+            }
+        }
+    }
+
+    if (receivedAny) {
+        m_lastReceiveTimeMs = GetCurrentTimeMs();
+    }
+
+    return receivedAny;
+}
+
+bool PollingUdpReceiver::GetPose(TrackingPose& pose) const {
+    if (!m_hasData) {
+        return false;
+    }
+
+    float yaw = m_yaw;
+    float pitch = m_pitch;
+    float roll = m_roll;
+
+    if (m_hasOffset) {
+        yaw -= m_yawOffset;
+        pitch -= m_pitchOffset;
+        roll -= m_rollOffset;
+    }
+
+    pose = TrackingPose(yaw, pitch, roll);
+    return true;
+}
+
+bool PollingUdpReceiver::GetRawRotation(float& yaw, float& pitch, float& roll) const {
+    if (!m_hasData) {
+        return false;
+    }
+
+    yaw = m_yaw;
+    pitch = m_pitch;
+    roll = m_roll;
+    return true;
+}
+
+bool PollingUdpReceiver::GetRotation(float& yaw, float& pitch, float& roll) const {
+    if (!m_hasData) {
+        return false;
+    }
+
+    yaw = m_yaw;
+    pitch = m_pitch;
+    roll = m_roll;
+
+    if (m_hasOffset) {
+        yaw -= m_yawOffset;
+        pitch -= m_pitchOffset;
+        roll -= m_rollOffset;
+    }
+
+    return true;
+}
+
+void PollingUdpReceiver::Recenter() {
+    if (m_hasData) {
+        m_yawOffset = m_yaw;
+        m_pitchOffset = m_pitch;
+        m_rollOffset = m_roll;
+        m_hasOffset = true;
+    }
+    if (m_hasPosition) {
+        m_posXOffset = m_posX;
+        m_posYOffset = m_posY;
+        m_posZOffset = m_posZ;
+    }
+}
+
+void PollingUdpReceiver::ResetOffset() {
+    m_yawOffset = 0.0f;
+    m_pitchOffset = 0.0f;
+    m_rollOffset = 0.0f;
+    m_posXOffset = 0.0f;
+    m_posYOffset = 0.0f;
+    m_posZOffset = 0.0f;
+    m_hasOffset = false;
+}
+
+bool PollingUdpReceiver::IsConnected() const {
+    if (!m_initialized || m_lastReceiveTimeMs == 0) {
+        return false;
+    }
+
+    int64_t elapsed = GetCurrentTimeMs() - m_lastReceiveTimeMs;
+    return elapsed < kConnectionTimeoutMs;
+}
+
+bool PollingUdpReceiver::GetPosition(float& x, float& y, float& z) const {
+    if (!m_hasPosition) {
+        return false;
+    }
+    x = m_posX - m_posXOffset;
+    y = m_posY - m_posYOffset;
+    z = m_posZ - m_posZOffset;
+    return true;
+}
+
+// The rules UdpReceiver::HandleDatagram gives its reasons for, in the same order: a datagram
+// that does not parse changes nothing, the source lock comes next, and the trailer is read
+// before the pose gate.
+bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived, const sockaddr_in& sender,
+                                     int64_t nowMs) {
+    TrackingPose pose;
+    PositionData position;
+    if (!OpenTrackPacket::TryParseAll(buffer, static_cast<size_t>(bytesReceived), pose, position)) {
+        return false;
+    }
+
+    const uint64_t source = (static_cast<uint64_t>(sender.sin_addr.s_addr) << 16) | ntohs(sender.sin_port);
+    if (m_primarySource != 0 && source != m_primarySource) {
+        if (nowMs - m_primaryLastSeenMs < kSourceHandoverMs) {
+            if (!m_secondSourceLogged && m_log) {
+                m_secondSourceLogged = true;
+                m_log("a SECOND tracker source is sending to this port - IGNORING it while the first one sends."
+                      " Two sources make the head pose alternate between them. Close whichever tracker you"
+                      " are not using.");
+            }
+            return false;
+        }
+        if (m_log) m_log("tracker source went silent; switching to the one now sending");
+    }
+    m_primarySource = source;
+    m_primaryLastSeenMs = nowMs;
+
+    // The trailer is parsed but no longer raises a recenter request. Headcam owns
+    // centring: it zeroes its own output on CENTER, and the pipeline's centre is
+    // identity by default, so the zeroed stream is already correct without the mod
+    // doing anything. A press still marks the jump to the app's new neutral as real.
+    uint8_t recenterCounter;
+    const bool hasTrailer =
+        OpenTrackPacket::TryParseRecenterCounter(buffer, static_cast<size_t>(bytesReceived), recenterCounter);
+    const bool pressed = hasTrailer && (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter);
+    if (hasTrailer) {
+        m_lastRecenterCounter = recenterCounter;
+        m_hasRecenterCounter = true;
+    }
+    if (pressed) {
+        m_poseGate.Announce(pose.yaw, pose.pitch, pose.roll);
+    } else if (!m_poseGate.Accept(pose.yaw, pose.pitch, pose.roll)) {
+        return false;
+    }
+
+    m_isRemoteConnection = IsRemoteAddress(sender);
+    m_yaw = pose.yaw;
+    m_pitch = pose.pitch;
+    m_roll = pose.roll;
+    m_hasData = true;
+
+    m_posX = position.x;
+    m_posY = position.y;
+    m_posZ = position.z;
+    m_hasPosition = true;
+
+    return true;
+}
+
+int64_t PollingUdpReceiver::GetCurrentTimeMs() const {
+    auto now = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+    return ms.count();
+}
+
+}  // namespace cameraunlock

@@ -1,0 +1,2 @@
+# RotationEnabled absent is the built-in true, so the pair is rotation only, a mode: accepted.
+value	PositionEnabled	accepted	2	false

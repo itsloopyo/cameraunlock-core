@@ -1,0 +1,175 @@
+#include <cameraunlock/config/legacy_import.h>
+#include <cameraunlock/config/value_codecs.h>
+#include <cameraunlock/config/value_guards.h>
+#include <cameraunlock/input/key_bindings.h>
+
+#include <algorithm>
+
+namespace cameraunlock::config {
+
+namespace {
+
+constexpr long long kMinCode = 0x01;
+constexpr long long kMaxCode = 0xFE;
+
+const char* DropReason(DropRule rule) {
+    switch (rule) {
+        case DropRule::NonFiniteNumber:
+            return "it is not a finite number, so the default is used";
+        case DropRule::PoseShaping:
+            return "sensitivity, scales, deadzones, response curves and axis inversion are set in the tracker now, "
+                   "not in this mod";
+        case DropRule::Reticle:
+            return "this mod no longer draws or toggles a reticle";
+        case DropRule::FollowsDefault:
+            return "this setting now follows the mod's default";
+        case DropRule::KeyCodeOutOfRange:
+            return "it is not a key code from 0x01 to 0xFE, so the action is unbound";
+        case DropRule::ModifierKey:
+            return "it is a Ctrl, Shift or Alt key, which goes down before the key of any chord made with it, "
+                   "so it is unbound";
+        case DropRule::CoupledAim:
+            return "aim is always decoupled now, so your aim stays with the mouse or controller while your head "
+                   "moves the view";
+        case DropRule::PositionSwitchOff:
+            return "positional tracking is switched off by the tracking mode now, so the mod starts in rotation only "
+                   "and the mode hotkey can turn position back on";
+        case DropRule::TrackerPivot:
+            return "the neck pivot is not a setting now, so a distance you set is not carried over";
+        case DropRule::NumberOutOfRange:
+            return "it is outside the range this setting takes, so the nearest end of the range is used";
+    }
+    throw std::invalid_argument("drop rule " + std::to_string(static_cast<int>(rule)) + " is not a DropRule");
+}
+
+std::string CodeText(long long code) {
+    if (code < 0) return std::to_string(code);
+    static const char kHex[] = "0123456789ABCDEF";
+    std::string digits;
+    unsigned long long rest = static_cast<unsigned long long>(code);
+    do {
+        digits.insert(digits.begin(), kHex[rest & 0xF]);
+        rest >>= 4;
+    } while (rest != 0);
+    return "0x" + digits;
+}
+
+std::string PoseShapingText(bool value) { return BoolCodec().Render(value); }
+
+template <class F>
+std::string PoseShapingText(F value) {
+    if (std::isnan(value)) return "nan";
+    if (std::isinf(value)) return value > 0 ? "inf" : "-inf";
+    return FloatingCodec<F>().Render(value);
+}
+
+template <class T>
+void RecordPoseShaping(T value, T shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped) {
+    if constexpr (!std::is_same_v<T, bool>) {
+        if (!std::isfinite(shipped)) {
+            throw std::invalid_argument("[" + section + "] " + key + ": the shipped value is not finite");
+        }
+    }
+    const bool folded = value == shipped;
+    pose_shaping.push_back({section, key, PoseShapingText(value), PoseShapingText(shipped), folded});
+    if (!folded) dropped.push_back({DropRule::PoseShaping, section, key, PoseShapingText(value)});
+}
+
+}  // namespace
+
+namespace detail {
+
+std::string LegacyNumberText(float value) { return FloatingCodec<float>().Render(value); }
+
+std::string LegacyNumberText(double value) { return FloatingCodec<double>().Render(value); }
+
+}  // namespace detail
+
+std::string DescribeDroppedValue(const DroppedValue& dropped) {
+    const char* reason = DropReason(dropped.rule);
+    return "not carried: [" + dropped.section + "] " + dropped.key + "=" + dropped.value + ", " + reason;
+}
+
+std::string LegacyVirtualKeyToBindings(long long code) {
+    if (code < kMinCode || code > kMaxCode || !IsBindableVirtualKey(static_cast<int>(code))) return {};
+    return input::FormatKeyBindings({{input::KeyModifiers::kNone, static_cast<int>(code)}});
+}
+
+std::string LegacyVirtualKeyToBindings(long long code, const std::string& section, const std::string& key,
+                                       std::vector<DroppedValue>& dropped) {
+    if (code != 0 && (code < kMinCode || code > kMaxCode)) {
+        dropped.push_back({DropRule::KeyCodeOutOfRange, section, key, CodeText(code)});
+    } else if (code != 0 && !IsBindableVirtualKey(static_cast<int>(code))) {
+        dropped.push_back({DropRule::ModifierKey, section, key, CodeText(code)});
+    }
+    return LegacyVirtualKeyToBindings(code);
+}
+
+void LegacyPoseShaping(bool value, bool shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped) {
+    RecordPoseShaping(value, shipped, section, key, pose_shaping, dropped);
+}
+
+void LegacyPoseShaping(float value, float shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped) {
+    RecordPoseShaping(value, shipped, section, key, pose_shaping, dropped);
+}
+
+void LegacyPoseShaping(double value, double shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped) {
+    RecordPoseShaping(value, shipped, section, key, pose_shaping, dropped);
+}
+
+void LegacyPositionSwitch(bool value, const std::string& section, const std::string& key, bool& rotation_enabled,
+                          bool& position_enabled, std::vector<DroppedValue>& dropped) {
+    if (value) return;
+    rotation_enabled = true;
+    position_enabled = false;
+    dropped.push_back({DropRule::PositionSwitchOff, section, key, BoolCodec().Render(false)});
+}
+
+void LegacyTrackerPivot(float value, float shipped, const std::string& section, const std::string& key,
+                        std::vector<DroppedValue>& dropped) {
+    if (!std::isfinite(shipped)) {
+        throw std::invalid_argument("[" + section + "] " + key + ": the shipped value is not finite");
+    }
+    if (value == shipped) return;
+    dropped.push_back({DropRule::TrackerPivot, section, key, PoseShapingText(value)});
+}
+
+void LegacyFollowsDefaultsIni::Setting(schema::Concept id, bool unchanged) {
+    if (id == schema::Concept::RotationEnabled || id == schema::Concept::PositionEnabled) {
+        throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                    " is half of the tracking mode, which TrackingMode takes as one unit");
+    }
+    Given(id);
+    if (unchanged) concepts_.push_back(id);
+}
+
+void LegacyFollowsDefaultsIni::NotInLegacy(schema::Concept id) { Setting(id, true); }
+
+void LegacyFollowsDefaultsIni::TrackingMode(bool unchanged) {
+    if (std::find(given_.begin(), given_.end(), schema::Concept::PositionEnabled) != given_.end()) {
+        throw std::invalid_argument("the tracking mode was given before");
+    }
+    given_.push_back(schema::Concept::RotationEnabled);
+    given_.push_back(schema::Concept::PositionEnabled);
+    if (!unchanged) return;
+    concepts_.push_back(schema::Concept::RotationEnabled);
+    concepts_.push_back(schema::Concept::PositionEnabled);
+}
+
+void LegacyFollowsDefaultsIni::Given(schema::Concept id) {
+    const schema::ConceptInfo& info = schema::kConcepts[static_cast<std::size_t>(id)];
+    if (!info.global) {
+        throw std::invalid_argument(std::string(info.name) +
+                                    " is not a global concept, so no row of it follows Defaults.ini");
+    }
+    if (std::find(given_.begin(), given_.end(), id) != given_.end()) {
+        throw std::invalid_argument(std::string(info.name) + " was given before");
+    }
+    given_.push_back(id);
+}
+
+}  // namespace cameraunlock::config

@@ -1,0 +1,10 @@
+# Text after ] is ignored with a diagnostic; the section still opens.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	Position	B	2	4	-
+key	Hotkeys	C	3	6	-
+diagnostic	TextAfterSectionHeader	1
+diagnostic	TextAfterSectionHeader	3
+diagnostic	TextAfterSectionHeader	5

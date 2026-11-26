@@ -1,0 +1,253 @@
+#!/usr/bin/env pwsh
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Bridge between install.cmd and the shared game-detection module.
+.DESCRIPTION
+    Called by each mod's install.cmd / uninstall.cmd. Looks up the
+    game by id in cameraunlock-core/data/games.json, uses the shared
+    detection pipeline (Steam appmanifest > Steam folder > GOG > Epic
+    > Xbox > env var), and writes the resolved values as a batch
+    script the caller can `call` to pick them up as `set` variables:
+
+        GAME_PATH            - resolved install path (required)
+        GAME_EXE             - leaf filename of the executable (for
+                               the "game is running" tasklist check)
+        GAME_EXE_RELPATH     - full relative path of the executable
+                               (same as Executable in games.json)
+        GAME_DISPLAY_NAME    - human-readable name (for messages)
+        ENV_VAR_NAME         - env var that overrides detection
+
+    If `-GivenPath` is supplied and points at an existing directory,
+    it's used verbatim (trusting the caller - matches the step 1
+    "trust %~1" semantics baked into the install.cmd templates).
+
+.PARAMETER GameId
+    Game id from games.json (hyphen-lowercase, e.g. "obra-dinn").
+
+.PARAMETER OutFile
+    Path to write the batch script to. install.cmd passes a %TEMP%-
+    derived filename.
+
+.PARAMETER GivenPath
+    Optional caller-supplied path (install.cmd's %~1). If set and it
+    is an existing directory, it is used verbatim instead of running
+    detection.
+
+.PARAMETER Interactive
+    Ask for the game folder when detection finds nothing. The install
+    and uninstall bodies pass this only when the caller did not pass
+    /y, so the launcher is never left waiting on a stdin read.
+
+.EXITCODE
+    0 - game resolved, OutFile written
+    1 - bad input (unknown game id, missing games.json, OutFile write failed)
+    2 - game not installed (detection ran cleanly but nothing matched)
+#>
+param(
+    [Parameter(Mandatory = $true)][string]$GameId,
+    [Parameter(Mandatory = $true)][string]$OutFile,
+    [string]$GivenPath,
+    [switch]$Interactive
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# This script lives in two possible layouts:
+#   1. Dev tree: cameraunlock-core/scripts/find-game.ps1 alongside a
+#      sibling cameraunlock-core/powershell/GamePathDetection.psm1.
+#   2. Release ZIP: <zip>/shared/find-game.ps1 alongside a sibling
+#      <zip>/shared/GamePathDetection.psm1 (packaged by Copy-SharedBundle).
+# Try layout 2 first since that's the hot path at user-install time.
+$modulePath = Join-Path $PSScriptRoot 'GamePathDetection.psm1'
+if (-not (Test-Path $modulePath)) {
+    $modulePath = Join-Path $PSScriptRoot '..\powershell\GamePathDetection.psm1'
+}
+if (-not (Test-Path $modulePath)) {
+    Write-Error "GamePathDetection.psm1 not found next to find-game.ps1 or in ../powershell/. Installer ZIP is corrupt or dev checkout is incomplete."
+    exit 1
+}
+Import-Module $modulePath -Force
+
+# Detection reads what a store publishes about itself. A game that arrived as a
+# zip from itch.io, Game Jolt or a direct download publishes nothing at all, so
+# there is no registry key, no manifest and no library folder to read, and the
+# only thing on the machine that knows where it went is the person who
+# extracted it. Asking them is the entire fallback.
+#
+# Returns $null when the user declines, which is the blank line they are told
+# about. A closed or empty stdin reads as that same blank line rather than
+# throwing, so a non-interactive caller that reaches here still terminates.
+function Read-GamePathFromUser {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Config,
+        [Parameter(Mandatory = $true)][string]$DisplayName)
+
+    Write-Host ""
+    Write-Host "Could not work out where $DisplayName is installed."
+    Write-Host "Type or paste the folder you installed it to, or press Enter to cancel."
+    Write-Host ""
+
+    while ($true) {
+        Write-Host "  $DisplayName folder: " -NoNewline
+        $typed = Read-Host
+        if ($null -eq $typed) { return $null }
+        $typed = $typed.Trim().Trim('"').Trim()
+        if (-not $typed) { return $null }
+
+        # Never trim past a drive root: "C:" is not "C:\", it is whatever
+        # directory this process happens to be sitting in on C:.
+        while ($typed.EndsWith('\') -and -not $typed.EndsWith(':\')) {
+            $typed = $typed.Substring(0, $typed.Length - 1)
+        }
+
+        if (-not (Test-Path -LiteralPath $typed -PathType Container)) {
+            Write-Host "  There is no folder at: $typed"
+            continue
+        }
+
+        # A relative path works for the install itself and then reads as
+        # nonsense in the log line and the state file, both of which outlive
+        # the working directory that gave it meaning.
+        $typed = (Resolve-Path -LiteralPath $typed).ProviderPath
+
+        # Same check every detection strategy passes through, so a typed path
+        # is held to the standard a detected one is, and the mod cannot be
+        # deployed into a folder the game is not in.
+        $relPath = Get-GameExecutableRelPath -Config $Config -Path $typed
+        if (-not (Test-GameInstallation -Path $typed -Executable $relPath)) {
+            Write-Host "  That folder does not contain $relPath, so it is not the"
+            Write-Host "  folder $DisplayName is installed in."
+            continue
+        }
+
+        return $typed
+    }
+}
+
+$cfg = Get-GameConfig -GameId $GameId
+if (-not $cfg) {
+    Write-Error "Unknown game id: $GameId. Add it to cameraunlock-core/data/games.json."
+    exit 1
+}
+
+$displayName = if ($cfg.ContainsKey('DisplayName')) { $cfg.DisplayName } else { $GameId }
+$envVarName  = if ($cfg.ContainsKey('EnvVar'))      { $cfg.EnvVar }      else { '' }
+
+# Resolve the game path. Given path wins - the caller (launcher or
+# knowledgeable user) has already decided where the game is.
+$gamePath = $null
+if ($GivenPath) {
+    if (Test-Path -LiteralPath $GivenPath -PathType Container) {
+        $gamePath = $GivenPath
+    } else {
+        Write-Error "Caller-supplied path does not exist or is not a directory: $GivenPath"
+        exit 1
+    }
+} else {
+    $gamePath = Find-GamePath -GameId $GameId
+    if (-not $gamePath -and $Interactive) {
+        $gamePath = Read-GamePathFromUser -Config $cfg -DisplayName $displayName
+        if (-not $gamePath) {
+            # The prompt has already said what was wanted. Falling through to
+            # the detection error below would follow it with a list of Steam
+            # libraries, which for a direct download is the one place the game
+            # was never going to be.
+            #
+            # Written to stderr directly rather than through Write-Error, which
+            # under this script's Stop preference is a terminating error and
+            # answers a deliberate cancel with a stack trace.
+            [Console]::Error.WriteLine("No folder given, so $displayName was not located.")
+            exit 2
+        }
+    }
+}
+
+# Pick the executable relpath. GDK / Xbox builds can ship under a different
+# exe name and folder layout than the Steam build (see XboxExecutable in
+# GamePathDetection.psm1), so the relpath belongs to the resolved install
+# rather than to the game.
+$exeRelPath = if ($gamePath) {
+    Get-GameExecutableRelPath -Config $cfg -Path $gamePath
+} else {
+    $cfg.Executable
+}
+$exeLeaf = Split-Path $exeRelPath -Leaf
+
+if (-not $gamePath) {
+    $libraries = @(Find-SteamLibraries)
+    $hint = if ($libraries.Count -gt 0) {
+        "Searched Steam libraries: $($libraries -join '; ')"
+    } else {
+        "No Steam libraries detected on this machine."
+    }
+    [Console]::Error.WriteLine("Could not find $displayName installation. $hint")
+    exit 2
+}
+
+# The bodies pass GAME_PATH as a quoted argument ("%GAME_PATH%"), where a
+# trailing backslash escapes the closing quote: tar -C then gets the folder
+# with a quote on the end. The override env var and GOG's registry value come
+# through as written, so one can end in a separator. A drive root keeps the
+# "X:\." form the bodies give a given path.
+$gamePath = $gamePath.TrimEnd('\')
+if ($gamePath.EndsWith(':')) { $gamePath += '\.' }
+
+# cmd.exe reads a batch file in the console's code page, so the stub is
+# written in it. ASCII turned every other character into `?`, so a game in a
+# folder with an accented name was not found by the install body. A
+# character the code page cannot hold stops here instead.
+#
+# WriteAllBytes (single tight win32 call) instead of Out-File: the
+# `.cmd` extension trips Windows Defender's script-scan, which briefly
+# locks the freshly-created file. Out-File's longer write window
+# races with that scan and intermittently throws a sharing violation.
+#
+# The stub is `call`ed by the install/uninstall body with delayed expansion
+# OFF, which is what lets a value keep its `!` (and its `^`). Inside the
+# `set "NAME=..."` quotes cmd.exe treats `&`, `^`, `(`, `)`, `<`, `>` and `|`
+# as literal text, so only three characters are genuinely unrepresentable:
+# a double quote ends the `set` early, and CR/LF end the line.
+$UNSAFE_CHARS = [ordered]@{
+    '"'    = 'a double quote'
+    "`r"   = 'a carriage return'
+    "`n"   = 'a line feed'
+}
+
+function ConvertTo-BatchSetValue {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory = $true)][string]$Name)
+
+    foreach ($char in $UNSAFE_CHARS.Keys) {
+        if ($Value.Contains($char)) {
+            throw "$Name contains $($UNSAFE_CHARS[$char]), which cannot be passed to cmd.exe: $Value"
+        }
+    }
+
+    return $Value -replace '%', '%%'
+}
+
+$gamePathCmd = ConvertTo-BatchSetValue $gamePath 'The game install path'
+$exeLeafCmd = ConvertTo-BatchSetValue $exeLeaf 'The game executable name'
+$exeRelPathCmd = ConvertTo-BatchSetValue $exeRelPath 'The game executable path'
+$displayNameCmd = ConvertTo-BatchSetValue $displayName 'The game display name'
+$envVarNameCmd = ConvertTo-BatchSetValue $envVarName 'The override env var name'
+
+$lines = @(
+    "set `"GAME_PATH=$gamePathCmd`""
+    "set `"GAME_EXE=$exeLeafCmd`""
+    "set `"GAME_EXE_RELPATH=$exeRelPathCmd`""
+    "set `"GAME_DISPLAY_NAME=$displayNameCmd`""
+    "set `"ENV_VAR_NAME=$envVarNameCmd`""
+)
+$stubEncoding = [System.Text.Encoding]::GetEncoding([Console]::OutputEncoding.CodePage,
+    [System.Text.EncoderFallback]::ExceptionFallback, [System.Text.DecoderFallback]::ExceptionFallback)
+try {
+    $stubBytes = $stubEncoding.GetBytes($lines -join "`r`n")
+} catch [System.Text.EncoderFallbackException] {
+    throw "The game path or name holds a character the console's code page ($($stubEncoding.CodePage)) cannot hold, so cmd.exe cannot be handed it: $gamePath"
+}
+[System.IO.File]::WriteAllBytes($OutFile, $stubBytes)
+exit 0

@@ -1,0 +1,8 @@
+# Two-state with no [Position] section: the mode is missing and the mod runs both. A change
+# to rotation appends the section after one blank line.
+binds	two-state
+preference	tracking_mode	missing	both
+preference	world_space_yaw	true	true
+preference	true_free_look	missing	false
+preference	launch_enabled	true	true
+change	tracking_mode	rotation

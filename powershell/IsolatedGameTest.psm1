@@ -1,0 +1,2282 @@
+#!/usr/bin/env pwsh
+# IsolatedGameTest.psm1 - run a game for a mod test in the background.
+# Part of CameraUnlock-Core shared utilities.
+#
+# The person at the machine keeps their mouse, keyboard and foreground window
+# while a test runs. The game takes its input from the mod's dev build
+# (cameraunlock/dev/isolated_input.h), this module writes the command file that
+# build plays, and captures come from PrintWindow, which reads a covered window.
+#
+# There is deliberately no function here that sends real keyboard or mouse
+# input, and none that brings the game to the foreground. A game this cannot
+# drive yet is a gap to close in core (data/isolated-input.json says how), not
+# a reason to take the machine over.
+#
+# One session has a game at a time. Enter-GameRig is the lock, kept outside
+# every repo so two worktrees and two mods' sessions meet the same one, and
+# Invoke-IsolatedGameSession is the whole run round a script block: lock, save
+# what the test changes, launch, the block, stop, put everything back.
+#
+# What stays in the mod's own .lab: how to get from the title screen into a
+# save, the game's cheats, and what to look for in the captures.
+
+$ErrorActionPreference = 'Stop'
+
+$script:CoverageFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'data\isolated-input.json'
+$script:CommandFileName = 'CameraUnlockInput.txt'
+$script:HostDllName = 'CameraUnlockIsolatedInput.dll'
+$script:HostDllBuild = Join-Path (Split-Path -Parent $PSScriptRoot) "cpp\tools\isolated_input_host\build\Release\$script:HostDllName"
+# The guard and the shim of a background launch (cpp/tools/rig_guard), as `pixi run build-rig-guard` leaves them.
+$script:RigGuardTools = Join-Path (Split-Path -Parent $PSScriptRoot) 'cpp\tools\rig_guard\build\out'
+# How long a game that has been ended is given to go (Stop-GameProcess).
+$script:GameExitSeconds = 120
+
+if (-not ('CameraUnlockIsolatedTest.Native' -as [type])) {
+    Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+namespace CameraUnlockIsolatedTest {
+    public static class Native {
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+        [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
+        [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+
+        [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int max);
+        delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+
+        // A process can own a console as well (BepInEx's log console), and that is what
+        // Process.MainWindowHandle returns for some games. The game is the largest visible
+        // window of the process that is not a console.
+        public static IntPtr GameWindow(uint pid) {
+            IntPtr best = IntPtr.Zero; long bestArea = 0;
+            EnumWindows(delegate(IntPtr hWnd, IntPtr l) {
+                uint owner; GetWindowThreadProcessId(hWnd, out owner);
+                RECT r;
+                if (owner != pid || !IsWindowVisible(hWnd) || !GetWindowRect(hWnd, out r)) return true;
+                System.Text.StringBuilder name = new System.Text.StringBuilder(256);
+                GetClassName(hWnd, name, name.Capacity);
+                if (name.ToString() == "ConsoleWindowClass") return true;
+                long area = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+                if (area > bestArea) { bestArea = area; best = hWnd; }
+                return true;
+            }, IntPtr.Zero);
+            return best;
+        }
+
+        public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
+
+        // PW_RENDERFULLCONTENT: the window's own content, whatever covers it.
+        public static Bitmap Capture(IntPtr hWnd) {
+            RECT r;
+            if (!GetWindowRect(hWnd, out r)) return null;
+            int w = r.Right - r.Left, h = r.Bottom - r.Top;
+            if (w <= 0 || h <= 0) return null;
+            Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(bmp)) {
+                IntPtr hdc = g.GetHdc();
+                bool ok = PrintWindow(hWnd, hdc, 2);
+                g.ReleaseHdc(hdc);
+                if (!ok) { bmp.Dispose(); return null; }
+            }
+            return bmp;
+        }
+    }
+}
+'@
+}
+
+# A type of its own, so a PowerShell that loaded this module before the type existed gains it on the next import.
+if (-not ('CameraUnlockIsolatedTest.FileUse' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace CameraUnlockIsolatedTest {
+    public static class FileUse {
+        [StructLayout(LayoutKind.Sequential)]
+        struct UniqueProcess { public int ProcessId; public System.Runtime.InteropServices.ComTypes.FILETIME StartTime; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct ProcessInfo {
+            public UniqueProcess Process;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string AppName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string ServiceShortName;
+            public int ApplicationType; public uint AppStatus; public uint SessionId;
+            [MarshalAs(UnmanagedType.Bool)] public bool Restartable;
+        }
+        [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmStartSession(out uint session, int flags, System.Text.StringBuilder key);
+        [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint session);
+        [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmRegisterResources(uint session, uint files, string[] names, uint apps, IntPtr app, uint services, string[] serviceNames);
+        [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint session, out uint needed, ref uint count, [In, Out] ProcessInfo[] info, ref uint reasons);
+
+        // The ids of the processes the Restart Manager names as using a file: one that has it
+        // open, and one that has it loaded as a DLL.
+        public static int[] ProcessIds(string path) {
+            uint session;
+            int result = RmStartSession(out session, 0, new System.Text.StringBuilder(64));
+            if (result != 0) throw new Win32Exception(result);
+            try {
+                result = RmRegisterResources(session, 1, new[] { path }, 0, IntPtr.Zero, 0, null);
+                if (result != 0) throw new Win32Exception(result);
+                uint needed, count = 0, reasons = 0;
+                result = RmGetList(session, out needed, ref count, null, ref reasons);
+                if (result == 0) return new int[0];
+                // ERROR_MORE_DATA: needed is how many there are.
+                if (result != 234) throw new Win32Exception(result);
+                ProcessInfo[] info = new ProcessInfo[needed];
+                count = needed;
+                result = RmGetList(session, out needed, ref count, info, ref reasons);
+                if (result != 0) throw new Win32Exception(result);
+                int[] ids = new int[count];
+                for (int i = 0; i < count; i++) ids[i] = info[i].Process.ProcessId;
+                return ids;
+            } finally { RmEndSession(session); }
+        }
+    }
+}
+'@
+}
+
+# ---------------------------------------------------------------------------
+# What a game reads its input through
+# ---------------------------------------------------------------------------
+
+function Get-PeImports {
+    <#
+    .SYNOPSIS
+    The DLLs a PE file imports and the functions it imports from each by name, delay imports
+    included. A file that cannot be opened or is not a PE throws.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 0x40 -or [BitConverter]::ToUInt16($bytes, 0) -ne 0x5A4D) { throw "$Path is not a PE file" }
+    $pe = [BitConverter]::ToInt32($bytes, 0x3C)
+    if ([BitConverter]::ToUInt32($bytes, $pe) -ne 0x4550) { throw "$Path has no PE signature" }
+    $sectionCount = [BitConverter]::ToUInt16($bytes, $pe + 6)
+    $optionalSize = [BitConverter]::ToUInt16($bytes, $pe + 20)
+    $optional = $pe + 24
+    $is64 = [BitConverter]::ToUInt16($bytes, $optional) -eq 0x20B
+    $directories = $optional + $(if ($is64) { 112 } else { 96 })
+    $sections = for ($i = 0; $i -lt $sectionCount; $i++) {
+        $o = $optional + $optionalSize + $i * 40
+        [pscustomobject]@{
+            Rva = [BitConverter]::ToUInt32($bytes, $o + 12); VirtualSize = [BitConverter]::ToUInt32($bytes, $o + 8)
+            Raw = [BitConverter]::ToUInt32($bytes, $o + 20); RawSize = [BitConverter]::ToUInt32($bytes, $o + 16)
+        }
+    }
+    $offsetOf = {
+        param([uint32]$rva)
+        foreach ($s in $sections) {
+            $size = [Math]::Max($s.VirtualSize, $s.RawSize)
+            if ($rva -ge $s.Rva -and $rva -lt $s.Rva + $size) { return [int]($s.Raw + $rva - $s.Rva) }
+        }
+        return -1
+    }
+    $stringAt = {
+        param([int]$offset)
+        $end = [Array]::IndexOf($bytes, [byte]0, $offset)
+        [Text.Encoding]::ASCII.GetString($bytes, $offset, $end - $offset)
+    }
+    $thunkSize = $(if ($is64) { 8 } else { 4 })
+    $namesAt = {
+        param([uint32]$thunkRva)
+        $names = New-Object System.Collections.Generic.List[string]
+        $t = & $offsetOf $thunkRva
+        while ($t -ge 0) {
+            $value = $(if ($is64) { [BitConverter]::ToUInt64($bytes, $t) } else { [uint64][BitConverter]::ToUInt32($bytes, $t) })
+            if ($value -eq 0) { break }
+            $byOrdinal = $(if ($is64) { ($value -shr 63) -ne 0 } else { ($value -band 0x80000000) -ne 0 })
+            if (-not $byOrdinal) {
+                $hint = & $offsetOf ([uint32]($value -band 0x7FFFFFFF))
+                if ($hint -ge 0) { $names.Add((& $stringAt ($hint + 2))) }
+            }
+            $t += $thunkSize
+        }
+        , $names.ToArray()
+    }
+
+    $imports = New-Object System.Collections.Generic.List[object]
+    $importRva = [BitConverter]::ToUInt32($bytes, $directories + 8)
+    $o = $(if ($importRva) { & $offsetOf $importRva } else { -1 })
+    while ($o -ge 0) {
+        $lookup = [BitConverter]::ToUInt32($bytes, $o)
+        $nameRva = [BitConverter]::ToUInt32($bytes, $o + 12)
+        $firstThunk = [BitConverter]::ToUInt32($bytes, $o + 16)
+        if ($nameRva -eq 0) { break }
+        $thunk = $(if ($lookup) { $lookup } else { $firstThunk })
+        $imports.Add([pscustomobject]@{ Dll = (& $stringAt (& $offsetOf $nameRva)); Functions = (& $namesAt $thunk) })
+        $o += 20
+    }
+    $delayRva = [BitConverter]::ToUInt32($bytes, $directories + 13 * 8)
+    $o = $(if ($delayRva) { & $offsetOf $delayRva } else { -1 })
+    while ($o -ge 0) {
+        $nameRva = [BitConverter]::ToUInt32($bytes, $o + 4)
+        $nameTable = [BitConverter]::ToUInt32($bytes, $o + 16)
+        if ($nameRva -eq 0) { break }
+        $imports.Add([pscustomobject]@{ Dll = (& $stringAt (& $offsetOf $nameRva)); Functions = (& $namesAt $nameTable) })
+        $o += 32
+    }
+    , $imports.ToArray()
+}
+
+function Get-IsolatedInputCoverage {
+    <#
+    .SYNOPSIS
+    data/isolated-input.json: the input paths and mod kinds isolated input can drive, and what to
+    build for each one it cannot.
+    #>
+    Get-Content $script:CoverageFile -Raw | ConvertFrom-Json
+}
+
+function Get-GameInputPaths {
+    <#
+    .SYNOPSIS
+    The input paths a game binary reads, from its import table, each with whether isolated input
+    drives it yet.
+    .DESCRIPTION
+    Pass the binary that reads the input: the game exe for most native engines, UnityPlayer.dll for a
+    Unity game. An import table says what a binary can call, not what it does call, so the answer is
+    where to start and the watched proof run (Test-IsolatedInputProof) is what settles it.
+    #>
+    param([Parameter(Mandatory)][string]$BinaryPath)
+    $imports = Get-PeImports -Path $BinaryPath
+    $dlls = @($imports | ForEach-Object { $_.Dll.ToLowerInvariant() })
+    $functions = @($imports | ForEach-Object { $_.Functions })
+    $coverage = Get-IsolatedInputCoverage
+    foreach ($entry in $coverage.input_paths.PSObject.Properties) {
+        $path = $entry.Value
+        $evidence = @()
+        if ($path.PSObject.Properties['imports']) { $evidence += @($path.imports | Where-Object { $functions -contains $_ }) }
+        if ($path.PSObject.Properties['dlls']) { $evidence += @($path.dlls | Where-Object { $dlls -contains $_ }) }
+        if ($evidence.Count -eq 0) { continue }
+        [pscustomobject]@{
+            Path     = $entry.Name
+            Status   = $path.status
+            Evidence = $evidence -join ', '
+            What     = $path.what
+            Build    = $(if ($path.PSObject.Properties['build']) { $path.build } else { $null })
+        }
+    }
+}
+
+function Assert-IsolatedInputCovers {
+    <#
+    .SYNOPSIS
+    Throws, naming what to build in core, unless isolated input can drive this game through this kind
+    of mod. Returns the input paths found when it can.
+    .DESCRIPTION
+    Call it before the first in-game test of a title. The error is the work order: build what it
+    names in cameraunlock-core, prove it in the game, change the entry in data/isolated-input.json to
+    supported, and then test. It is never answered by sending real keyboard or mouse input.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$BinaryPath,
+        [Parameter(Mandatory)][ValidateSet('native', 'managed', 'jvm', 'script')][string]$ModHost
+    )
+    $coverage = Get-IsolatedInputCoverage
+    $modHostEntry = $coverage.mod_hosts.$ModHost
+    $gaps = New-Object System.Collections.Generic.List[string]
+    if ($modHostEntry.status -ne 'supported') {
+        $gaps.Add("a $ModHost mod ($($modHostEntry.what)) cannot host isolated input yet. Build: $($modHostEntry.build)")
+    }
+    $paths = @(Get-GameInputPaths -BinaryPath $BinaryPath)
+    $usable = @($paths | Where-Object { $_.Status -eq 'supported' })
+    foreach ($p in $paths | Where-Object { $_.Status -eq 'unsupported' }) {
+        $gaps.Add("$BinaryPath reads $($p.Path) ($($p.Evidence)): $($p.What). Build: $($p.Build)")
+    }
+    if ($paths.Count -eq 0) {
+        $gaps.Add("$BinaryPath imports no input API this module knows. If the engine reads input in another binary (UnityPlayer.dll, an engine DLL), pass that one. Otherwise find what it reads, add the path to data/isolated-input.json and its detours to cameraunlock/dev/isolated_input.h.")
+    }
+    # An unsupported path beside a supported one may be the one the game really uses, so it is
+    # reported and the proof run decides. Nothing usable at all is where this stops.
+    if ($modHostEntry.status -ne 'supported' -or $usable.Count -eq 0) {
+        throw ("Isolated input does not cover this game yet. Do not test it with the real keyboard and mouse: close the gap in cameraunlock-core first (docs/isolated-input.md, 'A game it does not cover yet').`n - " + ($gaps -join "`n - "))
+    }
+    foreach ($gap in $gaps) { Write-RigWarning $gap }
+    $paths
+}
+
+# ---------------------------------------------------------------------------
+# The test port
+# ---------------------------------------------------------------------------
+
+function Get-ModTestPort {
+    <#
+    .SYNOPSIS
+    The UDP port a mod is tested on, so tests of different mods never share one and never use 4242:
+    5000 plus the sum of the decimal digits in the SHA-256 hex digest of the repo folder name without
+    its -headtracking suffix, then the next port up that nothing is bound to.
+    #>
+    param([Parameter(Mandatory)][string]$RepoName)
+    $name = $RepoName -replace '-headtracking$', ''
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $digest = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($name)) } finally { $sha.Dispose() }
+    $hex = -join ($digest | ForEach-Object { $_.ToString('x2') })
+    $port = 5000
+    foreach ($c in $hex.ToCharArray()) { if ($c -ge '0' -and $c -le '9') { $port += [int][string]$c } }
+    while (Get-NetUDPEndpoint -LocalPort $port -ErrorAction SilentlyContinue) { $port++ }
+    $port
+}
+
+function Set-ModTestPort {
+    <#
+    .SYNOPSIS
+    Writes UdpPort=<port> into a mod's config file for a test, and returns the port. Save the file
+    with Save-GameTestState first: this does not keep the value it replaces.
+    .DESCRIPTION
+    The last UdpPort line is replaced, keeping the key's spelling and the white space round the
+    equals sign. With no such line, one is added after the last line of [Network] that is not
+    blank, or under a new [Network] at the end. Every other byte stays, the byte order mark and the
+    line endings included.
+
+    A file that does not exist throws: a mod on the canonical config imports its older settings
+    only while CameraUnlock.ini is absent, so a test that made the file would not be testing what a
+    player gets. -Create is for the test that means it.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$IniPath,
+        [Parameter(Mandatory)][int]$Port,
+        [switch]$Create
+    )
+    if ($Port -eq 4242) { throw 'port 4242 is the one real trackers send to; test on Get-ModTestPort' }
+    if ($Port -lt 1 -or $Port -gt 65535) { throw "$Port is not a UDP port" }
+    if (-not (Test-Path $IniPath -PathType Leaf)) {
+        if (-not $Create) { throw "$IniPath does not exist. Launch the mod once so it writes its config, or pass -Create to test from a file holding the port alone." }
+        [IO.File]::WriteAllText($IniPath, "[Network]`r`nUdpPort=$Port`r`n", [Text.Encoding]::ASCII)
+        return $Port
+    }
+    $bytes = [IO.File]::ReadAllBytes($IniPath)
+    if ([Array]::IndexOf($bytes, [byte]0) -ge 0) { throw "$IniPath holds a NUL byte: it is UTF-16 or not text, and this edits neither" }
+    $marked = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    # Latin-1 gives every byte back as it was, whatever the file's encoding: only ASCII is written into it.
+    $latin = [Text.Encoding]::GetEncoding(28591)
+    $skip = $(if ($marked) { 3 } else { 0 })
+    $text = $latin.GetString($bytes, $skip, $bytes.Length - $skip)
+    $ending = $(if ($text -match "`r`n" -or $text -notmatch "`n") { "`r`n" } else { "`n" })
+    $key = [regex]'(?im)^([ \t]*UdpPort[ \t]*=[ \t]*)[^\r\n]*'
+    $found = $key.Matches($text)
+    if ($found.Count -gt 0) {
+        $last = $found[$found.Count - 1]
+        $text = $text.Substring(0, $last.Index) + $last.Groups[1].Value + $Port + $text.Substring($last.Index + $last.Length)
+    } else {
+        $section = [regex]::Match($text, '(?ims)^[ \t]*\[Network\][^\r\n]*(\r?\n(?![ \t]*\[)[^\r\n]*)*')
+        if ($section.Success) {
+            # Before the blank lines that close the section.
+            $body = $section.Value -replace '(\r?\n[ \t]*)+$', ''
+            $at = $section.Index + $body.Length
+            $text = $text.Substring(0, $at) + $ending + "UdpPort=$Port" + $text.Substring($at)
+        } else {
+            if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $text += $ending }
+            $text += "[Network]${ending}UdpPort=$Port$ending"
+        }
+    }
+    $out = $latin.GetBytes($text)
+    if ($marked) { $out = [byte[]](0xEF, 0xBB, 0xBF) + $out }
+    [IO.File]::WriteAllBytes($IniPath, [byte[]]$out)
+    $Port
+}
+
+# ---------------------------------------------------------------------------
+# Running the game
+# ---------------------------------------------------------------------------
+
+function Get-FileUse {
+    # One clause for a message: which processes have a file open or loaded, as far as Windows will say.
+    param([Parameter(Mandatory)][string]$Path)
+    try { $ids = @([CameraUnlockIsolatedTest.FileUse]::ProcessIds($Path)) }
+    catch [System.ComponentModel.Win32Exception] { return "what has it could not be asked ($($_.Exception.Message))" }
+    if ($ids.Count -eq 0) { return 'no process is named as having it open or loaded' }
+    $named = foreach ($id in $ids) {
+        $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+        $(if ($process) { "$($process.ProcessName) (pid $id)" } else { "pid $id, which has gone since" })
+    }
+    "it is open or loaded in $($named -join ', ')"
+}
+
+function Stop-GameProcess {
+    # Ends a process and returns once it has gone. Wait-Process is not that wait: it goes by the
+    # exit code, which a forced stop sets at once, and returned 17 ms after the stop of a process
+    # with 4 GB of memory that stayed listed, with a DLL it had loaded still undeletable, for
+    # another 240 ms (measured 2026-10-08). The process handle is signalled when it has gone. A
+    # Project Zomboid had not gone 25 s after its stop on a machine short of commit (2026-10-07).
+    param([Parameter(Mandatory)][System.Diagnostics.Process]$Process)
+    $id = $Process.Id
+    $name = $Process.ProcessName
+    try { Stop-Process -Id $id -Force -ErrorAction Stop }
+    catch {
+        # A process that is already on its way out (it quit or crashed in the same moment, and
+        # its exit code is set) is waited for whatever the stop answered. One whose state cannot
+        # even be asked for is taken as still running, and the refusal is what is thrown.
+        $refusal = $_
+        $ending = $false
+        try { $ending = $Process.HasExited } catch [System.ComponentModel.Win32Exception] { }
+        if (-not $ending) { throw $refusal }
+    }
+    if (-not $Process.WaitForExit($script:GameExitSeconds * 1000)) {
+        throw "$name (pid $id) was ended and had still not gone $script:GameExitSeconds seconds later"
+    }
+}
+
+function Remove-IsolatedInputHostCopy {
+    # Removes a host DLL copied beside a mod, and the ones earlier runs had to leave. Returns
+    # nothing when the name is free, or what is left: Path, where it is now, Moved, whether it
+    # was moved aside, Reason, why it could not be deleted, and Use, what has it.
+    # Windows deletes no DLL a process still has loaded and writes over none, and renames one
+    # freely: a copy that will not delete is moved aside under a name of its own, so the next
+    # start can put its copy under the name the mod loads.
+    param([Parameter(Mandatory)][string]$Path, [int]$PatienceSeconds = 0)
+    # Left by earlier runs. One that is still held stays for the next run to try.
+    Get-ChildItem (Split-Path -Parent $Path) -Filter "$(Split-Path -Leaf $Path).left-*" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    $deadline = (Get-Date).AddSeconds($PatienceSeconds)
+    while ($true) {
+        if (-not (Test-Path $Path)) { return }
+        try { Remove-Item $Path -Force -ErrorAction Stop; return }
+        catch [UnauthorizedAccessException], [System.IO.IOException] {
+            $reason = $_.Exception.Message
+            if ((Get-Date) -ge $deadline) { break }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    $use = Get-FileUse -Path $Path
+    $aside = "$Path.left-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+    try {
+        [IO.File]::Move($Path, $aside)
+        [pscustomobject]@{ Path = $aside; Moved = $true; Reason = $reason; Use = $use }
+    } catch [UnauthorizedAccessException], [System.IO.IOException] {
+        [pscustomobject]@{ Path = $Path; Moved = $false; Reason = $reason; Use = $use }
+    }
+}
+
+function Format-HostDllLeft {
+    param([Parameter(Mandatory)]$Left)
+    $where = $(if ($Left.Moved) { "It was moved aside to $($Left.Path), and the next start or stop of a session in that folder deletes it once it is free." }
+               else { "It could not be moved aside either and is still at $($Left.Path): the next Start-IsolatedGame -ModHost managed in that folder replaces it, or says what has it." })
+    "the isolated-input host DLL copied beside the mod could not be deleted ($($Left.Reason)): $($Left.Use). $where Nothing of the game's is affected."
+}
+
+function Copy-IsolatedInputHost {
+    <#
+    .SYNOPSIS
+    Copies the isolated-input host DLL (cpp/tools/isolated_input_host) into a mod folder, for a mod
+    with no native code of its own: a C# mod's dev build loads it from there through
+    CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked. Returns the path of the copy.
+    .DESCRIPTION
+    The default source is the x64 build `pixi run build-isolated-input-host` leaves in this core
+    checkout. Pass -HostDll for a build made elsewhere, such as a 32-bit one for a 32-bit game.
+
+    A copy an earlier run left in the folder is replaced. One that a process still has loaded
+    can be neither deleted nor written over, so it is moved aside (CameraUnlockIsolatedInput.dll.left-<id>),
+    with a warning that names the process, and deleted by a later start or stop once it is free.
+    Only a copy that can be neither deleted nor moved for 10 seconds stops the start, and the
+    error says what has it.
+    #>
+    param([Parameter(Mandatory)][string]$ModFolder, [string]$HostDll = $script:HostDllBuild)
+    if (-not (Test-Path $HostDll -PathType Leaf)) {
+        throw "The isolated-input host DLL is not built: $HostDll. Build it in cameraunlock-core with: cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build; cmake --build cpp/tools/isolated_input_host/build --config Release (pixi run build-isolated-input-host)."
+    }
+    if (-not (Test-Path $ModFolder -PathType Container)) { throw "The mod folder does not exist: $ModFolder" }
+    $target = Join-Path $ModFolder $script:HostDllName
+    $deadline = (Get-Date).AddSeconds(10)
+    while ($true) {
+        $left = Remove-IsolatedInputHostCopy -Path $target
+        if (-not $left) { break }
+        if ($left.Moved) {
+            Write-RigWarning "an isolated-input host DLL from an earlier run was still in use at $target ($($left.Reason)): $($left.Use). It was moved aside to $($left.Path) and a fresh copy put in its place."
+            break
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw "An isolated-input host DLL from an earlier run is at $target and for 10 seconds could be neither deleted ($($left.Reason)) nor moved aside: $($left.Use). Nothing was started."
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    Copy-Item $HostDll $target
+    $target
+}
+
+function Test-IsolatedInputProcess {
+    <#
+    .SYNOPSIS
+    True when the process runs isolated input: it holds the event cameraunlock/dev/isolated_input.h
+    makes for it. An event that exists but cannot be opened, as one of a process at a higher
+    integrity level, counts.
+    #>
+    param([Parameter(Mandatory)][uint32]$ProcessId)
+    $event = $null
+    try {
+        if (-not [Threading.EventWaitHandle]::TryOpenExisting("Local\CameraUnlock.IsolatedInput.$ProcessId", [ref]$event)) { return $false }
+    } catch [UnauthorizedAccessException] {
+        return $true
+    }
+    $event.Dispose()
+    $true
+}
+
+function New-RigGuardFolder {
+    # A folder of its own for one run's guard, beside the rig locks and outside every repo.
+    param([Parameter(Mandatory)][string]$ProcessName)
+    Join-Path (Get-GameRigRoot) "_guard\$(Get-Date -Format yyyyMMdd-HHmmss-fff)-$ProcessName-$PID"
+}
+
+function Start-RigGuard {
+    <#
+    .SYNOPSIS
+    Starts the guard of a background test's game (cpp/tools/rig_guard) and returns once it is
+    watching. Start-IsolatedGame calls this before it launches anything; call it yourself only for a
+    run that does not go through Start-IsolatedGame.
+    .DESCRIPTION
+    The guard ends every process of the run, and says why in one line in <Folder>\guard.verdict and
+    guard.log, on the first of: a window of one of those processes is the foreground window, the
+    display mode of any screen changes, -LimitSeconds are up, or one of them cannot be given the
+    shim. The run's processes are the one it starts itself (-Launch), every process started after
+    the guard whose executable is named in -Names, and everything those start.
+
+    With -Launch the guard starts that executable suspended and puts the shim in before its first
+    instruction, so its first window is already made without taking the foreground. A process it
+    finds by name was started by someone else (Steam, a launcher's service): it is held still and
+    given the shim as soon as it is seen, which the guard's log times.
+
+    -NoShim leaves the shim out: the guard still watches and ends the game. For a game the shim
+    breaks, and only then.
+
+    Returns Folder, ProcessId (the guard's) and LaunchedId (what -Launch started, or 0). Throws,
+    with nothing left running, when the tools are not built, the guard does not come up, or the
+    launch fails.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Folder,
+        [string[]]$Names = @(),
+        [int]$LimitSeconds = 1800,
+        [string]$Launch = '',
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = '',
+        [switch]$NoShim,
+        [string]$ToolFolder = $script:RigGuardTools
+    )
+    foreach ($built in 'CameraUnlockRig.x64.exe', 'CameraUnlockRig.x86.exe', 'CameraUnlockRigShim.x64.dll', 'CameraUnlockRigShim.x86.dll') {
+        if (-not (Test-Path (Join-Path $ToolFolder $built) -PathType Leaf)) {
+            throw "The rig guard is not built: $(Join-Path $ToolFolder $built) is missing. Build it in cameraunlock-core with: pixi run build-rig-guard. No game is started without it."
+        }
+    }
+    if (Test-Path (Join-Path $Folder 'guard.txt')) { throw "$Folder already holds a guard's files: every run has a folder of its own" }
+    New-Item -ItemType Directory -Force $Folder | Out-Null
+    $lines = @("limit=$LimitSeconds") + @($Names | Where-Object { $_ } | ForEach-Object { "name=$_" })
+    if ($NoShim) { $lines += 'shim=0' }
+    if ($Launch) {
+        $lines += "launch=$Launch"
+        if ($Arguments.Count -gt 0) { $lines += "arguments=$($Arguments -join ' ')" }
+        if ($WorkingDirectory) { $lines += "directory=$WorkingDirectory" }
+    }
+    Set-Content -Path (Join-Path $Folder 'guard.txt') -Value $lines -Encoding Unicode
+    $guard = Start-Process (Join-Path $ToolFolder 'CameraUnlockRig.x64.exe') -ArgumentList 'guard', "`"$Folder`"" -PassThru
+    $failed = Join-Path $Folder 'guard.failed'
+    $waitFor = {
+        param([string]$File, [int]$Seconds, [string]$What)
+        $deadline = (Get-Date).AddSeconds($Seconds)
+        while (-not (Test-Path (Join-Path $Folder $File))) {
+            if (Test-Path $failed) { throw "the rig guard $What`: $((Get-Content $failed -Raw -Encoding UTF8).Trim())" }
+            if ($guard.HasExited) { throw "the rig guard $What`: it exited with code $($guard.ExitCode). Its folder is $Folder" }
+            if ((Get-Date) -ge $deadline) {
+                Stop-Process -Id $guard.Id -Force
+                throw "the rig guard $What within $Seconds seconds and was stopped, which ends whatever it had started. Its folder is $Folder"
+            }
+            Start-Sleep -Milliseconds 20
+        }
+    }
+    & $waitFor 'guard.ready' 15 'did not come up'
+    $launched = 0
+    if ($Launch) {
+        & $waitFor 'guard.launched' 60 "could not start $Launch"
+        $launched = [int](Get-Content (Join-Path $Folder 'guard.launched') -TotalCount 1)
+    }
+    [pscustomobject]@{ Folder = $Folder; ProcessId = $guard.Id; LaunchedId = $launched }
+}
+
+function Get-RigGuardVerdict {
+    <#
+    .SYNOPSIS
+    The line the guard wrote when it ended the game, or nothing while it has not: the time, why
+    (FOREGROUND with the window's title and class, DISPLAY, LIMIT or UNGUARDED), and how many
+    processes it ended.
+    #>
+    param([Parameter(Mandatory)][string]$Folder)
+    $file = Join-Path $Folder 'guard.verdict'
+    if (Test-Path $file) { (Get-Content $file -Raw -Encoding UTF8).Trim() }
+}
+
+function Stop-RigGuard {
+    <#
+    .SYNOPSIS
+    Tells a guard its run is over and waits for it to go. The guard ends whatever of the run is
+    still up first: a launcher, a child the game started. Does nothing for a folder no guard came
+    up in, or whose guard has gone. A guard that has not gone after -WaitSeconds (it does not read
+    the stop while it is putting the shim into a process) is ended, which ends the run with it,
+    and this throws: nothing of the run is left up when it returns or throws.
+    #>
+    param([Parameter(Mandatory)][string]$Folder, [int]$WaitSeconds = 30)
+    $ready = Join-Path $Folder 'guard.ready'
+    if (-not (Test-Path $ready)) { return }
+    Set-Content -Path (Join-Path $Folder 'guard.stop') -Value ''
+    $guard = Get-Process -Id ([int](Get-Content $ready -TotalCount 1)) -ErrorAction SilentlyContinue
+    # The id may have gone to another process since, another session's guard included: this folder's
+    # guard was running before it wrote guard.ready.
+    if (-not $guard -or $guard.ProcessName -notlike 'CameraUnlockRig*' -or $guard.StartTime -gt (Get-Item $ready).LastWriteTime) { return }
+    if (-not $guard.WaitForExit($WaitSeconds * 1000)) {
+        Stop-Process -Id $guard.Id -Force
+        [void]$guard.WaitForExit(10000)
+        throw "the rig guard (pid $($guard.Id)) was asked to stop, had not gone $WaitSeconds seconds later and was ended, which ends every process of its run. Its folder is $Folder"
+    }
+}
+
+function Stop-LeftRigGuard {
+    # A guard whose session never stopped it (its script was ended, or the game was stopped by
+    # process id alone) takes in the next process of the same name, and so would this run's guard.
+    # The game is not running when this is called, so a guard still up for it has nothing left to watch.
+    param([Parameter(Mandatory)][string]$ProcessName)
+    $guards = Join-Path (Get-GameRigRoot) '_guard'
+    if (-not (Test-Path $guards)) { return }
+    foreach ($folder in Get-ChildItem $guards -Directory) {
+        if (-not (Test-Path (Join-Path $folder.FullName 'guard.ready')) -or (Test-Path (Join-Path $folder.FullName 'guard.stop'))) { continue }
+        if (@(Get-Content (Join-Path $folder.FullName 'guard.txt')) -notcontains "name=$ProcessName") { continue }
+        Stop-RigGuard -Folder $folder.FullName
+    }
+}
+
+function Get-SessionGuardVerdict {
+    # A session written before the guard existed has no GuardFolder.
+    param($Session)
+    if ($Session.PSObject.Properties['GuardFolder'] -and $Session.GuardFolder) { Get-RigGuardVerdict -Folder $Session.GuardFolder }
+}
+
+function Start-IsolatedGame {
+    <#
+    .SYNOPSIS
+    Starts a game for a background test, under a guard that ends it the moment it takes the
+    foreground or changes the display mode.
+    .DESCRIPTION
+    Writes the command file beside the mod (its presence is what switches a dev build's isolated
+    input on), starts the guard (Start-RigGuard), launches, waits for the process and then for
+    -SettleSeconds. Returns the session the other functions take. Refuses to start while the game
+    is already running: that one is someone else's.
+
+    An executable -Launch is started by the guard itself, suspended, with the rig shim in before
+    its first instruction: its windows are made without being activated, and it cannot take the
+    foreground, clip or move the cursor, or change the display mode. Each of its top-level windows
+    that has no owner and is not a tool window sits in the bottom right corner of the work area,
+    at the size the game gave it, from before it is first shown, whether or not the game asked for
+    fullscreen, and a move or resize the game makes later leaves it there. Anything else (a steam:// URI,
+    a shell:AppsFolder path) is started as before, and the guard puts the shim into the game as
+    soon as a process named -ProcessName or one of -Processes appears. Name every launcher the
+    game comes up through in -Processes, or its windows are nobody's.
+
+    A name is taken from any process started after the guard, whoever started it: a launcher the
+    person at the machine opens for a game of their own during the run is taken in and ended with
+    the run. So name only launchers that are the game's own. Start-RigGuard -Names also takes
+    the whole path of an executable, and then only that file is the run's; -Processes here takes
+    names only, since the rig lock reads them as process names.
+
+    Nothing here hands the foreground back any more. A game that takes it is ended by the guard,
+    and this throws with the guard's line; so does every Invoke-GameInput after it. The guard also
+    ends the game after -GuardMinutes, whatever the test is doing: raise it for a longer session.
+    Stop-IsolatedGame stops the guard, which ends what is left of the run.
+
+    What to know before calling it (docs/isolated-input.md, "The guarded launch", has the rest):
+    - The game is ended 30 minutes after the launch unless -GuardMinutes says otherwise. That
+      holds for a game left running with Exit-GameRig -KeptIn too.
+    - A launch that is not an executable (a steam:// URI) gets the shim only once the game's
+      process is seen. A window or a Direct3D device it made before that is not covered, and the
+      guard ends the run if that window takes the foreground. Launch the executable itself
+      wherever the game allows it.
+    - The shim covers Direct3D 9, DXGI swap chains made through a factory's CreateSwapChain or
+      CreateSwapChainForHwnd or by D3D11CreateDeviceAndSwapChain, and DirectInput 8. Of those, the
+      test runs Direct3D 9, Direct3D 11 and DirectInput 8. It does not cover DirectDraw, DirectInput 7
+      and older, Direct3D 10's own create-with-swap-chain calls, a DirectInput made through
+      CoCreateInstance, a borderless window the size of the screen (not activated, but not made
+      smaller), low-level keyboard and mouse hooks, RegisterHotKey, or a console window the game
+      opens. For the first four the guard ending the game is all there is.
+    - The corner is held at the calls that place a window (SetWindowPos, MoveWindow,
+      DeferWindowPos, SetWindowPlacement) and at each show. A window whose own procedure answers
+      a move with another place, one made visible by a change of style alone, a maximised window,
+      and a window with an owner or a tool window are left where the game puts them.
+    - A process the shim cannot be put into ends the run: one that is elevated or protected, or
+      a packaged app. -NoShim runs such a game with the guard alone.
+    - The guard ends the run on a change of display mode whoever made it, the person at the
+      machine included, and it does not look at the foreground for the tens of milliseconds it
+      takes to put the shim into a process it has just found.
+    - No real game had been run under the guard when this was written (2026-11-17): what it does
+      to a given game is found by trying that game.
+
+    -Started is handed the process the moment it appears, before the settling.
+    With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
+    Stop-IsolatedGame removes that copy. A copy an earlier run left there, still loaded in some
+    process, does not stop the start: it is moved aside.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ProcessName,
+        # A URI (steam://rungameid/...), a shell:AppsFolder path or an executable.
+        [Parameter(Mandatory)][string]$Launch,
+        # The folder the mod's DLL is deployed to.
+        [Parameter(Mandatory)][string]$ModFolder,
+        [int]$StartTimeoutSeconds = 120,
+        [int]$SettleSeconds = 60,
+        # native: the mod's own dev build holds the detours. managed: a C# mod, which loads the host DLL.
+        [ValidateSet('native', 'managed')][string]$ModHost = 'native',
+        # The host DLL to copy for a managed mod, when it is not this checkout's x64 build.
+        [string]$HostDll = $script:HostDllBuild,
+        [scriptblock]$Started,
+        # Command-line arguments for an executable -Launch, joined with spaces: quote one that holds a space.
+        [string[]]$Arguments = @(),
+        # Other executables of the run, by name: the launchers the game comes up through. The guard takes
+        # them in too. A name matches any process of that name started after the guard, one the person
+        # at the machine starts for themselves included, and that one is ended with the run: name only
+        # launchers that are this game's own.
+        [string[]]$Processes = @(),
+        # The guard ends the game this long after the launch, whatever the test is doing. A session that
+        # runs longer than half an hour has to say so here.
+        [int]$GuardMinutes = 30,
+        # Where the guard keeps its log and verdict. One of its own under the rig root when left out.
+        [string]$GuardFolder = '',
+        # Watch and end only, without the shim: for a game the shim breaks.
+        [switch]$NoShim
+    )
+    if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
+        throw "$ProcessName is already running and this session did not start it. Not launching over it."
+    }
+    if (-not $GuardFolder) { $GuardFolder = New-RigGuardFolder -ProcessName $ProcessName }
+    Stop-LeftRigGuard -ProcessName $ProcessName
+    $deployedHost = $(if ($ModHost -eq 'managed') { Copy-IsolatedInputHost -ModFolder $ModFolder -HostDll $HostDll } else { $null })
+    $commandFile = Join-Path $ModFolder $script:CommandFileName
+    Set-Content -Path $commandFile -Value '0' -Encoding ASCII
+    Remove-Item "$commandFile.done" -ErrorAction SilentlyContinue
+
+    # An executable is the guard's to start, suspended. A URI or a shell path starts in someone else's process.
+    $direct = $Launch -match '\.exe$' -and (Test-Path $Launch -PathType Leaf)
+    $guarded = @{ Folder = $GuardFolder; Names = @($ProcessName) + $Processes; LimitSeconds = $GuardMinutes * 60; NoShim = $NoShim }
+    if ($direct) { $guarded += @{ Launch = (Resolve-Path $Launch).ProviderPath; Arguments = $Arguments; WorkingDirectory = (Get-Location).ProviderPath } }
+    [void](Start-RigGuard @guarded)
+    try {
+        if (-not $direct) {
+            if ($Arguments.Count -gt 0) { Start-Process $Launch -ArgumentList $Arguments } else { Start-Process $Launch }
+        }
+        $ended = { $verdict = Get-RigGuardVerdict -Folder $GuardFolder; if ($verdict) { throw "the guard ended the game as it started: $verdict" } }
+        $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
+        $process = $null
+        while ((Get-Date) -lt $deadline -and -not $process) {
+            & $ended
+            $process = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $process) { Start-Sleep -Milliseconds 500 }
+        }
+        if (-not $process) { throw "$ProcessName did not start within $StartTimeoutSeconds seconds of launching $Launch" }
+        if ($Started) { & $Started $process | Out-Null }
+
+        $settled = (Get-Date).AddSeconds($SettleSeconds)
+        while ((Get-Date) -lt $settled) {
+            Start-Sleep -Milliseconds 500
+            & $ended
+        }
+        & $ended
+    } catch {
+        # The guard ends whatever of the run came up. The first error is the one to report.
+        $failure = $_
+        try { Stop-RigGuard -Folder $GuardFolder } catch { Write-RigWarning "and the rig guard could not be stopped: $_" }
+        throw $failure
+    }
+    [pscustomobject]@{ ProcessId = $process.Id; ProcessName = $ProcessName; CommandFile = $commandFile; Sequence = 0; HostDll = $deployedHost; GuardFolder = $GuardFolder }
+}
+
+function Invoke-GameInput {
+    <#
+    .SYNOPSIS
+    Plays input commands inside the game (cameraunlock/dev/input_script.h is the language) and waits
+    for the mod to report them played.
+    .DESCRIPTION
+    Samples the real foreground for the whole of the script. The result's GameHeldForeground is true
+    when the game ever had it: the real keyboard and mouse reach a foreground game, so that run
+    proves nothing about what the script did and is repeated. Throws when the mod reports a line
+    that did not parse or does not answer in time.
+    #>
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][string[]]$Commands,
+        [int]$TimeoutSeconds = 60
+    )
+    # Process id 0 is what a session holds between stopping its game and starting it again, and it is also the system's idle process.
+    if (-not $Session.ProcessId) { throw 'the session has no game running: it was stopped and not started again' }
+    if (-not (Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue)) {
+        $verdict = Get-SessionGuardVerdict $Session
+        throw "the game (pid $($Session.ProcessId)) is no longer running$(if ($verdict) { ": the guard ended it. $verdict" })"
+    }
+    $Session.Sequence++
+    # A session with a file of its own (Start-IsolatedGameSession -SessionFile) is one a later
+    # process picks up. The number is written before the script is handed over: one that is never
+    # answered has still used it, and the next process must not ask with it again.
+    if ($Session.PSObject.Properties['SessionFile'] -and $Session.SessionFile) { Save-IsolatedGameSession -Session $Session }
+    $sequence = "$($Session.Sequence)"
+    $temp = "$($Session.CommandFile).tmp"
+    [IO.File]::WriteAllLines($temp, @($sequence) + $Commands)
+    $heldForeground = [CameraUnlockIsolatedTest.Native]::ForegroundPid() -eq $Session.ProcessId
+    # The mod reads the command file on a timer, and a move that lands on that read is refused.
+    foreach ($attempt in 1..20) {
+        try { Move-Item $temp $Session.CommandFile -Force -ErrorAction Stop; break }
+        catch [System.IO.IOException] { if ($attempt -eq 20) { throw }; Start-Sleep -Milliseconds 25 }
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $done = $null
+    while ((Get-Date) -lt $deadline) {
+        if ([CameraUnlockIsolatedTest.Native]::ForegroundPid() -eq $Session.ProcessId) { $heldForeground = $true }
+        $done = Get-Content "$($Session.CommandFile).done" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($done -and $done -match "^$sequence(\D|$)") { break }
+        $verdict = Get-SessionGuardVerdict $Session
+        if ($verdict) { throw "the guard ended the game while script $sequence was playing. $verdict" }
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not ($done -and $done -match "^$sequence(\D|$)")) {
+        throw "script $sequence was not played within $TimeoutSeconds seconds. Is the dev build deployed, and was the command file there when the game started?"
+    }
+    if ($done -ne $sequence) { throw "script $done" }
+    [pscustomobject]@{ Sequence = $Session.Sequence; GameHeldForeground = $heldForeground }
+}
+
+function Save-GameCapture {
+    <#
+    .SYNOPSIS
+    Saves the game window as a PNG, covered or not, at 1/Scale size.
+    #>
+    param([Parameter(Mandatory)]$Session, [Parameter(Mandatory)][string]$Path, [int]$Scale = 1)
+    $process = Get-Process -Id $Session.ProcessId -ErrorAction Stop
+    $window = [CameraUnlockIsolatedTest.Native]::GameWindow([uint32]$process.Id)
+    if ($window -eq [IntPtr]::Zero) { throw "the game (pid $($process.Id)) has no visible window to capture" }
+    $bitmap = [CameraUnlockIsolatedTest.Native]::Capture($window)
+    if (-not $bitmap) { throw "the game window could not be captured" }
+    try {
+        if ($Scale -gt 1) {
+            $small = New-Object System.Drawing.Bitmap ([int]($bitmap.Width / $Scale)), ([int]($bitmap.Height / $Scale))
+            $graphics = [System.Drawing.Graphics]::FromImage($small)
+            $graphics.InterpolationMode = 'HighQualityBicubic'
+            $graphics.DrawImage($bitmap, 0, 0, $small.Width, $small.Height)
+            $graphics.Dispose()
+            $small.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $small.Dispose()
+        } else {
+            $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+    } finally { $bitmap.Dispose() }
+    $Path
+}
+
+function Test-CaptureDiffers {
+    <#
+    .SYNOPSIS
+    True when two captures differ in more than Threshold of the pixels sampled.
+    .DESCRIPTION
+    A capture that never changes while the game should be moving is a broken instrument, not an
+    answer: PrintWindow can return one frame over and over for some renderers. Check it once per
+    title before trusting any capture.
+    #>
+    param([Parameter(Mandatory)][string]$First, [Parameter(Mandatory)][string]$Second, [double]$Threshold = 0.002)
+    $a = [System.Drawing.Bitmap]::FromFile($First)
+    $b = [System.Drawing.Bitmap]::FromFile($Second)
+    try {
+        if ($a.Width -ne $b.Width -or $a.Height -ne $b.Height) { return $true }
+        $sampled = 0; $different = 0
+        for ($y = 0; $y -lt $a.Height; $y += 16) {
+            for ($x = 0; $x -lt $a.Width; $x += 16) {
+                $sampled++
+                $p = $a.GetPixel($x, $y); $q = $b.GetPixel($x, $y)
+                if ([Math]::Abs($p.R - $q.R) + [Math]::Abs($p.G - $q.G) + [Math]::Abs($p.B - $q.B) -gt 24) { $different++ }
+            }
+        }
+        return ($different / $sampled) -gt $Threshold
+    } finally { $a.Dispose(); $b.Dispose() }
+}
+
+function Test-IsolatedInputProof {
+    <#
+    .SYNOPSIS
+    The proof a title owes before its tests count: a scripted input changes what the game shows while
+    the game never holds the real foreground.
+    .DESCRIPTION
+    Pass commands the game visibly reacts to from where it is (open a menu, turn the view). Captures
+    before and after into -Folder. Returns Proven, and why not when it is not.
+    #>
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][string[]]$Commands,
+        [Parameter(Mandatory)][string]$Folder
+    )
+    New-Item -ItemType Directory -Force $Folder | Out-Null
+    $before = Save-GameCapture -Session $Session -Path (Join-Path $Folder 'proof-before.png')
+    $played = Invoke-GameInput -Session $Session -Commands $Commands
+    $after = Save-GameCapture -Session $Session -Path (Join-Path $Folder 'proof-after.png')
+    $changed = Test-CaptureDiffers -First $before -Second $after
+    $reason = $(if ($played.GameHeldForeground) { 'the game held the real foreground during the run, so real input could have done it: repeat' }
+                elseif (-not $changed) { 'the game showed no change: it did not take the input, or the capture is not live' }
+                else { $null })
+    [pscustomobject]@{ Proven = (-not $reason); Reason = $reason; Before = $before; After = $after }
+}
+
+function Stop-IsolatedGame {
+    <#
+    .SYNOPSIS
+    Stops the game this session started, by process id, and removes the command file so the next
+    start of the same build answers to the real keyboard. Removes the host DLL too when the session
+    copied one. The host's log (CameraUnlockIsolatedInput.log beside it) is left to be read.
+    .DESCRIPTION
+    Returns once the game's process has gone, which is when the files it had loaded come free. It
+    throws when the stop is refused, and when the process has still not gone 120 seconds after it.
+
+    A host DLL that will not delete for 10 seconds with the game gone is something else's to
+    let go: this warns, naming the file and the process that has it, moves it aside so the next
+    start is not in its way, and does not throw. The game is stopped either way.
+    #>
+    param([Parameter(Mandatory)]$Session)
+    $process = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
+    if ($process -and $process.ProcessName -eq $Session.ProcessName) { Stop-GameProcess -Process $process }
+    if ($Session.PSObject.Properties['GuardFolder'] -and $Session.GuardFolder) { Stop-RigGuard -Folder $Session.GuardFolder }
+    Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
+    if ($Session.HostDll) {
+        $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
+        if ($left) { Write-RigWarning "The game is stopped, and $(Format-HostDllLeft $left)" }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# One session at a time
+# ---------------------------------------------------------------------------
+# <root>\<key>\lock\owner.json     the lock, with who holds it
+# <root>\_queue\<ticks>-<pid>.json one ticket for each session waiting, oldest first
+# Every look at them and every change to them happens inside one named mutex, so no two sessions
+# ever decide on the same state. The lock itself is a folder, because it has to outlive the
+# process that took it: a session that starts the game in one process and stops it in another
+# holds the rig in between.
+
+function Get-GameRigRoot {
+    # CAMERAUNLOCK_RIG_ROOT is for this module's own tests, which must not meet a real session's lock.
+    $(if ($env:CAMERAUNLOCK_RIG_ROOT) { $env:CAMERAUNLOCK_RIG_ROOT } else { Join-Path $env:LOCALAPPDATA 'CameraUnlock\rig' })
+}
+
+function Get-GameRigKey {
+    param([string]$Game)
+    $key = $Game.ToLowerInvariant() -replace '\.exe$', ''
+    if ($key -notmatch '^[a-z0-9][a-z0-9 ._-]*$') { throw "'$Game' cannot name a rig: give the game's process name" }
+    $key
+}
+
+# The rig an agent holds is put on the hivemind board (github.com/itsloopyo/hivemind), so the
+# agents there see who has which game in `hivemind status` without asking this lock. It is a copy
+# for them to read: this lock alone decides who gets the rig. Only under an agent harness, since a
+# person at a terminal has no place on the board, and only where hivemind is installed. hivemind
+# refusing, as it does an agent that never joined, is said and not thrown: the rig is held either
+# way, and the run needs nothing more. The copy ends with the process that holds the rig (--while),
+# because a release from a run whose shell was reaped never reaches hivemind (2026-10-26).
+function Get-GameRigBoardName {
+    param([string]$Key)
+    $name = 'rig-' + ($Key -replace '[^a-z0-9._-]', '-')
+    $name.Substring(0, [Math]::Min(32, $name.Length))
+}
+
+function Invoke-GameRigBoard {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    if (-not ($env:CLAUDECODE -or $env:CODEX_THREAD_ID -or $env:CODEX_SESSION_ID)) { return }
+    $hivemind = Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $hivemind) { return }
+    $run = Invoke-ConsoleProgram -Path $hivemind.Source -Arguments $Arguments
+    # A copy held --while a process that has ended is gone already, which is what a release asks for.
+    if ($run.ExitCode -ne 0 -and $Arguments[0] -eq 'release' -and "$($run.Output)" -match 'you hold no reservation') { return }
+    if ($run.ExitCode -ne 0) { Write-RigWarning "hivemind $($Arguments[0]) for the rig failed (exit $($run.ExitCode)): $($run.Output)" }
+}
+
+function Set-GameRigOnBoard {
+    param([Parameter(Mandatory)]$Rig, [string]$What = '', [int]$While = $PID)
+    $why = $(if ($What) { "$($Rig.Owner): $What" } else { $Rig.Owner })
+    $why = ($why -replace '\s+', ' ').Trim()
+    $why = $why.Substring(0, [Math]::Min(200, $why.Length))
+    $Rig | Add-Member -NotePropertyName BoardWhat -NotePropertyValue $What -Force
+    Invoke-GameRigBoard -Arguments @('reserve', '--quiet', '--while', "$While", (Get-GameRigBoardName $Rig.Key), $why)
+}
+
+function Invoke-GameRigExclusive {
+    # Runs -Block with the rig's mutex held. The mutex is named for the root, so a test's root has its own.
+    param([Parameter(Mandatory)][scriptblock]$Block)
+    $sha = [Security.Cryptography.SHA1]::Create()
+    try { $digest = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes((Get-GameRigRoot).ToLowerInvariant())) } finally { $sha.Dispose() }
+    $mutex = New-Object System.Threading.Mutex($false, ('Global\CameraUnlockGameRig-' + (-join ($digest[0..7] | ForEach-Object { $_.ToString('x2') }))))
+    try {
+        # A holder that died inside the block leaves the mutex abandoned, and the wait still hands it over.
+        try { [void]$mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { }
+        try { & $Block } finally { $mutex.ReleaseMutex() }
+    } finally { $mutex.Dispose() }
+}
+
+function Test-GameRigProcessAlive {
+    # The start time is what tells the process that took a lock from a later one handed the same id.
+    param([int]$Id, [string]$Start)
+    # No process: the lock was left with its running game (Exit-GameRig -KeptIn). Id 0 is also the system's idle process.
+    if (-not $Id) { return $false }
+    $process = Get-Process -Id $Id -ErrorAction SilentlyContinue
+    if (-not $process) { return $false }
+    if ($null -eq $process.StartTime) {
+        # Windows PowerShell gives no start time, rather than throwing, for a process this one may not
+        # open: System, lsass, an elevated one. A dead lock's id handed on to one of those threw from
+        # every queue turn. WMI reads any process's start, to the microsecond.
+        $created = (Get-CimInstance Win32_Process -Filter "ProcessId=$Id").CreationDate
+        if (-not $created) { return $false }
+        return [Math]::Abs($created.ToFileTimeUtc() - [long]$Start) -lt 10
+    }
+    try { $process.StartTime.ToFileTimeUtc().ToString() -eq $Start }
+    # A process whose start time cannot be read is another user's, and it is running.
+    catch [System.ComponentModel.Win32Exception] { $true }
+    catch [System.InvalidOperationException] { $false }
+}
+
+function Read-GameRigOwner {
+    param([string]$Key)
+    $file = Join-Path (Join-Path (Get-GameRigRoot) $Key) 'lock\owner.json'
+    if (-not (Test-Path $file)) { return $null }
+    Get-Content $file -Raw | ConvertFrom-Json
+}
+
+function Move-GameRigFolder {
+    # Windows refuses to rename a folder while any file in it is open, whatever the handle shares,
+    # and a scanner opens the owner.json just written. With 15 sessions queued on Project Zomboid a
+    # take failed on it once (2026-10-16). That handle goes in moments; one that stays is named.
+    param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To, [int]$PatienceSeconds = 5)
+    $deadline = (Get-Date).AddSeconds($PatienceSeconds)
+    while ($true) {
+        try { [IO.Directory]::Move($From, $To); return }
+        # .NET Framework reports the refusal as an IOException carrying E_ACCESSDENIED.
+        catch [System.IO.IOException] {
+            if ($_.Exception.HResult -ne 0x80070005) { throw }
+            if ((Get-Date) -ge $deadline) {
+                $use = @(Get-ChildItem $From -File -Recurse | ForEach-Object { "$($_.Name): $(Get-FileUse -Path $_.FullName)" })
+                throw "the rig folder $From could not be renamed to $To for $PatienceSeconds s ($($_.Exception.Message)). $($use -join '; ')"
+            }
+            Start-Sleep -Milliseconds 50
+        }
+    }
+}
+
+function Test-GameRigOwnerLive {
+    # A lock is live while the process that took it runs, or while any process it named does: the
+    # game a session started goes on holding the rig after the process that launched it has ended.
+    param($Owner)
+    # A lock left with its game (Exit-GameRig -KeptIn) is held by those processes and no others:
+    # a game of the same name started later, by hand, is not the one that was left.
+    if (-not $Owner.ProcessId -and $Owner.PSObject.Properties['Kept']) {
+        foreach ($left in @($Owner.Kept)) {
+            if (Test-GameRigProcessAlive -Id $left.Id -Start $left.Start) { return $true }
+        }
+        return $false
+    }
+    if (Test-GameRigProcessAlive -Id $Owner.ProcessId -Start $Owner.ProcessStart) { return $true }
+    foreach ($name in @($Owner.Processes)) {
+        if (Get-Process -Name $name -ErrorAction SilentlyContinue) { return $true }
+    }
+    $false
+}
+
+function Get-GameRigOwnProcesses {
+    # The running processes that are a lock's own: the ones it was left with (Kept) that still
+    # run and, for the holder itself (-Started), any of its names started since it took the lock.
+    # A game of the same name that was already up when the holder came is someone else's.
+    param($Owner, [switch]$Started)
+    $own = @{}
+    if ($Owner.PSObject.Properties['Kept']) {
+        foreach ($left in @($Owner.Kept)) {
+            if (Test-GameRigProcessAlive -Id $left.Id -Start $left.Start) { $own[[int]$left.Id] = "$($left.Start)" }
+        }
+    }
+    if ($Started -and $Owner.PSObject.Properties['Entered'] -and $Owner.Entered) {
+        foreach ($name in @($Owner.Processes)) {
+            foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+                try { $began = $process.StartTime.ToFileTimeUtc() }
+                catch [System.ComponentModel.Win32Exception], [System.InvalidOperationException] { continue }
+                if ($began -ge [long]$Owner.Entered) { $own[[int]$process.Id] = "$began" }
+            }
+        }
+    }
+    foreach ($id in $own.Keys) { [pscustomobject]@{ Id = $id; Start = $own[$id] } }
+}
+
+function Format-GameRigOwner {
+    param($Owner)
+    $text = "$($Owner.Owner) ($(if ($Owner.ProcessId) { "pid $($Owner.ProcessId)" } else { "left with its running game, which Stop-KeptGame -KeptIn '$($Owner.KeptIn)' ends" }), since $($Owner.Since)"
+    if ($Owner.What) { $text += ", $($Owner.What)" }
+    if ($Owner.WholeGpu) { $text += ', the whole graphics card' }
+    "$text)"
+}
+
+function Get-GameRigLimit {
+    # How many rigs this machine runs at once, from <root>\max-rigs.txt (Set-GameRigLimit). 0 is no
+    # limit. Read inside the mutex, which Set-GameRigLimit writes it under.
+    $file = Join-Path (Get-GameRigRoot) 'max-rigs.txt'
+    if (-not (Test-Path $file)) { return 0 }
+    $text = "$(Get-Content $file -Raw)".Trim()
+    if ($text -notmatch '^[1-9][0-9]*$') { throw "$file holds '$text': it takes the number of rigs this machine runs at once, as Set-GameRigLimit writes it" }
+    [int]$text
+}
+
+function Set-GameRigLimit {
+    <#
+    .SYNOPSIS
+    Sets how many rigs, of any game, this machine runs at once. Enter-GameRig queues a session past
+    that number in its turn. -Count 0 takes the limit away.
+    .DESCRIPTION
+    Each rig is a game or an offline render with gigabytes of its own, and the queue per game does
+    not see the others: on 2026-10-26 five Project Zomboid rigs (two game copies, three harness
+    renders) left 7 GB free of 62. The number is the machine's, so it lives in the rig root
+    beside the locks, not in any repo.
+    #>
+    param([Parameter(Mandatory)][int]$Count)
+    if ($Count -lt 0) { throw "-Count is how many rigs run at once: $Count is not one" }
+    $root = Get-GameRigRoot
+    $file = Join-Path $root 'max-rigs.txt'
+    Invoke-GameRigExclusive {
+        if ($Count -eq 0) { if (Test-Path $file) { Remove-Item $file -Force }; return }
+        New-Item -ItemType Directory -Force $root | Out-Null
+        Set-Content $file "$Count" -Encoding ASCII
+    }
+}
+
+function Get-GameRigTickets {
+    # The live tickets, oldest first. A ticket whose process has gone is removed: called inside the mutex.
+    $queue = Join-Path (Get-GameRigRoot) '_queue'
+    if (-not (Test-Path $queue)) { return }
+    foreach ($file in Get-ChildItem $queue -Filter *.json | Sort-Object Name) {
+        $ticket = Get-Content $file.FullName -Raw | ConvertFrom-Json
+        if (Test-GameRigProcessAlive -Id $ticket.ProcessId -Start $ticket.ProcessStart) {
+            $ticket | Add-Member -NotePropertyName File -NotePropertyValue $file.FullName -PassThru
+        } else {
+            Remove-Item $file.FullName -Force
+        }
+    }
+}
+
+function Get-GameRigTicketKeys {
+    # Every rig a ticket may take: the games of its pool, or the one it named before pools were.
+    param($Ticket)
+    $(if ($Ticket.PSObject.Properties['Keys']) { @($Ticket.Keys) } else { @($Ticket.Key) })
+}
+
+function Set-GameRigStateFolder {
+    # Names the state a session saves on the lock it holds, once a pool has said which lock that is.
+    param([Parameter(Mandatory)]$Rig, [Parameter(Mandatory)][string]$StateFolder)
+    Invoke-GameRigExclusive {
+        $held = Read-GameRigOwner $Rig.Key
+        if (-not $held -or $held.Token -ne $Rig.Token) { throw "the rig for $($Rig.Key) is no longer held by $($Rig.Owner)" }
+        $held.StateFolder = $StateFolder
+        ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
+    }
+}
+
+function Get-GameRig {
+    <#
+    .SYNOPSIS
+    Who holds a game's rig and who is waiting for it, without taking it. Nothing when the rig is free
+    and nobody waits. Leave -Game out for the rig of work that has no game (Enter-GameRig -WholeGpu).
+    .DESCRIPTION
+    Live is false for a lock whose taker has gone and whose game is not running: the next
+    Enter-GameRig takes that one over, unless Unrestored names a saved state its session never
+    put back.
+    #>
+    param([string]$Game)
+    $key = $(if ($Game) { Get-GameRigKey $Game } else { 'gpu' })
+    Invoke-GameRigExclusive {
+        $owner = Read-GameRigOwner $key
+        $waiting = @(Get-GameRigTickets | Where-Object { (Get-GameRigTicketKeys $_) -contains $key } | ForEach-Object { $_.Owner })
+        if (-not $owner -and $waiting.Count -eq 0) { return }
+        [pscustomobject]@{
+            Key        = $key
+            Holder     = $owner
+            Live       = [bool]($owner -and (Test-GameRigOwnerLive $owner))
+            Unrestored = $(if ($owner -and $owner.StateFolder -and (Test-Path (Join-Path $owner.StateFolder 'state.json'))) { $owner.StateFolder } else { $null })
+            Waiting    = $waiting
+        }
+    }
+}
+
+function Enter-GameRig {
+    <#
+    .SYNOPSIS
+    Takes the one lock on a game, waiting its turn behind whoever asked first, and returns the rig
+    Exit-GameRig releases. A game, its saves and its settings are one thing on this machine,
+    whichever repo, worktree or session wants them.
+    .DESCRIPTION
+    The lock lives in %LOCALAPPDATA%\CameraUnlock\rig\<game>, outside every repo, so two worktrees
+    of one mod and two mods for one game meet the same lock. It records who took it: -Owner, the
+    process id, when, and -What.
+
+    Only the session that took a lock releases it. A lock is taken over from a session that never
+    released it only when that session's process has gone AND the game is not running, and never
+    while the files that session saved (-StateFolder) are still waiting to be put back: that
+    throws, naming the folder to restore. While the game is running with no lock on it, someone
+    started it by hand, and this waits for them too.
+
+    -WholeGpu is for work that needs the graphics card to itself, an image generation run as much
+    as a benchmark: it waits until no rig is held, and no rig is given out while it holds. Such
+    work needs no game: leave -Game out. Run it from the PowerShell that took the lock, because
+    the lock of a process that has ended, with no game running, is anyone's to take over. While
+    it waits it holds off new rigs only once nobody who asked before it is still waiting; until
+    then a session that asked after it takes a free game, and one it holds past that moment
+    holds the waiter up for as long.
+
+    -Token takes back the lock an earlier process of the same session took: pass the Token of the
+    rig that process got. This is how a session that starts the game in one process stops it in
+    another.
+
+    -KeptIn is for a script that leaves the game running when it ends and is run again to restart
+    it: the file Exit-GameRig -KeptIn wrote. While the processes that run left up are still
+    running under the token in that file, the rig is taken back, from whichever process asks,
+    and the game left up is this caller's to stop. A file whose lock has gone, or whose game has
+    ended, is removed and the rig is asked for in the ordinary way, which waits for a game
+    someone else has up, one of the same name started by hand included. While another process
+    has the kept lock taken back, this waits for it like any other, and takes it back in turn
+    if that process dies with the game it was left with still up. -StopKept stops the game the lock was left
+    with, by process id, as it is taken back: use it where the script would otherwise stop the
+    game by name, which also stops one that is not its own.
+
+    What a lock is left with (Exit-GameRig -KeptIn) is what it was left with before and still
+    runs, and whatever of the game's names started after its holder took it. A game that was
+    already up when the holder came is never the holder's.
+
+    -WholeGpu is refused at once, not queued, while a game left running holds a rig and nobody
+    who asked before it is still waiting: nothing says when that game will end, and every
+    session that asked later would wait behind it.
+
+    While it waits it says what for, each time that changes: who holds the rig and how many asked
+    before this session. -Waiting is a block handed that line in place of its being printed, for a
+    caller that acts on it or words it its own way. A
+    holder whose own process has gone while its game runs on is named as that: the session is
+    between two of its processes, or its runner was killed. -SessionFile is recorded with the
+    lock for that case, so whoever waits can see what Stop-IsolatedGameSession would need.
+
+    -Pool is for a game this machine keeps several private copies of, each with its own exe name,
+    data folder and so its own lock, so that several sessions can run it at once. It names every
+    copy, and the session takes whichever is free first, in its turn: a session gets a copy
+    beside those that asked before it only while there is a free copy for each of them as well,
+    and a copy that is the only one a session ahead may take is left for it. The rig returned
+    says which copy in Game. Each copy is still a game on the graphics card: -WholeGpu waits
+    for every copy and holds them all off while it runs. -Pool with one name is -Game.
+
+    Set-GameRigLimit caps how many rigs, of every game, are held at once. A session that would
+    go past it waits, and those that asked first, for any game, are served first while there is
+    room. A rig taken back by -Token or -KeptIn is held already and is not asked for again.
+
+    A session that never asks is not seen. Every session on the machine has to take the rig for
+    the lock to mean anything.
+    #>
+    param(
+        # The game's process name, as Start-IsolatedGame takes it.
+        [string]$Game,
+        # In place of -Game: the process names of interchangeable copies of a game, of which this takes one.
+        [string[]]$Pool = @(),
+        # Who is asking, as another session or the person at the machine would know them.
+        [Parameter(Mandatory)][string]$Owner,
+        # What the rig is wanted for, one line, shown to whoever waits behind this.
+        [string]$What = '',
+        # Other process names that mean the game is still up: a launcher, a stub that hands over.
+        [string[]]$Processes = @(),
+        # Where this session saves the game's files (Save-GameTestState -Folder).
+        [string]$StateFolder = '',
+        [switch]$WholeGpu,
+        # 0 takes the rig now or throws. The default waits an hour.
+        [int]$WaitSeconds = 3600,
+        [string]$Token = '',
+        # The file the session is kept in (Start-IsolatedGameSession -SessionFile), shown by Get-GameRig.
+        [string]$SessionFile = '',
+        # Handed each new line this session waits on, which is then not printed. It runs outside the lock's mutex.
+        [scriptblock]$Waiting,
+        # The file a run that left the game up kept its lock in (Exit-GameRig -KeptIn).
+        [string]$KeptIn = '',
+        # With -KeptIn: stop the game the kept lock was left with, by process id, once it is taken back.
+        [switch]$StopKept
+    )
+    if (-not $Game -and $Pool.Count -eq 0 -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, -Pool, or -WholeGpu for work that has no game' }
+    if ($Pool.Count -gt 0) {
+        if ($Game) { throw '-Pool and -Game are one or the other: -Pool names every game the rig may be' }
+        if ($Token) { throw "-Token takes back one game's lock: name it with -Game, not -Pool" }
+        if ($KeptIn) { throw "-KeptIn keeps one game's lock: name it with -Game, not -Pool" }
+    }
+    if ($KeptIn -and -not $Game) { throw "-KeptIn needs -Game: the lock kept there is a game's" }
+    $root = Get-GameRigRoot
+    $queue = Join-Path $root '_queue'
+    $start = (Get-Process -Id $PID).StartTime.ToFileTimeUtc().ToString()
+    # Each game this may take, with the names that mean it is up and where its lock lives.
+    $candidates = @(foreach ($name in $(if ($Pool.Count -gt 0) { $Pool } elseif ($Game) { @($Game) } else { @('') })) {
+        $candidateKey = $(if ($name) { Get-GameRigKey $name } else { 'gpu' })
+        $plain = $name -replace '\.exe$', ''
+        [pscustomobject]@{
+            Key = $candidateKey; Game = $(if ($plain) { $plain } else { $null }); RigFolder = Join-Path $root $candidateKey
+            Lock = Join-Path (Join-Path $root $candidateKey) 'lock'
+            Names = [string[]]@(@($plain) + $Processes | Where-Object { $_ } | Select-Object -Unique)
+        }
+    })
+    $keys = [string[]]@($candidates | ForEach-Object Key)
+    if (@($keys | Select-Object -Unique).Count -ne $keys.Count) { throw "-Pool names one game twice: $($Pool -join ', ')" }
+    $key = $keys[0]
+    $lock = $candidates[0].Lock
+    $whose = $(if ($Pool.Count -gt 1) { "the pool $($keys -join ', ')" } else { "the rig for $key" })
+
+    if ($Token) {
+        $rig = Invoke-GameRigExclusive {
+            $held = Read-GameRigOwner $key
+            if (-not $held -or $held.Token -ne $Token) {
+                throw "the rig for $key is not held under that token$(if ($held) { ': it is held by ' + (Format-GameRigOwner $held) }). The lock this session took is gone."
+            }
+            if ($held.ProcessId -ne $PID -and (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) {
+                throw "the rig for $key is held under that token by a process that is still running (pid $($held.ProcessId)), and it is that one's to release"
+            }
+            $held.ProcessId = $PID
+            $held.ProcessStart = $start
+            ConvertTo-Json $held | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
+            [pscustomobject]@{ Key = $key; Game = $candidates[0].Game; Owner = $held.Owner; Token = $Token; Path = $lock; TakenOverFrom = $null }
+        }
+        # Taken back by token, the rig is on the board already with what it was taken for. Putting it
+        # there again with no -What wiped that a second before every release (2026-10-21 log).
+        if ($What) { Set-GameRigOnBoard -Rig $rig -What $What }
+        return $rig
+    }
+
+    # This session's place in the queue, numbered inside the mutex so no two tickets tie and none
+    # is older than one already there.
+    $ticket = Invoke-GameRigExclusive {
+        New-Item -ItemType Directory -Force (@($candidates | ForEach-Object RigFolder) + $queue) | Out-Null
+        $tickets = @(Get-GameRigTickets)
+        $ticks = [DateTime]::UtcNow.Ticks
+        if ($tickets.Count -gt 0) { $ticks = [Math]::Max($ticks, [long]$tickets[-1].Ticks + 1) }
+        $file = Join-Path $queue ('{0:D20}-{1}.json' -f $ticks, $PID)
+        ConvertTo-Json ([pscustomobject]@{ Ticks = "$ticks"; Key = $key; Keys = $keys; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; WholeGpu = [bool]$WholeGpu }) |
+            Set-Content $file -Encoding UTF8
+        $file
+    }
+    $said = ''
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    try {
+        while ($true) {
+            # One turn: the rig, or what this session is waiting for.
+            $turn = Invoke-GameRigExclusive {
+                # Whoever asked before this session for a game this may take goes first, and a whole-card waiter
+                # once it is first in the queue (below).
+                $tickets = @(Get-GameRigTickets)
+                $ahead = @(foreach ($other in $tickets) {
+                    if ($other.File -eq $ticket) { break }
+                    if ($other.WholeGpu -or $WholeGpu -or @(Get-GameRigTicketKeys $other | Where-Object { $keys -contains $_ }).Count -gt 0) { $other }
+                })
+                $behind = $(if ($ahead.Count -gt 0) { ", and $($ahead.Count) asked before this session" } else { '' })
+                if ($KeptIn -and (Test-Path $KeptIn)) {
+                    $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
+                    $left = Read-GameRigOwner $key
+                    if (-not $left -or $left.Token -ne $kept.Token -or -not (Test-GameRigOwnerLive $left)) {
+                        Remove-Item $KeptIn -Force
+                    } elseif (-not $left.ProcessId -or -not (Test-GameRigProcessAlive -Id $left.ProcessId -Start $left.ProcessStart)) {
+                        # Left with its game, or taken back by a process that died with the game up.
+                        # The lock this file keeps is this caller's already: it is not queued for.
+                        $own = @(Get-GameRigOwnProcesses $left)
+                        if ($own.Count -gt 0) {
+                            $left.ProcessId = $PID
+                            $left.ProcessStart = $start
+                            $left | Add-Member -NotePropertyName Kept -NotePropertyValue $own -Force
+                            $left | Add-Member -NotePropertyName Entered -NotePropertyValue ([DateTime]::UtcNow.ToFileTimeUtc().ToString()) -Force
+                            ConvertTo-Json $left | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
+                            Remove-Item $ticket -Force
+                            return [pscustomobject]@{ Key = $key; Game = $candidates[0].Game; Owner = $left.Owner; Token = $left.Token; Path = $lock; TakenOverFrom = $null; Kept = $own }
+                        }
+                    }
+                }
+                $inUse = [ordered]@{}
+                $stale = @{}
+                $limit = Get-GameRigLimit
+                $machine = [ordered]@{}
+                foreach ($folder in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne '_queue' }) {
+                    $held = Read-GameRigOwner $folder.Name
+                    if (-not $held) { continue }
+                    $live = Test-GameRigOwnerLive $held
+                    if ($live) { $machine[$folder.Name] = $held }
+                    $mine = $keys -contains $folder.Name
+                    if ($mine -and $held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
+                        throw "this process already holds the rig for $($folder.Name) ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
+                    }
+                    # The whole card is every rig, a copy of this session's own pool as much as any
+                    # other game: a copy held beside a free one still has the card.
+                    if ($live -and $WholeGpu -and -not $held.ProcessId) {
+                        # A game left running may stay up for hours, and once a whole-card waiter is first
+                        # everyone who asks after it waits behind it: then this is refused, not queued.
+                        # Before that it holds nobody off, and the game may be stopped before its turn.
+                        if ($ahead.Count -gt 0) { return "the graphics card is in use by a game left running: $($folder.Name) is held by $(Format-GameRigOwner $held)$behind" }
+                        throw "the graphics card is in use by a game left running: $($folder.Name) is held by $(Format-GameRigOwner $held). Stop it, then ask again."
+                    }
+                    if ($live -and ($WholeGpu -or $held.WholeGpu) -and -not ($mine -and $candidates.Count -eq 1)) {
+                        return "the graphics card is in use: $($folder.Name) is held by $(Format-GameRigOwner $held)"
+                    }
+                    if (-not $mine) { continue }
+                    if ($live) {
+                        $orphaned = $(if (-not $held.ProcessId -or (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) { '' } else { ', whose own process has gone while the game runs on' })
+                        $inUse[$folder.Name] = "$(Format-GameRigOwner $held)$orphaned"
+                        continue
+                    }
+                    if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
+                        throw "the last session on $($folder.Name), $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
+                    }
+                    $stale[$folder.Name] = $held
+                }
+                $open = @($candidates | Where-Object { -not $inUse.Contains($_.Key) })
+                if ($open.Count -eq 0) {
+                    if ($candidates.Count -eq 1) { return "the rig is in use: $($inUse[$key])$behind" }
+                    return "every game of $whose is in use: $(@($inUse.Keys | ForEach-Object { "$_ by $($inUse[$_])" }) -join '; ')$behind"
+                }
+                # A whole-card waiter holds off new rigs only once it is next on every rig, which is
+                # once nobody who asked before it is still waiting, so copies are not left idle while
+                # it could not start anyway. The cost is the waiter's: a rig this takes in the
+                # meantime and holds past the moment the waiter comes first holds the waiter up for
+                # as long. It is never starved: no ticket is numbered before one already queued, so
+                # those ahead of it only go, and once it is first no rig is given out until every
+                # held one comes back.
+                $card = @($ahead | Where-Object { $_.WholeGpu -and $_.File -eq $tickets[0].File })
+                if ($card.Count -gt 0) {
+                    return "waiting behind $($card[0].Owner) (pid $($card[0].ProcessId)), who asked first, for the whole graphics card"
+                }
+                # Only those ahead that may take one of the open games compete for them: one asking for
+                # other copies of the pool loses nothing when this takes a copy it cannot have.
+                $openKeys = @($open | ForEach-Object Key)
+                $rivals = @($ahead | Where-Object { $WholeGpu -or (-not $_.WholeGpu -and @(Get-GameRigTicketKeys $_ | Where-Object { $openKeys -contains $_ }).Count -gt 0) })
+                # A pool lets this through beside those rivals only while it has a game for each of them as well.
+                if ($rivals.Count -ge $open.Count) {
+                    return "waiting behind $($rivals[0].Owner) (pid $($rivals[0].ProcessId)), who asked first$(if ($rivals.Count -gt 1) { ", with $($rivals.Count - 1) more ahead of this session" })$(if ($candidates.Count -gt 1) { ", for $whose" })"
+                }
+                $free = @($open | Where-Object { -not @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) })
+                if ($free.Count -eq 0) {
+                    $running = @($open | ForEach-Object { @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) } | Select-Object -Unique)
+                    return "$($running -join ', ') is running and no session holds its rig: someone started it by hand"
+                }
+                if ($free.Count -le $rivals.Count) {
+                    return "waiting behind $($rivals[0].Owner) (pid $($rivals[0].ProcessId)), who asked first, for $whose, of which $($open.Count - $free.Count) is running with no session holding its rig"
+                }
+                if ($limit -gt 0) {
+                    # Whoever asked first, for any game, is served first while the machine has room.
+                    # Only those that could take a game now count, each against a game of its own:
+                    # one whose games are all held, or running with no rig, could not use the room.
+                    $given = @{}
+                    $first = @(foreach ($other in Get-GameRigTickets) {
+                        if ($other.File -eq $ticket) { break }
+                        # A whole-card waiter ahead that is not first takes no room yet, and one that is first stopped this above.
+                        if ($other.WholeGpu) { continue }
+                        $could = @(Get-GameRigTicketKeys $other | Where-Object {
+                            -not $machine.Contains($_) -and -not $given.Contains($_) -and -not (Get-Process -Name $_ -ErrorAction SilentlyContinue)
+                        })
+                        if ($could.Count -gt 0) { $given[$could[0]] = $true; $other }
+                    })
+                    if ($machine.Count -ge $limit) {
+                        return "this machine runs $limit rigs at once and $($machine.Count) are held: $(@($machine.Keys | ForEach-Object { "$_ by $($machine[$_].Owner)" }) -join '; ')$(if ($first.Count -gt 0) { ", and $($first.Count) asked before this session" })"
+                    }
+                    if ($first.Count -ge $limit - $machine.Count) {
+                        return "waiting behind $($first[0].Owner) (pid $($first[0].ProcessId)), who asked first: this machine runs $limit rigs at once and $($machine.Count) are held"
+                    }
+                }
+                # A game that is the only one a session ahead may take is left for it.
+                $reserved = @($rivals | ForEach-Object { $theirs = @(Get-GameRigTicketKeys $_); if ($theirs.Count -eq 1) { $theirs[0] } })
+                $pick = @($free | Where-Object { $reserved -notcontains $_.Key })[0]
+
+                if ($stale.ContainsKey($pick.Key)) { Remove-Item $pick.Lock -Recurse -Force }
+                # The owner's record is written first and the folder renamed into place, which
+                # happens whole or not at all: a lock never exists without its owner.
+                $fresh = Join-Path $pick.RigFolder ('taking-' + [Guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory $fresh | Out-Null
+                $record = [pscustomobject]@{
+                    Key = $pick.Key; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; Since = (Get-Date).ToString('s')
+                    Entered = [DateTime]::UtcNow.ToFileTimeUtc().ToString()
+                    What = $What; Processes = $pick.Names; WholeGpu = [bool]$WholeGpu; StateFolder = $StateFolder
+                    SessionFile = $SessionFile
+                    Token = [Guid]::NewGuid().ToString('N')
+                }
+                ConvertTo-Json $record | Set-Content (Join-Path $fresh 'owner.json') -Encoding UTF8
+                Move-GameRigFolder -From $fresh -To $pick.Lock
+                Remove-Item $ticket -Force
+                [pscustomobject]@{ Key = $pick.Key; Game = $pick.Game; Owner = $Owner; Token = $record.Token; Path = $pick.Lock; TakenOverFrom = $(if ($stale.ContainsKey($pick.Key)) { $stale[$pick.Key] } else { $null }) }
+            }
+            if ($turn -isnot [string]) {
+                if ($StopKept -and $turn.PSObject.Properties['Kept']) {
+                    foreach ($left in @($turn.Kept)) {
+                        if (-not (Test-GameRigProcessAlive -Id $left.Id -Start $left.Start)) { continue }
+                        $process = Get-Process -Id $left.Id -ErrorAction SilentlyContinue
+                        if (-not $process) { continue }
+                        try { Stop-GameProcess -Process $process }
+                        catch { throw "the game left up on $key (pid $($left.Id)) has not stopped, and the rig is held by this process: $_" }
+                    }
+                }
+                if ($turn.TakenOverFrom) {
+                    Write-RigWarning "the rig for $($turn.Key) was still held by $(Format-GameRigOwner $turn.TakenOverFrom), whose process has gone and whose game is not running. It has been taken over. Whatever that session changed and did not save with -StateFolder is as it left it."
+                }
+                Set-GameRigOnBoard -Rig $turn -What $What
+                return $turn
+            }
+            if ($WaitSeconds -le 0) { throw $turn }
+            if ((Get-Date) -ge $deadline) { throw "$turn. Waited $WaitSeconds seconds for $whose." }
+            if ($turn -ne $said) {
+                $said = $turn
+                if ($Waiting) { & $Waiting $turn | Out-RigHost } else { "Enter-GameRig ($($keys -join ', '), $Owner): $turn" | Out-RigHost }
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    } finally {
+        # Gone already when the rig was taken. Left by a wait that ran out or a turn that threw.
+        # Inside the mutex, as every look at the queue is: a ticket that went while another
+        # session was reading the queue made that session's turn throw.
+        Invoke-GameRigExclusive { Remove-Item $ticket -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Exit-GameRig {
+    <#
+    .SYNOPSIS
+    Releases the rig Enter-GameRig returned. Throws, and removes nothing, when the lock is no
+    longer this session's: one another session holds is theirs to release.
+    .DESCRIPTION
+    -KeptIn is for a script that may leave the game running when it ends. While the game runs
+    the lock is not released: it is left with the game, its token is written to that file, and
+    the next run takes it back with Enter-GameRig -KeptIn, from any process. With the game gone
+    the rig is released and the file removed.
+    #>
+    param([Parameter(Mandatory)]$Rig, [string]$KeptIn = '')
+    $kept = Invoke-GameRigExclusive {
+        $held = Read-GameRigOwner $Rig.Key
+        if (-not $held) { throw "the rig for $($Rig.Key) is not held: the lock $($Rig.Owner) took is gone" }
+        if ($held.Token -ne $Rig.Token) { throw "the rig for $($Rig.Key) is held by $(Format-GameRigOwner $held), not by the session releasing it. Left as it is." }
+        if ($held.ProcessId -ne $PID) { throw "the rig for $($Rig.Key) was taken by pid $($held.ProcessId), not by this process. Take it back with Enter-GameRig -Token first." }
+        if ($KeptIn) {
+            # The processes the lock is left with, by id and start time: they alone keep it live.
+            $left = @(Get-GameRigOwnProcesses $held -Started)
+            if ($left.Count -gt 0) {
+                ConvertTo-Json ([pscustomobject]@{ Key = $held.Key; Token = $held.Token; Owner = $held.Owner }) | Set-Content $KeptIn -Encoding UTF8
+                $held | Add-Member -NotePropertyName Kept -NotePropertyValue $left -Force
+                $held | Add-Member -NotePropertyName KeptIn -NotePropertyValue $KeptIn -Force
+                $held.ProcessId = 0
+                $held.ProcessStart = ''
+                ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
+                return [int]$left[0].Id
+            }
+            Remove-Item $KeptIn -Force -ErrorAction SilentlyContinue
+        }
+        # Renamed away first, so the lock goes in one step even when a file in it is slow to delete.
+        $gone = Join-Path (Split-Path -Parent $Rig.Path) ('released-' + [Guid]::NewGuid().ToString('N'))
+        Move-GameRigFolder -From $Rig.Path -To $gone
+        Remove-Item $gone -Recurse -Force
+        $false
+    }
+    # A game left running keeps the rig, and stays on the board with it, for as long as it runs.
+    if ($kept) {
+        $what = $(if ($Rig.PSObject.Properties['BoardWhat']) { $Rig.BoardWhat } else { '' })
+        Set-GameRigOnBoard -Rig $Rig -What $what -While $kept
+    } else {
+        Invoke-GameRigBoard -Arguments @('release', (Get-GameRigBoardName $Rig.Key))
+    }
+}
+
+function Stop-KeptGame {
+    <#
+    .SYNOPSIS
+    Stops the game an earlier run left up with its lock kept in -KeptIn (Exit-GameRig -KeptIn),
+    and releases that lock. For a script that wants the rig from the start, a session through
+    Start-IsolatedGameSession above all, in a repo whose other scripts leave the game running.
+    Does nothing when no lock is kept there, and removes a file whose lock or whose game has gone.
+    .DESCRIPTION
+    Only the processes the lock was left with are stopped, by process id: a game of the same
+    name that someone started since is not touched. While another process has the kept lock
+    taken back this waits for it, -WaitSeconds at most. Throws, stopping nothing, when the kept lock names saved
+    state that was never put back, and when this process itself holds the lock.
+    #>
+    param([Parameter(Mandatory)][string]$Game, [Parameter(Mandatory)][string]$KeptIn, [int]$WaitSeconds = 3600)
+    if (-not (Test-Path $KeptIn)) { return }
+    $key = Get-GameRigKey $Game
+    $held = Invoke-GameRigExclusive {
+        $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
+        $now = Read-GameRigOwner $key
+        if (-not $now -or $now.Token -ne $kept.Token -or -not (Test-GameRigOwnerLive $now)) { Remove-Item $KeptIn -Force; return }
+        $now
+    }
+    if (-not $held) { return }
+    if ($held.ProcessId -eq $PID) { throw "this process holds the rig for $key itself: stop the game it took back and release with Exit-GameRig -KeptIn" }
+    if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
+        throw "the game left up on $key, $(Format-GameRigOwner $held), has files that were never put back. What was saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)' once the game is stopped."
+    }
+    $rig = Enter-GameRig -Game $Game -Owner $held.Owner -KeptIn $KeptIn -StopKept -WaitSeconds $WaitSeconds
+    Exit-GameRig -Rig $rig
+    Remove-Item $KeptIn -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
+# The files a test changes
+# ---------------------------------------------------------------------------
+
+# A session whose runner was killed (a harness reaping the shell it was started from) has lost the
+# console it was started in. A console program started into that console dies before it runs
+# (0xC0000142), and the host's own output throws (0xE9) the moment it asks the console anything.
+# What a session runs or shows on its way out goes through these three, so that a lost console
+# cannot keep the game's files from going back or the rig from being released.
+
+function Invoke-ConsoleProgram {
+    # Runs a console program in a hidden console of its own. Returns its ExitCode, and Output: its
+    # stdout and stderr on one line.
+    param([Parameter(Mandatory)][string]$Path, [string[]]$Arguments = @())
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = $Path
+    $start.Arguments = ($Arguments | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }) -join ' '
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($start)
+    try {
+        $errors = $process.StandardError.ReadToEndAsync()
+        $said = $process.StandardOutput.ReadToEnd() + $errors.Result
+        $process.WaitForExit()
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Output = ($said -replace '\s+', ' ').Trim() }
+    } finally { $process.Dispose() }
+}
+
+function Write-RigWarning {
+    # Write-Warning, or the same line on stderr, which a runner's log redirect still takes, when the
+    # host has lost its console.
+    param([Parameter(Mandatory)][string]$Text)
+    try { Write-Warning $Text }
+    catch [System.Management.Automation.Host.HostException] { [Console]::Error.WriteLine("WARNING: $Text") }
+}
+
+function Out-RigHost {
+    # Out-Host, or stdout when the host has lost its console: what was not shown yet goes there.
+    param([Parameter(ValueFromPipeline)]$InputObject)
+    begin {
+        $shown = { Out-Host }.GetSteppablePipeline()
+        $lost = $false
+        try { $shown.Begin($true) } catch [System.Management.Automation.Host.HostException] { $lost = $true }
+    }
+    process {
+        if (-not $lost) {
+            try { $shown.Process($InputObject); return } catch [System.Management.Automation.Host.HostException] { $lost = $true }
+        }
+        [Console]::Out.Write(($InputObject | Out-String))
+    }
+    end {
+        if (-not $lost) {
+            try { $shown.End() } catch [System.Management.Automation.Host.HostException] { [Console]::Error.WriteLine('WARNING: the host lost its console while it was showing output: what it had not shown yet is lost') }
+        }
+    }
+}
+
+function Invoke-FolderMirror {
+    # robocopy /MIR makes Target the same as Source without ever emptying Target first: a file it
+    # cannot write is tried again, and one that never frees is left as it was with the rest in place.
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Target)
+    $robocopy = (Get-Command robocopy -CommandType Application | Select-Object -First 1).Source
+    $run = Invoke-ConsoleProgram -Path $robocopy -Arguments $Source, $Target, '/MIR', '/R:10', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+    # robocopy answers 1 to 7 for a copy that worked. A negative code is one that never ran.
+    if ($run.ExitCode -lt 0 -or $run.ExitCode -ge 8) { throw "robocopy could not make $Target the same as $Source (exit code $($run.ExitCode)): $($run.Output)" }
+}
+
+function Save-GameTestState {
+    <#
+    .SYNOPSIS
+    Copies the files and folders a test is about to change (the deployed mod, its config, the
+    game's settings, a save folder) into -Folder and records which of them did not exist, so
+    Restore-GameTestState puts every one back exactly, absent ones included. Refuses a folder that
+    already holds a saved state: that one has not been restored yet.
+    .DESCRIPTION
+    -Folders takes whole folders, for what a game writes while it runs: a save folder it adds
+    chunk files to cannot be put back file by file, because the files it added have to go. A
+    folder is copied with everything under it.
+    #>
+    param(
+        [Parameter(Position = 0)][string[]]$Files = @(),
+        [Parameter(Mandatory, Position = 1)][string]$Folder,
+        [string[]]$Folders = @()
+    )
+    if ($Files.Count + $Folders.Count -eq 0) { throw 'Save-GameTestState was given nothing to save: name -Files, -Folders or both' }
+    foreach ($path in $Folders) { if (Test-Path $path -PathType Leaf) { throw "$path is a file: name it under -Files" } }
+    $index = Join-Path $Folder 'state.json'
+    if (Test-Path $index) { throw "$Folder already holds a saved state that was never restored. Restore it first." }
+    New-Item -ItemType Directory -Force $Folder | Out-Null
+    $entries = @(for ($i = 0; $i -lt $Files.Count; $i++) {
+        if (Test-Path $Files[$i] -PathType Container) { throw "$($Files[$i]) is a folder: name it under -Folders" }
+        $existed = Test-Path $Files[$i]
+        if ($existed) { Copy-Item $Files[$i] (Join-Path $Folder "$i.bak") -Force }
+        [pscustomobject]@{ Path = $Files[$i]; Existed = $existed; Copy = "$i.bak" }
+    })
+    $entries += @(for ($i = 0; $i -lt $Folders.Count; $i++) {
+        $existed = Test-Path $Folders[$i]
+        if ($existed) { Invoke-FolderMirror -Source $Folders[$i] -Target (Join-Path $Folder "$i.dir") }
+        [pscustomobject]@{ Path = $Folders[$i]; Existed = $existed; Copy = "$i.dir"; Kind = 'folder' }
+    })
+    ConvertTo-Json @($entries) | Set-Content $index -Encoding UTF8
+}
+
+function Restore-GameTestState {
+    <#
+    .SYNOPSIS
+    Puts back every file and folder Save-GameTestState recorded, removes the ones that did not
+    exist before, and removes the saved state.
+    .DESCRIPTION
+    A folder is mirrored back, never removed and copied again: a file the stopped game still
+    holds is tried for 20 seconds, and if it never frees the folder keeps everything else and
+    this throws. Whenever it throws, the saved state is still in -Folder and it can be run again.
+    -RetrySeconds gives a file the same patience: a game holds its own DLLs open for some seconds
+    after its process has gone.
+    #>
+    param([Parameter(Mandatory, Position = 0)][string]$Folder, [int]$RetrySeconds = 0)
+    $index = Join-Path $Folder 'state.json'
+    # Windows PowerShell hands a JSON array back as one object, so it is unrolled here.
+    $entries = @((Get-Content $index -Raw | ConvertFrom-Json) | ForEach-Object { $_ })
+    foreach ($entry in $entries) {
+        $copy = Join-Path $Folder $entry.Copy
+        if ($entry.PSObject.Properties['Kind'] -and $entry.Kind -eq 'folder') {
+            if ($entry.Existed) { Invoke-FolderMirror -Source $copy -Target $entry.Path }
+            elseif (Test-Path $entry.Path) { Remove-Item $entry.Path -Recurse -Force }
+            continue
+        }
+        $deadline = (Get-Date).AddSeconds($RetrySeconds)
+        while ($true) {
+            try {
+                if ($entry.Existed) { Copy-Item $copy $entry.Path -Force -ErrorAction Stop }
+                elseif ($RetrySeconds -gt 0) { if (Test-Path $entry.Path) { Remove-Item $entry.Path -Force -ErrorAction Stop } }
+                else { Remove-Item $entry.Path -Force -ErrorAction SilentlyContinue }
+                break
+            } catch [UnauthorizedAccessException], [System.IO.IOException] {
+                if ((Get-Date) -ge $deadline) { throw }
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    }
+    Remove-Item $Folder -Recurse -Force
+}
+
+# ---------------------------------------------------------------------------
+# Head poses
+# ---------------------------------------------------------------------------
+
+function Start-TestPoseSender {
+    <#
+    .SYNOPSIS
+    Starts a hidden process that sends OpenTrack packets to the mod's test port at about 60 Hz,
+    easing toward the pose in -PoseFile ("x y z yaw pitch roll": centimetres and degrees). Returns
+    its process id, which is what to stop it by.
+    .DESCRIPTION
+    One long-lived sender per session: a receiver locks onto the first source it hears. The pose is
+    eased and carries a little noise, because a stream of identical packets after a large step is
+    what a frozen tracker looks like.
+    #>
+    param([Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$PoseFile, [int]$Minutes = 120)
+    if ($Port -eq 4242) { throw 'port 4242 is the one real trackers send to; test on Get-ModTestPort' }
+    if (-not (Test-Path $PoseFile)) { Set-Content -Path $PoseFile -Value '0 0 0 0 0 0' -Encoding ASCII }
+    $script = Join-Path $PSScriptRoot 'Send-TestPose.ps1'
+    $process = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"", '-Port', $Port, '-PoseFile', "`"$PoseFile`"", '-Minutes', $Minutes)
+    $process.Id
+}
+
+function Set-TestPose {
+    <#
+    .SYNOPSIS
+    Sets the pose the sender eases toward: centimetres and degrees.
+    #>
+    param([Parameter(Mandatory)][string]$PoseFile, [double]$X = 0, [double]$Y = 0, [double]$Z = 0,
+          [double]$Yaw = 0, [double]$Pitch = 0, [double]$Roll = 0)
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    Set-Content -Path $PoseFile -Encoding ASCII -Value (($X, $Y, $Z, $Yaw, $Pitch, $Roll | ForEach-Object { $_.ToString($culture) }) -join ' ')
+}
+
+# ---------------------------------------------------------------------------
+# Watching the game
+# ---------------------------------------------------------------------------
+
+function Wait-GameLogLine {
+    <#
+    .SYNOPSIS
+    Waits for a line matching -Match in a log the game or the mod is writing, and returns it with
+    its line number. Throws when it has not come within -TimeoutSeconds.
+    .DESCRIPTION
+    -Match is a regular expression, or the text itself with -SimpleMatch. The log is read while
+    its writer holds it open, and need not exist yet. A log an earlier run left behind can hold the
+    line already: delete it before the launch, or pass -After the line number an earlier wait
+    returned to look only below it. With -Session the wait ends as soon as the game has gone, and
+    the error says that is why.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Match,
+        [int]$TimeoutSeconds = 120,
+        [switch]$SimpleMatch,
+        [int]$After = 0,
+        $Session
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        # Looked up before the read, so a line the game wrote as it went is still found.
+        $gone = $Session -and -not (Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue)
+        $lines = @()
+        if (Test-Path $Path -PathType Leaf) {
+            $stream = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            try {
+                $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8, $true)
+                $lines = @($reader.ReadToEnd() -split "\r?\n")
+            } finally { $stream.Dispose() }
+        }
+        for ($i = $After; $i -lt $lines.Count; $i++) {
+            $hit = $(if ($SimpleMatch) { $lines[$i].Contains($Match) } else { $lines[$i] -match $Match })
+            if ($hit) { return [pscustomobject]@{ Line = $lines[$i]; LineNumber = $i + 1 } }
+        }
+        $last = $(if ($lines.Count -gt 0) { "Its last line: $(@($lines | Where-Object { $_ })[-1])" } else { 'It does not exist.' })
+        if ($gone) { throw "the game (pid $($Session.ProcessId)) went before $Path showed '$Match'. $last" }
+        if ((Get-Date) -ge $deadline) { throw "$Path did not show '$Match' within $TimeoutSeconds seconds. $last" }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+function Start-GameProcessSampler {
+    <#
+    .SYNOPSIS
+    Starts a hidden process that writes one CSV row every -IntervalSeconds for a running process:
+    private bytes, working set, dedicated video memory and processor time. Returns the sampler
+    Stop-GameProcessSampler takes. It ends by itself when the process it watches has gone. A file
+    already at -Path is replaced.
+    .DESCRIPTION
+    Columns: time, elapsedSeconds, privateMB, workingSetMB, dedicatedVideoMB, cpuSeconds.
+    dedicatedVideoMB is the sum of Windows' "GPU Process Memory" counters for the process and is
+    empty in a row where Windows had none. cpuSeconds counts from the start of the process over
+    all its threads, so the load between two rows is the difference over the time between them.
+    #>
+    param(
+        [Parameter(Mandatory)][int]$ProcessId,
+        [Parameter(Mandatory)][string]$Path,
+        [double]$IntervalSeconds = 2
+    )
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { throw "no process $ProcessId to sample" }
+    Remove-Item $Path, "$Path.stop" -ErrorAction SilentlyContinue
+    $script = Join-Path $PSScriptRoot 'Sample-GameProcess.ps1'
+    $interval = $IntervalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $sampler = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"", '-ProcessId', $ProcessId, '-Path', "`"$Path`"", '-IntervalSeconds', $interval)
+    $deadline = (Get-Date).AddSeconds(30)
+    while (-not (Test-Path $Path)) {
+        if ($sampler.HasExited) { throw "the sampler ended before it wrote $Path" }
+        if ((Get-Date) -ge $deadline) { Stop-Process -Id $sampler.Id -Force; throw "the sampler did not start writing $Path within 30 seconds" }
+        Start-Sleep -Milliseconds 100
+    }
+    [pscustomobject]@{ SamplerId = $sampler.Id; ProcessId = $ProcessId; Path = $Path; IntervalSeconds = $IntervalSeconds }
+}
+
+function Stop-GameProcessSampler {
+    <#
+    .SYNOPSIS
+    Ends a sampler between two rows, so the CSV never stops in the middle of one, and returns the
+    CSV's path. A sampler that has already ended with its process is not an error.
+    #>
+    param([Parameter(Mandatory)]$Sampler)
+    $process = Get-Process -Id $Sampler.SamplerId -ErrorAction SilentlyContinue
+    if ($process -and $process.ProcessName -eq 'powershell') {
+        Set-Content "$($Sampler.Path).stop" '' -Encoding ASCII
+        # Reading the video memory counter takes about a second, on top of the row's own wait.
+        if (-not $process.WaitForExit([int](($Sampler.IntervalSeconds + 15) * 1000))) {
+            Stop-Process -Id $Sampler.SamplerId -Force
+            Remove-Item "$($Sampler.Path).stop" -ErrorAction SilentlyContinue
+            throw "the sampler (pid $($Sampler.SamplerId)) did not stop when asked and was ended: the last row of $($Sampler.Path) may be cut short"
+        }
+    }
+    $Sampler.Path
+}
+
+# ---------------------------------------------------------------------------
+# A whole session
+# ---------------------------------------------------------------------------
+
+function Save-IsolatedGameSession {
+    <#
+    .SYNOPSIS
+    Writes a session to its SessionFile, for the next process of the same session to read with
+    Get-IsolatedGameSession. Invoke-GameInput does this itself with every script; call it after
+    changing the session by hand (a new ProcessId once a launcher has handed over, a property of
+    the mod's own).
+    #>
+    param([Parameter(Mandatory)]$Session)
+    ConvertTo-Json $Session | Set-Content $Session.SessionFile -Encoding UTF8
+}
+
+function Get-IsolatedGameSession {
+    <#
+    .SYNOPSIS
+    Reads back the session Start-IsolatedGameSession -SessionFile wrote, in a later process.
+    #>
+    param([Parameter(Mandatory)][string]$SessionFile)
+    if (-not (Test-Path $SessionFile)) { throw "no session at ${SessionFile}: nothing was started, or it has been stopped" }
+    Get-Content $SessionFile -Raw | ConvertFrom-Json
+}
+
+function Start-IsolatedGameSession {
+    <#
+    .SYNOPSIS
+    Everything before the first input of a background test, in the order that is safe: takes the
+    game's rig, saves what the test changes, runs -Prepare, sets the test port, starts the pose
+    sender and launches. Returns the session. If any step fails, the game's files are put back
+    and the rig released before the error leaves.
+    .DESCRIPTION
+    Invoke-IsolatedGameSession is this, a script block and Stop-IsolatedGameSession in one call,
+    and is the one to use for a run that fits in one process. Call this and
+    Stop-IsolatedGameSession apart, with -SessionFile, for a session driven over several
+    processes: start, look at a capture, decide what to play next, stop. The rig stays held in
+    between, by the running game.
+
+    The game runs under the guard of Start-IsolatedGame, whose help lists what that means for a
+    rig: the game is ended 30 minutes after the launch unless -GuardMinutes says otherwise, on its
+    first foreground window, and on any change of display mode; a steam:// launch is covered
+    later than an executable; and every name in -Processes is ended with the run, whoever
+    started it.
+
+    -Enter runs with the rig held and nothing saved yet, and is handed the session: take a
+    second lock the game's other users still go by, wait for one of them to finish putting the
+    game's files back. -Leave is its other half, run once the files are back and before the rig is
+    released. It runs when the start fails too, -Enter having thrown included, so it must do
+    nothing where -Enter did nothing. Pass the same block to Stop-IsolatedGameSession.
+
+    -Prepare runs with the rig held and the state saved, before the launch, and is handed the
+    session: build and deploy the dev build, change the game's settings. A build made there cannot
+    land under another session's running game.
+
+    -Slots is for a game kept in several private copies (Enter-GameRig -Pool), in place of
+    -ProcessName. Each slot is a hashtable with the copy's ProcessName and any of Launch,
+    ModFolder, WorkingDirectory, IniPath, Port, Arguments, Environment and StateFolder, each of
+    which replaces the value passed to the session; Launch and ModFolder must come from one or
+    the other. The session takes whichever copy is free first and runs with that slot's values,
+    and carries the slot it took in Slot, whole: a key of the caller's own rides along there. -Launched runs as the game's process appears, before the settling, and is handed
+    the session: start a sampler there to have the process from its first seconds. -IniPath is the mod's config, where -Port is written; it is saved and put back
+    with -Files. -PoseFile starts the pose sender on -Port.
+
+    The session carries Port, PoseFile, Sender (the pose sender's process id), ModFolder,
+    StateFolder, Owner, RigToken, SessionFile and GuardFolder beside what Start-IsolatedGame
+    returns. GuardFolder holds the guard's log and, when it ended the game, guard.verdict. With
+    -SessionFile it is written there as soon as the game's process appears, and the rig's record
+    names the file, so a session whose own process is killed can still be stopped by another:
+    Stop-IsolatedGameSession -SessionFile.
+    #>
+    param(
+        # The game, or -Slots in its place.
+        [string]$ProcessName = '',
+        [string]$Launch = '',
+        [string]$ModFolder = '',
+        # Private copies of the game, of which the session takes whichever is free first (Enter-GameRig -Pool).
+        [hashtable[]]$Slots = @(),
+        # Who is running the test, for the rig's owner record.
+        [Parameter(Mandatory)][string]$Owner,
+        [string]$What = '',
+        # What the test changes: the deployed mod, its config, the game's settings; whole folders the game writes.
+        [string[]]$Files = @(),
+        [string[]]$Folders = @(),
+        # Where they are kept until the session stops. Needed with -Files, -Folders or -IniPath.
+        [string]$StateFolder = '',
+        [scriptblock]$Enter,
+        [scriptblock]$Leave,
+        [scriptblock]$Prepare,
+        [scriptblock]$Launched,
+        [string]$IniPath = '',
+        [int]$Port = 0,
+        [string]$PoseFile = '',
+        # How long the pose sender runs if nothing stops it. The session's end stops it.
+        [int]$PoseSenderMinutes = 120,
+        # The folder to launch from, for a game that finds its data through the working directory.
+        [string]$WorkingDirectory = '',
+        # Environment variables for the launch alone, put back once the game has started.
+        [hashtable]$Environment = @{},
+        [int]$StartTimeoutSeconds = 120,
+        [int]$SettleSeconds = 60,
+        [ValidateSet('native', 'managed')][string]$ModHost = 'native',
+        [string]$HostDll = $script:HostDllBuild,
+        # Other process names that mean the game is still up, for the rig. The guard takes them in as
+        # part of the run (Start-IsolatedGame -Processes): name the launchers the game comes up through,
+        # and only ones that are this game's own. A process of one of these names that the person at
+        # the machine starts during the run is ended with it.
+        [string[]]$Processes = @(),
+        [switch]$WholeGpu,
+        [int]$WaitSeconds = 3600,
+        # Handed each new line the wait for the rig says (Enter-GameRig -Waiting).
+        [scriptblock]$Waiting,
+        [string]$SessionFile = '',
+        # Command-line arguments for the launch (Start-IsolatedGame -Arguments).
+        [string[]]$Arguments = @(),
+        # The guard ends the game this long after the launch, whatever the test is doing
+        # (Start-IsolatedGame -GuardMinutes). A session longer than half an hour has to say so here.
+        [int]$GuardMinutes = 30,
+        # Watch and end only, without the shim (Start-IsolatedGame -NoShim).
+        [switch]$NoShim
+    )
+    # Every way the session can run, each checked before anything is taken: one game, or each slot
+    # with its own values over the ones passed here.
+    $slotted = 'ProcessName', 'Launch', 'ModFolder', 'WorkingDirectory', 'IniPath', 'Port', 'Arguments', 'Environment', 'StateFolder'
+    if ($Slots.Count -gt 0 -and $ProcessName) { throw '-Slots names the game in each slot: leave -ProcessName out' }
+    if ($Slots.Count -eq 0 -and -not ($ProcessName -and $Launch -and $ModFolder)) { throw 'a session needs -ProcessName, -Launch and -ModFolder, or -Slots' }
+    # A session with no slots is one plan whose slot is false: foreach does not go round a $null.
+    $plans = @(foreach ($slot in $(if ($Slots.Count -gt 0) { $Slots } else { $false })) {
+        $plan = @{ Slot = $(if ($slot) { $slot } else { $null }) }
+        foreach ($name in $slotted) { $plan[$name] = (Get-Variable -Name $name -ValueOnly) }
+        if ($slot) {
+            # Keys of the caller's own ride along in the slot, which the session carries whole.
+            foreach ($name in @($slot.Keys | Where-Object { $slotted -contains $_ })) { $plan[$name] = $slot[$name] }
+            if (-not $plan.ProcessName -or -not $plan.Launch -or -not $plan.ModFolder) { throw "every slot needs a ProcessName, a Launch and a ModFolder, of its own or passed to the session: $(@($slot.Keys | ForEach-Object { "$_=$($slot[$_])" }) -join ', ')" }
+        }
+        if (($plan.IniPath -or $PoseFile) -and $plan.Port -eq 0) { throw '-IniPath and -PoseFile need -Port: pass Get-ModTestPort -RepoName <the repo folder>' }
+        $plan.Kept = @($Files + $(if ($plan.IniPath -and $Files -notcontains $plan.IniPath) { $plan.IniPath }) | Where-Object { $_ })
+        $plan.Saves = $plan.Kept.Count + $Folders.Count -gt 0
+        if ($plan.Saves -and -not $plan.StateFolder) { throw '-Files, -Folders and -IniPath need -StateFolder: where what the test changes is kept until it is put back' }
+        $plan
+    })
+    if ($SessionFile -and (Test-Path $SessionFile)) { throw "$SessionFile holds a session that was never stopped. Stop it first (Stop-IsolatedGameSession -SessionFile)." }
+
+    $asking = @{ Owner = $Owner; What = $What; Processes = $Processes; WholeGpu = $WholeGpu; WaitSeconds = $WaitSeconds; SessionFile = $SessionFile; Waiting = $Waiting }
+    if ($Slots.Count -gt 0) {
+        $rig = Enter-GameRig @asking -Pool @($plans | ForEach-Object { $_.ProcessName })
+        $plan = @($plans | Where-Object { (Get-GameRigKey $_.ProcessName) -eq $rig.Key })[0]
+        # The pool said which lock is this session's only now: it names the state to restore before any is saved.
+        if ($plan.Saves) {
+            try { Set-GameRigStateFolder -Rig $rig -StateFolder $plan.StateFolder } catch { Exit-GameRig -Rig $rig; throw }
+        }
+    } else {
+        $plan = $plans[0]
+        $rig = Enter-GameRig @asking -Game $ProcessName -StateFolder $(if ($plan.Saves) { $StateFolder } else { '' })
+    }
+    foreach ($name in $slotted) { Set-Variable -Name $name -Value $plan[$name] }
+    $kept = $plan.Kept
+    $saves = $plan.Saves
+    $session = [pscustomobject]@{
+        ProcessId = 0; ProcessName = $ProcessName; CommandFile = (Join-Path $ModFolder $script:CommandFileName); Sequence = 0
+        HostDll = $(if ($ModHost -eq 'managed') { Join-Path $ModFolder $script:HostDllName } else { $null })
+        ModFolder = $ModFolder; Port = $Port; PoseFile = $PoseFile; Sender = 0
+        StateFolder = $(if ($saves) { $StateFolder } else { '' }); Owner = $Owner; RigToken = $rig.Token; SessionFile = $SessionFile
+        Slot = $plan.Slot
+        GuardFolder = (New-RigGuardFolder -ProcessName $ProcessName)
+    }
+    try {
+        if ($Enter) { & $Enter $session | Out-RigHost }
+        if ($saves) { Save-GameTestState -Files $kept -Folders $Folders -Folder $StateFolder }
+        if ($Prepare) { & $Prepare $session | Out-RigHost }
+        if ($IniPath) { [void](Set-ModTestPort -IniPath $IniPath -Port $Port) }
+        if ($PoseFile) {
+            Set-TestPose -PoseFile $PoseFile
+            $session.Sender = Start-TestPoseSender -Port $Port -PoseFile $PoseFile -Minutes $PoseSenderMinutes
+        }
+        $before = @{}
+        foreach ($name in $Environment.Keys) {
+            $before[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            [Environment]::SetEnvironmentVariable($name, "$($Environment[$name])", 'Process')
+        }
+        if ($WorkingDirectory) { Push-Location $WorkingDirectory }
+        try {
+            # Written before the settling: a session killed in it has left a game someone has to stop.
+            [void](Start-IsolatedGame -ProcessName $ProcessName -Launch $Launch -ModFolder $ModFolder -StartTimeoutSeconds $StartTimeoutSeconds `
+                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll -Arguments $Arguments -Processes $Processes `
+                -GuardMinutes $GuardMinutes -GuardFolder $session.GuardFolder -NoShim:$NoShim -Started {
+                    param($process)
+                    $session.ProcessId = $process.Id
+                    if ($SessionFile) { Save-IsolatedGameSession -Session $session }
+                    if ($Launched) { & $Launched $session | Out-RigHost }
+                })
+        } finally {
+            if ($WorkingDirectory) { Pop-Location }
+            foreach ($name in $before.Keys) { [Environment]::SetEnvironmentVariable($name, $before[$name], 'Process') }
+        }
+        $session
+    } catch {
+        # The first error is the one to report. One from putting things back is said beside it.
+        $failure = $_
+        try { Complete-IsolatedGameSession -Session $session -Rig $rig -Leave $Leave -RestoreRetrySeconds 30 }
+        catch { Write-RigWarning "and the session could not be put back: $_" }
+        throw $failure
+    }
+}
+
+function Complete-IsolatedGameSession {
+    # Stops what the session started and puts back what it changed, in the order of what each
+    # step protects. The game first: nothing is put back under a game that has not gone, so that
+    # alone throws at once and leaves the rig held. Then the game's files, and the rig is
+    # released only once they are back: a restore that fails leaves it held, and Enter-GameRig
+    # then tells the next session what to restore. -Collect and -Leave run whatever the other
+    # did. The host DLL is the least of it, a copy of core's own in the mod folder: one that
+    # will not delete is a warning and never keeps the files from going back or the rig held.
+    param($Session, $Rig, [scriptblock]$Collect, [scriptblock]$Leave, [int]$RestoreRetrySeconds)
+    $failures = New-Object System.Collections.Generic.List[object]
+    $process = $(if ($Session.ProcessId) { Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue })
+    if ($process -and $process.ProcessName -eq $Session.ProcessName) {
+        try { Stop-GameProcess -Process $process }
+        catch { throw "the game (pid $($Session.ProcessId)) has not stopped, so nothing was put back under it and the rig is still held: $_" }
+    }
+    # What is left of the run goes before any file is put back: a launcher that outlives the game
+    # writes the game's files again. A guard that will not stop still ends the run at its limit.
+    if ($Session.PSObject.Properties['GuardFolder'] -and $Session.GuardFolder) {
+        try { Stop-RigGuard -Folder $Session.GuardFolder } catch { $failures.Add($_) }
+    }
+    # With no game started as well: Start-IsolatedGame puts it beside the mod before the launch.
+    Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
+    if ($Session.Sender) {
+        $sender = Get-Process -Id $Session.Sender -ErrorAction SilentlyContinue
+        if ($sender -and $sender.ProcessName -eq 'powershell') { Stop-Process -Id $Session.Sender -Force }
+    }
+    if ($Collect) { try { & $Collect $Session | Out-RigHost } catch { $failures.Add($_) } }
+    if ($Session.StateFolder -and (Test-Path (Join-Path $Session.StateFolder 'state.json'))) {
+        Restore-GameTestState -Folder $Session.StateFolder -RetrySeconds $RestoreRetrySeconds
+    }
+    # The files are back: nothing from here on may keep the rig held.
+    try {
+        if ($Session.HostDll) {
+            $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
+            if ($left) { Write-RigWarning "The session ended as it should, with the game stopped and its files back, and $(Format-HostDllLeft $left)" }
+        }
+        if ($Leave) { try { & $Leave $Session | Out-RigHost } catch { $failures.Add($_) } }
+    } finally { Exit-GameRig -Rig $Rig }
+    if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
+    if ($failures.Count -gt 0) { throw $failures[0] }
+}
+
+function Stop-IsolatedGameSession {
+    <#
+    .SYNOPSIS
+    Ends a session Start-IsolatedGameSession began: stops the game and the pose sender, runs
+    -Collect, puts back every file and folder the session saved, and releases the rig.
+    .DESCRIPTION
+    The game is stopped first, and the stop returns once its process has gone. A game that has
+    not stopped (the stop refused, or the process still there 120 seconds after it) throws at
+    once: nothing is put back under it, and the rig stays held.
+
+    -Collect runs after the game has stopped and before its files are put back, and is handed the
+    session: copy out the logs and the config as the run left them. -Leave runs once the files
+    are back and before the rig is released: the other half of Start-IsolatedGameSession -Enter.
+    Each of the two runs whatever the other did, and the first failure is thrown at the end.
+
+    The host DLL of a -ModHost managed session is removed once the files are back. One that will
+    not delete is a warning that names it and the process that has it, never an error: the
+    session ends as it should, and the next start in that folder is not stopped by it.
+
+    With -SessionFile this also ends a session whose own process was killed: Get-GameRig names
+    the file of the session that holds a rig. It refuses while that process is still running, and
+    leaves the session as it is, its file included, to be stopped once that process has ended.
+
+    A session whose lock is gone (someone removed it, or it was taken over after the game went
+    with nothing saved) is not put back: its pose sender is stopped, its session file removed,
+    and this throws. The game and its files may be another session's by then.
+
+    The rig is released only once the files are back. If the restore fails this throws with the
+    rig still held and the saved state still in the session's StateFolder: run
+    Restore-GameTestState on it. Until then Enter-GameRig refuses the game to everyone, naming
+    that folder.
+
+    A file is tried for -RestoreRetrySeconds, because a game holds its own DLLs for some seconds
+    after its process has gone.
+    #>
+    param(
+        $Session,
+        # In place of -Session, in a later process than the one that started it.
+        [string]$SessionFile = '',
+        [scriptblock]$Collect,
+        [scriptblock]$Leave,
+        [int]$RestoreRetrySeconds = 30
+    )
+    if (-not $Session) {
+        if (-not $SessionFile) { throw 'Stop-IsolatedGameSession needs -Session or -SessionFile' }
+        $Session = Get-IsolatedGameSession -SessionFile $SessionFile
+    }
+    # The process that started or restarted the session is still at it: the session is that one's
+    # until it ends, and nothing of it is touched, so it can be stopped afterwards.
+    $held = Invoke-GameRigExclusive { Read-GameRigOwner (Get-GameRigKey $Session.ProcessName) }
+    if ($held -and $held.Token -eq $Session.RigToken -and $held.ProcessId -ne $PID -and (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) {
+        throw "the session is still in the hands of pid $($held.ProcessId), which is starting or restarting its game. Nothing was stopped or put back: stop it once that process has ended."
+    }
+    if (-not $held -or $held.Token -ne $Session.RigToken) {
+        # Without the rig the game and its files may be another session's by now. What is only
+        # this session's is cleared, so it is not stopped twice.
+        if ($Session.Sender) {
+            $sender = Get-Process -Id $Session.Sender -ErrorAction SilentlyContinue
+            if ($sender -and $sender.ProcessName -eq 'powershell') { Stop-Process -Id $Session.Sender -Force }
+        }
+        if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
+        throw "this session no longer holds the rig, so the game and its files were left alone: $(if ($held) { "the rig is held by $(Format-GameRigOwner $held)" } else { 'the lock it took is gone' })"
+    }
+    # Any other refusal is said as itself and leaves the session whole, its file included, to be stopped again.
+    $rig = Enter-GameRig -Game $Session.ProcessName -Owner $Session.Owner -Token $Session.RigToken
+    Complete-IsolatedGameSession -Session $Session -Rig $rig -Collect $Collect -Leave $Leave -RestoreRetrySeconds $RestoreRetrySeconds
+}
+
+function Invoke-IsolatedGameSession {
+    <#
+    .SYNOPSIS
+    A whole background test round one script block: takes the game's rig, saves what the test
+    changes, launches, runs -Run with the session, then stops the game, puts everything back
+    and releases the rig, on every way out: the block throwing, the game not starting, the rig
+    not coming free in time.
+    .DESCRIPTION
+    Takes what Start-IsolatedGameSession takes, -SessionFile included, and -Collect as
+    Stop-IsolatedGameSession does. Returns what -Run returns. What the block does is the mod's own: the way into a save, the
+    inputs, the poses, the captures.
+
+    When the block throws and the teardown fails as well, the block's error is the one thrown and
+    the teardown's is a warning.
+    #>
+    param(
+        # The game, or -Slots in its place, as Start-IsolatedGameSession takes them.
+        [string]$ProcessName = '',
+        [string]$Launch = '',
+        [string]$ModFolder = '',
+        [hashtable[]]$Slots = @(),
+        [Parameter(Mandatory)][string]$Owner,
+        # Handed the session: Invoke-GameInput, Set-TestPose, Save-GameCapture, Wait-GameLogLine.
+        [Parameter(Mandatory)][scriptblock]$Run,
+        [scriptblock]$Collect,
+        [string]$What = '',
+        [string[]]$Files = @(),
+        [string[]]$Folders = @(),
+        [string]$StateFolder = '',
+        [scriptblock]$Enter,
+        [scriptblock]$Leave,
+        [scriptblock]$Prepare,
+        [scriptblock]$Launched,
+        [string]$IniPath = '',
+        [int]$Port = 0,
+        [string]$PoseFile = '',
+        [int]$PoseSenderMinutes = 120,
+        [string]$WorkingDirectory = '',
+        [hashtable]$Environment = @{},
+        [int]$StartTimeoutSeconds = 120,
+        [int]$SettleSeconds = 60,
+        [ValidateSet('native', 'managed')][string]$ModHost = 'native',
+        [string]$HostDll = $script:HostDllBuild,
+        [string[]]$Processes = @(),
+        [switch]$WholeGpu,
+        [int]$WaitSeconds = 3600,
+        [scriptblock]$Waiting,
+        [string]$SessionFile = '',
+        [int]$RestoreRetrySeconds = 30,
+        [string[]]$Arguments = @(),
+        [int]$GuardMinutes = 30,
+        [switch]$NoShim
+    )
+    $start = @{} + $PSBoundParameters
+    'Run', 'Collect', 'RestoreRetrySeconds' | ForEach-Object { $start.Remove($_) }
+    $session = Start-IsolatedGameSession @start
+    $thrown = $false
+    try {
+        & $Run $session
+    } catch {
+        $thrown = $true
+        throw
+    } finally {
+        try { Stop-IsolatedGameSession -Session $session -Collect $Collect -Leave $Leave -RestoreRetrySeconds $RestoreRetrySeconds }
+        catch {
+            if (-not $thrown) { throw }
+            Write-RigWarning "and the session could not be put back: $_"
+        }
+    }
+}
+
+Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
+    Get-ModTestPort, Copy-IsolatedInputHost, Test-IsolatedInputProcess, Start-RigGuard, Stop-RigGuard, Get-RigGuardVerdict, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
+    Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose,
+    Set-ModTestPort, Get-GameRig, Set-GameRigLimit, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
+    Start-IsolatedGameSession, Stop-IsolatedGameSession, Invoke-IsolatedGameSession, Get-IsolatedGameSession, Save-IsolatedGameSession

@@ -1,0 +1,7 @@
+# Two-state: PositionEnabled true is both. A change to rotation writes PositionEnabled only.
+binds	two-state
+preference	tracking_mode	both	both
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true
+change	tracking_mode	rotation

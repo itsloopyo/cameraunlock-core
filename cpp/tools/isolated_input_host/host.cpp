@@ -1,0 +1,95 @@
+// cameraunlock/dev/isolated_input.h as a DLL, for a mod with no native code of
+// its own to compile the header into. A C# mod's dev build loads it through
+// CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked, which calls the one export.
+//
+// Nothing happens when the DLL is loaded. The start is an export because the
+// caller has to give the command file's path and has to be told when the
+// detours did not go in, and DllMain can do neither.
+
+#include "cameraunlock/logging/file_log.h"
+
+#define CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION
+#include "cameraunlock/dev/isolated_input.h"
+
+#include <cstring>
+#include <filesystem>
+#include <mutex>
+#include <string>
+
+namespace {
+
+// CameraUnlock.Core.Dev.IsolatedInput turns these into its exception messages.
+enum StartResult : int {
+    kStarted = 0,
+    kMinHookFailed = 1,
+    kDetoursFailed = 2,
+    kAlreadyStarted = 3,
+};
+
+std::mutex g_mutex;
+bool g_started = false;
+
+}  // namespace
+
+// Starts isolated input on `commandFile` and logs to
+// CameraUnlockIsolatedInput.log in the same folder.
+extern "C" __declspec(dllexport) int CameraUnlockStartIsolatedInput(const wchar_t* commandFile) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_started) return kAlreadyStarted;
+
+    const std::filesystem::path folder = std::filesystem::path(commandFile).parent_path();
+    cameraunlock::logging::Open((folder / L"CameraUnlockIsolatedInput.log").wstring());
+
+    const MH_STATUS initialised = MH_Initialize();
+    if (initialised != MH_OK) {
+        cameraunlock::logging::Line("isolated input host: MinHook did not initialise: %s", MH_StatusToString(initialised));
+        return kMinHookFailed;
+    }
+    if (!cameraunlock::dev::StartIsolatedInput(commandFile,
+                                               [](const char* text) { cameraunlock::logging::Line("%s", text); })) {
+        cameraunlock::logging::Line("isolated input host: a detour could not be installed, so none is left in");
+        MH_Uninitialize();
+        return kDetoursFailed;
+    }
+    g_started = true;
+    return kStarted;
+}
+
+// Holds a key down (`down` 1) or lets it go (0) for the key state functions alone
+// (cameraunlock::dev::HoldIsolatedKey). For a harness running inside the game that is
+// not a C# mod, which binds it by name. 0 when held, 1 before
+// CameraUnlockStartIsolatedInput has started, 2 for a key code outside 1 to 255.
+extern "C" __declspec(dllexport) int CameraUnlockHoldIsolatedKey(int vk, int down) {
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_started) return 1;
+    }
+    return cameraunlock::dev::HoldIsolatedKey(vk, down != 0) ? 0 : 2;
+}
+
+// Sends one JSON object, UTF-8 with a NUL, to the game link's client
+// (cameraunlock::dev::PublishToGameLink). 0 when sent, 1 when not: nobody is
+// connected, the link is not on, or it was not one line holding an object (logged).
+extern "C" __declspec(dllexport) int CameraUnlockPublishToGameLink(const char* json) {
+    return cameraunlock::dev::PublishToGameLink(json) ? 0 : 1;
+}
+
+// Takes the oldest `mod` command from the game link into `buffer`, UTF-8 with a NUL
+// (cameraunlock::dev::TakeModCommand). Returns its length, 0 when none waits, or
+// minus the size it needs when `size` is too small, in which case it is kept for the
+// next call. kGameLinkMaxLine + 1 is always enough.
+extern "C" __declspec(dllexport) int CameraUnlockTakeModCommand(char* buffer, int size) {
+    static std::mutex lock;
+    static std::string kept;
+    static bool keeping = false;
+    std::lock_guard<std::mutex> guard(lock);
+    if (!keeping) {
+        if (!cameraunlock::dev::TakeModCommand(kept)) return 0;
+        keeping = true;
+    }
+    const int needed = static_cast<int>(kept.size()) + 1;
+    if (size < needed) return -needed;
+    std::memcpy(buffer, kept.c_str(), static_cast<std::size_t>(needed));
+    keeping = false;
+    return needed - 1;
+}

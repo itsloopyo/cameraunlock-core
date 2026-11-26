@@ -1,0 +1,109 @@
+using CameraUnlock.Core.Data;
+
+namespace CameraUnlock.Core.Ads
+{
+    /// <summary>
+    /// The lean split between its two carriers (see <see cref="LeanHandover"/>).
+    /// C# twin of cameraunlock::ads::LeanShares.
+    /// </summary>
+    public struct LeanShares
+    {
+        /// <summary>Moves the rendered view and nothing else.</summary>
+        public Vec3 Camera;
+
+        /// <summary>
+        /// Moves the transform the camera, the arms, the weapon and the round's start point
+        /// all hang off, so the sights stay on the eye and the round leaves from it.
+        /// </summary>
+        public Vec3 Rig;
+    }
+
+    /// <summary>
+    /// Hands the lateral part of a positional lean over from the camera to the rig as the
+    /// sights come up, and back as they come down, riding <see cref="AdsFade"/>. C# twin of
+    /// cameraunlock/ads/lean_handover.h (see the shooter-ads-handling skill, "Carry the
+    /// lateral lean on the rig").
+    /// <para>
+    /// The part of the lean along the aim moves the eye along the sight line, which keeps it
+    /// on the sights, so it stays on the camera in every mode: leaning in brings the sights
+    /// closer. Only the part perpendicular to the aim is handed over.
+    /// </para>
+    /// <para>
+    /// The lean goes in whole and already clamped against the world: the clamp runs once,
+    /// before the split, because the rig carries the muzzle and the start point and an
+    /// unclamped share would shoot through the wall. Both shares come back in the space the
+    /// lean went in, so a mod converts the rig's share through world space when its rig's
+    /// local frame is not the camera's. The two shares sum to the lean, so the eye lands in
+    /// the same place whichever carrier holds it, except where the forward stop holds the eye
+    /// back or, with no rig, the lateral lean eases out.
+    /// </para>
+    /// <para>
+    /// Only the camera's share opens a gap between the eye and the round, so it is the only
+    /// share the aim hook and the reticle are handed.
+    /// </para>
+    /// </summary>
+    public sealed class LeanHandover
+    {
+        private readonly AdsFade _fade = new AdsFade();
+        // Follows the sights alone, true free look or not, for the forward stop.
+        private readonly AdsFade _sightsFade = new AdsFade();
+        private float _forwardStop = float.PositiveInfinity;
+        private bool _rigEngaged;
+
+        /// <summary>
+        /// The eye relief: how far forward of where the game puts the eye the lean may take
+        /// it while the sights are up, so the eye never passes the rear sight or a scope's
+        /// eyepiece. Measured once per game, in metres; a mod that never sets it has no
+        /// stop. It holds in both modes, since the weapon stays put in true free look as
+        /// well, and it eases in and out with the sights rather than stepping.
+        /// </summary>
+        public void SetForwardStop(float metres)
+        {
+            _forwardStop = metres;
+        }
+
+        /// <summary>
+        /// Once per rendered frame the lean is applied. <paramref name="aimForward"/> is the
+        /// unit aim direction in the same space as <paramref name="lean"/>, pointing the way the
+        /// camera looks.
+        /// <paramref name="aiming"/> is the ADS state for this frame, polled rather than
+        /// latched. In true free look the camera keeps the lean through the aim.
+        /// <paramref name="rigAvailable"/> is false wherever the rig must stay where the game
+        /// puts it (mounted in a vehicle seat, say): the lateral lean then eases out on the
+        /// sights instead, and the rig carries nothing.
+        /// </summary>
+        public LeanShares Update(Vec3 lean, Vec3 aimForward, bool aiming, bool trueFreeLook, bool rigAvailable,
+                                 ulong nowMs)
+        {
+            float cameraShare = _fade.Update(aiming && !trueFreeLook, nowMs);
+            float sightsUp = 1.0f - _sightsFade.Update(aiming, nowMs);
+            float alongLength = Vec3.Dot(lean, aimForward);
+            Vec3 lateral = lean - aimForward * alongLength;
+            float kept = alongLength;
+            if (kept > _forwardStop) kept += (_forwardStop - kept) * sightsUp;
+            Vec3 along = aimForward * kept;
+            var shares = new LeanShares
+            {
+                Camera = along + lateral * cameraShare,
+                Rig = rigAvailable ? lateral * (1.0f - cameraShare) : Vec3.Zero,
+            };
+            _rigEngaged = shares.Rig.X != 0.0f || shares.Rig.Y != 0.0f || shares.Rig.Z != 0.0f;
+            return shares;
+        }
+
+        /// <summary>
+        /// Every path that stops the lean - position off, tracking suspended, a menu, a camera
+        /// cut - calls this instead of <see cref="Update"/>. Returns true when the last Update
+        /// left a share on the rig, which the mod then puts back where the game had it,
+        /// because nothing in the game resets it. The next Update starts at the hip.
+        /// </summary>
+        public bool Stop()
+        {
+            bool release = _rigEngaged;
+            _rigEngaged = false;
+            _fade.Reset();
+            _sightsFade.Reset();
+            return release;
+        }
+    }
+}

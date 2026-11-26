@@ -1,0 +1,2148 @@
+#include "cameraunlock/c/cameraunlock.h"
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+#include "cameraunlock/c/host/cameraunlock_host.h"
+#endif
+#ifdef CAMERAUNLOCK_C_TESTING
+#include "cameraunlock/c/testing/cameraunlock_testing.h"
+#endif
+
+#include "cameraunlock/ads/ads_fade.h"
+#include "cameraunlock/ads/aim_mode.h"
+#include "cameraunlock/ads/lean_handover.h"
+#include "cameraunlock/camera/lean_clamp.h"
+#include "cameraunlock/camera/zoom_compensation.h"
+#include "cameraunlock/config/config_owner.h"
+#include "cameraunlock/config/defaults_location.h"
+#include "cameraunlock/config/head_tracking_config_table.h"
+#include "cameraunlock/config/hotkey_codec.h"
+#include "cameraunlock/effects/head_follow_light.h"
+#include "cameraunlock/input/hotkey_poller.h"
+#include "cameraunlock/input/key_binding_registration.h"
+#include "cameraunlock/input/key_bindings.h"
+#include "cameraunlock/logging/file_log.h"
+#include "cameraunlock/os/game_window.h"
+#include "cameraunlock/protocol/udp_receiver.h"
+#include "cameraunlock/time/frame_clock.h"
+#include "cameraunlock/tracking/head_tracking_session.h"
+
+#include <algorithm>
+#include <atomic>
+#include <charconv>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstring>
+#include <exception>
+#include <initializer_list>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <variant>
+#include <vector>
+
+namespace {
+
+using namespace cameraunlock;
+namespace cfg = cameraunlock::config;
+
+static_assert(sizeof(CameraUnlockSettings) == 60, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockFrameInput) == 80 && offsetof(CameraUnlockFrameInput, now_ms) == 8 &&
+                  offsetof(CameraUnlockFrameInput, aim_forward) == 32,
+              "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockFrame) == 96, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockObstruction) == 16, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockLean) == 40, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockConfig) == 76, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockOption) == 40 && offsetof(CameraUnlockOption, min) == 16,
+              "docs/c-interface.md states this layout");
+
+// Everything below lives in objects that are never destroyed. A host's process can end with the
+// receiver's and the poller's threads running, and a destructor that joined them would run
+// while the C runtime is being torn down.
+
+// ---- Errors and the log -----------------------------------------------------------------------
+
+thread_local std::string t_last_error;
+
+struct LogState {
+    std::mutex mutex;
+    std::string pending;
+    bool file = false;
+};
+
+LogState& TheLog() {
+    static LogState* state = new LogState();
+    return *state;
+}
+
+void LogLine(const std::string& line) {
+    LogState& log = TheLog();
+    const std::lock_guard<std::mutex> lock(log.mutex);
+    if (log.file) {
+        logging::Text(line);
+    } else {
+        log.pending.append(line).push_back('\n');
+    }
+}
+
+void LogLines(const std::vector<std::string>& lines) {
+    for (const std::string& line : lines) LogLine(line);
+}
+
+template <class Body>
+std::int32_t Guarded(const char* what, Body&& body) noexcept {
+    std::string reason;
+    try {
+        return body();
+    } catch (const std::exception& failure) {
+        reason = failure.what();
+    } catch (...) {
+        reason = "something that is not a std::exception was thrown";
+    }
+    try {
+        // A call made every frame that fails every frame would write a line a frame. The reason
+        // is always there to be asked for, and the log has it once a second.
+        thread_local std::chrono::steady_clock::time_point logged_at;
+        const std::string failure = std::string(what) + ": " + reason;
+        const auto now = std::chrono::steady_clock::now();
+        if (failure != t_last_error || now - logged_at >= std::chrono::seconds(1)) {
+            logged_at = now;
+            LogLine(failure);
+        }
+        t_last_error = failure;
+    } catch (...) {
+        // Out of memory while recording the reason. Nothing may leave this function but the status.
+    }
+    return CAMERAUNLOCK_ERROR;
+}
+
+void Require(bool held, const char* otherwise) {
+    if (!held) throw std::invalid_argument(otherwise);
+}
+
+template <class Struct>
+void RequireStruct(const Struct* given, const char* name) {
+    if (given == nullptr) throw std::invalid_argument(std::string(name) + " is NULL");
+    if (given->struct_size != sizeof(Struct)) {
+        throw std::invalid_argument(std::string(name) + " is " + std::to_string(sizeof(Struct)) +
+                                    " bytes in this library and its struct_size says " +
+                                    std::to_string(given->struct_size) +
+                                    ": the host and the library are from different builds");
+    }
+}
+
+std::wstring Wide(const char* utf8, const char* name) {
+    if (utf8 == nullptr) throw std::invalid_argument(std::string(name) + " is NULL");
+    const int length = static_cast<int>(std::strlen(utf8));
+    if (length == 0) return std::wstring();
+    const int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, length, nullptr, 0);
+    if (needed <= 0) throw std::invalid_argument(std::string(name) + " is not UTF-8");
+    std::wstring wide(static_cast<std::size_t>(needed), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, length, wide.data(), needed);
+    return wide;
+}
+
+std::int32_t CopyOut(const std::string& text, char* buffer, std::int32_t capacity, bool with_nul) {
+    const std::int32_t length = static_cast<std::int32_t>(text.size());
+    if (buffer != nullptr && capacity >= length + (with_nul ? 1 : 0)) {
+        std::memcpy(buffer, text.data(), text.size());
+        if (with_nul) buffer[length] = '\0';
+    }
+    return length;
+}
+
+bool Finite(const float* values, int count) {
+    for (int i = 0; i < count; ++i) {
+        if (!std::isfinite(values[i])) return false;
+    }
+    return true;
+}
+
+// ---- The session ------------------------------------------------------------------------------
+
+CameraUnlockSettings SettingsOf(const HeadTrackingConfig& config) {
+    const std::optional<TrackingMode> mode = DecodeTrackingMode(config.rotation_enabled, config.position_enabled);
+    if (!mode) throw std::invalid_argument("RotationEnabled and PositionEnabled are both false, which is no tracking mode");
+
+    CameraUnlockSettings settings = {};
+    settings.struct_size = sizeof(settings);
+    settings.tracking_mode = static_cast<std::int32_t>(*mode);
+    settings.aim_mode = static_cast<std::int32_t>(
+        ads::DecodeAimMode(config.true_free_look, config.free_look_marker, config.stock_sights));
+    settings.data_freshness_ms = config.data_freshness_ms;
+    settings.collision_enabled = config.collision_enabled ? 1 : 0;
+    settings.local_smoothing = config.local_smoothing;
+    settings.remote_smoothing = config.remote_smoothing;
+    settings.limit_x = config.position.limit_x;
+    settings.limit_y = config.position.limit_y;
+    settings.limit_y_down = config.position.limit_y_down;
+    settings.limit_z = config.position.limit_z;
+    settings.limit_z_back = config.position.limit_z_back;
+    settings.collision_margin = config.lean_clamp.skin;
+    settings.collision_release_smoothing = config.lean_clamp.release_smoothing;
+    settings.light_multiplier = config.light.multiplier;
+    return settings;
+}
+
+struct PendingLean {
+    math::Vec3 lean;
+    math::Vec3 aim;
+    bool query = false;
+    bool aiming = false;
+    bool rig_available = false;
+    bool free_look = false;
+    float delta_seconds = 0.0f;
+    float forward_stop = 0.0f;
+    std::uint64_t now_ms = 0;
+};
+
+// How a line names a view. View 0 is the session and goes unnamed, so a host with one view reads
+// the lines it always has.
+std::string Named(std::int32_t view) {
+    return view == 0 ? std::string() : " (view " + std::to_string(view) + ")";
+}
+
+// What is one tracker's and one camera's.
+struct View {
+    std::mutex mutex;
+    UdpReceiver receiver;
+    HeadTrackingSession<UdpReceiver> tracking{receiver};
+    // Written under Session::starts and the view's own mutex, so either one reads them.
+    bool started = false;
+    std::int32_t port = 0;
+    CameraUnlockSettings settings = SettingsOf(HeadTrackingConfig{});
+    camera::LeanClamp clamp;
+    ads::LeanHandover handover;
+    ads::AdsFade stock_fade;
+    // How much of the tracker's pose reaches the view: 1 while its packets are fresh, eased to 0
+    // once it goes quiet, so a tracker that was closed leaves the view the game's own.
+    float tracker_share = 1.0f;
+    time::FrameClock clock{std::numeric_limits<float>::max()};
+    std::optional<PendingLean> pending;
+    // A stop or a missed lean let go of a rig that carried a share. The host is told on this
+    // view's next frame that returns, or it would leave the rig offset for good.
+    bool release_rig = false;
+};
+
+struct Session {
+    // Held through a start and a stop, taken before the view's own.
+    std::mutex starts;
+    // Held through a configure, a frame and a lean, taken before the view's own and never with
+    // `starts`: a frame runs on the settings and the tracking mode of one configure, whole, in
+    // every view.
+    std::mutex settings;
+    View views[CAMERAUNLOCK_VIEWS];
+    std::atomic<std::int32_t> aim_mode{CAMERAUNLOCK_AIM_SIGHTS_LOCKED};
+
+    Session() {
+        views[0].receiver.SetLog(&LogLine);
+        for (std::int32_t view = 1; view < CAMERAUNLOCK_VIEWS; ++view) {
+            views[view].receiver.SetLog([view](const std::string& line) { LogLine(line + Named(view)); });
+        }
+#ifdef CAMERAUNLOCK_C_TESTING
+        // A test's tracker is on this machine, and a port open to the network makes Windows ask the
+        // user whether to let each new test executable through the firewall.
+        for (View& view : views) view.receiver.SetLoopbackOnly(true);
+#endif
+    }
+
+    // The tracking mode is every view's. View 0's pipeline keeps it, where core's cycle is, and a
+    // frame of another view takes it from there.
+    HeadTrackingSession<UdpReceiver>& mode() { return views[0].tracking; }
+};
+
+Session*& SessionSlot() {
+    static Session* session = new Session();
+    return session;
+}
+
+Session& TheSession() {
+    return *SessionSlot();
+}
+
+View& ViewAt(Session& session, std::int32_t view) {
+    if (view < 0 || view >= CAMERAUNLOCK_VIEWS) {
+        throw std::invalid_argument("there is no view " + std::to_string(view) + ": the views are 0 to " +
+                                    std::to_string(CAMERAUNLOCK_VIEWS - 1));
+    }
+    return session.views[view];
+}
+
+void RequireSettings(const CameraUnlockSettings& s) {
+    Require(s.tracking_mode >= 0 && s.tracking_mode <= 2, "tracking_mode is not a CAMERAUNLOCK_TRACKING_*");
+    Require(s.aim_mode >= 0 && s.aim_mode <= 3, "aim_mode is not a CAMERAUNLOCK_AIM_*");
+    Require(s.data_freshness_ms >= 1, "data_freshness_ms is below 1");
+    Require(s.local_smoothing >= 0.0f && s.local_smoothing <= 1.0f, "local_smoothing is outside 0 to 1");
+    Require(s.remote_smoothing >= 0.0f && s.remote_smoothing <= 1.0f, "remote_smoothing is outside 0 to 1");
+    // A negative limit turns the clamp's bounds round and pins the view at a fixed offset.
+    const float limits[] = {s.limit_x, s.limit_y, s.limit_y_down, s.limit_z, s.limit_z_back, s.collision_margin};
+    for (const float limit : limits) {
+        Require(std::isfinite(limit) && limit >= 0.0f, "a position limit or the collision margin is negative or not a number");
+    }
+    Require(s.collision_release_smoothing >= 0.0f && s.collision_release_smoothing <= 1.0f,
+            "collision_release_smoothing is outside 0 to 1");
+    Require(s.light_multiplier >= 0.0f && s.light_multiplier <= effects::kMaxLightMultiplier,
+            "light_multiplier is outside 0 to 5");
+}
+
+bool StopLean(View& s) {
+    s.clamp.Reset();
+    return s.handover.Stop();
+}
+
+// A quiet tracker's last pose is eased out over kQuietSeconds and a returning one's eased in over
+// kBackSeconds, both smoothstepped, so neither the loss nor the return is a jump.
+constexpr float kQuietSeconds = 1.0f;
+constexpr float kBackSeconds = 0.5f;
+
+float TrackerShare(View& s, bool fresh, float delta) {
+    s.tracker_share = fresh ? std::min(1.0f, s.tracker_share + delta / kBackSeconds)
+                            : std::max(0.0f, s.tracker_share - delta / kQuietSeconds);
+    const float t = s.tracker_share;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// A view that starts applying again starts from the tracker as it is now: nothing of a pose it
+// sent before it went quiet, and whole while it sends or before it has sent anything.
+void Rest(View& s, CameraUnlockFrame& out) {
+    const bool quiet = s.receiver.GetLastReceiveTimestamp() != 0 && (out.flags & CAMERAUNLOCK_STATE_FRESH) == 0;
+    s.tracker_share = quiet ? 0.0f : 1.0f;
+    s.tracking.ResetTransientState();
+    s.stock_fade.Reset();
+    if (StopLean(s)) out.flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
+}
+
+std::int64_t SteadyMicros() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+camera::LeanObstruction HandBack(void* context, const math::Vec3&, const math::Vec3&, float) {
+    return *static_cast<const camera::LeanObstruction*>(context);
+}
+
+// ---- A view's start, stop, frame and lean -----------------------------------------------------
+
+std::int32_t StartView(std::int32_t view, std::int32_t udp_port) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    Require(udp_port >= 1 && udp_port <= 65535, "udp_port is outside 1 to 65535");
+    const std::lock_guard<std::mutex> starts(session.starts);
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    if (s.started) {
+        throw std::logic_error(view == 0 ? "the session is already started: cameraunlock_session_stop first"
+                                         : "view " + std::to_string(view) + " is already started: cameraunlock_view_stop first");
+    }
+    for (std::int32_t other = 0; other < CAMERAUNLOCK_VIEWS; ++other) {
+        if (other != view && session.views[other].started && session.views[other].port == udp_port) {
+            throw std::invalid_argument("view " + std::to_string(view) + " cannot listen on UDP port " +
+                                        std::to_string(udp_port) + ", which view " + std::to_string(other) +
+                                        " listens on: a port carries one tracker");
+        }
+    }
+    bool bound = false;
+    try {
+        bound = s.receiver.Start(static_cast<std::uint16_t>(udp_port));
+    } catch (...) {
+        // A start that threw part way leaves the view not started and its port free to another.
+        s.receiver.Stop();
+        throw;
+    }
+    s.started = true;
+    s.port = udp_port;
+    // The receiver says why a bind failed and when a later one held. This is the line for
+    // the bind that held at once, so a log always says which of the two happened.
+    if (bound) LogLine("Listening for OpenTrack datagrams on UDP port " + std::to_string(udp_port) + Named(view));
+    return CAMERAUNLOCK_OK;
+}
+
+std::int32_t StopView(std::int32_t view) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    const std::lock_guard<std::mutex> starts(session.starts);
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    s.receiver.Stop();
+    s.started = false;
+    s.pending.reset();
+    s.tracking.ResetTransientState();
+    s.stock_fade.Reset();
+    s.tracker_share = 1.0f;
+    if (StopLean(s)) s.release_rig = true;
+    return CAMERAUNLOCK_OK;
+}
+
+std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, CameraUnlockFrame* out) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    RequireStruct(input, "CameraUnlockFrameInput");
+    RequireStruct(out, "CameraUnlockFrame");
+    const std::lock_guard<std::mutex> settings(session.settings);
+    const std::lock_guard<std::mutex> lock(s.mutex);
+
+    *out = {};
+    out->struct_size = sizeof(*out);
+    out->pose_share = 1.0f;
+    out->zoom_factor = 1.0f;
+
+    if (s.pending) {
+        s.pending.reset();
+        if (StopLean(s)) s.release_rig = true;
+        throw std::logic_error(
+            view == 0 ? "the frame before this one asked for cameraunlock_session_lean, which was not called"
+                      : "the frame of view " + std::to_string(view) +
+                            " before this one asked for cameraunlock_view_lean, which was not called");
+    }
+
+    float delta = input->delta_seconds;
+    Require(std::isfinite(delta) && delta >= 0.0f, "delta_seconds is negative or not a number");
+    std::uint64_t now_ms = input->now_ms;
+    if ((input->flags & CAMERAUNLOCK_FRAME_CLOCK) != 0) {
+        const float measured = s.clock.Tick();
+        delta = measured < delta ? measured : delta;
+        now_ms = static_cast<std::uint64_t>(SteadyMicros() / 1000);
+    }
+    out->delta_seconds = delta;
+    if (s.release_rig) out->flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
+
+    const TrackingMode mode = session.mode().GetMode();
+    // Not on view 0, which keeps the mode: a cycle on another thread between the two would be undone.
+    if (view != 0) s.tracking.SetMode(mode);
+    const ads::AimMode aim_mode = static_cast<ads::AimMode>(session.aim_mode.load());
+    out->tracking_mode = static_cast<std::int32_t>(mode);
+    out->aim_mode = static_cast<std::int32_t>(aim_mode);
+
+    const std::int64_t received = s.receiver.GetLastReceiveTimestamp();
+    if (s.receiver.IsRunning()) out->flags |= CAMERAUNLOCK_STATE_LISTENING;
+    if (s.receiver.IsRemoteConnection()) out->flags |= CAMERAUNLOCK_STATE_REMOTE;
+    if (received != 0 && (SteadyMicros() - received) / 1000 < s.settings.data_freshness_ms) {
+        out->flags |= CAMERAUNLOCK_STATE_FRESH;
+    }
+    {
+        LogState& log = TheLog();
+        const std::lock_guard<std::mutex> log_lock(log.mutex);
+        if (!log.pending.empty()) out->flags |= CAMERAUNLOCK_STATE_LOG;
+    }
+
+    if ((input->flags & CAMERAUNLOCK_FRAME_ACTIVE) == 0) {
+        Rest(s, *out);
+        s.release_rig = false;
+        return CAMERAUNLOCK_OK;
+    }
+    Require(std::isfinite(input->tan_half_fov) && input->tan_half_fov > 0.0f &&
+                std::isfinite(input->tan_half_fov_base) && input->tan_half_fov_base > 0.0f,
+            "tan_half_fov and tan_half_fov_base are not both positive numbers");
+
+    if (!s.tracking.Update(delta)) {
+        Rest(s, *out);
+        s.release_rig = false;
+        return CAMERAUNLOCK_OK;
+    }
+    out->flags |= CAMERAUNLOCK_STATE_POSE;
+
+    const bool aiming = (input->flags & CAMERAUNLOCK_FRAME_AIMING) != 0;
+    const float present = TrackerShare(s, (out->flags & CAMERAUNLOCK_STATE_FRESH) != 0, delta);
+    const float share = present * s.stock_fade.Update(ads::StockSightsEngaged(aim_mode, aiming), now_ms);
+    const float zoom = camera::FovZoomFactor(input->tan_half_fov, input->tan_half_fov_base);
+    out->tracker_share = present;
+    out->pose_share = share;
+    out->zoom_factor = zoom;
+
+    float yaw, pitch, roll;
+    if (mode != TrackingMode::PositionOnly && s.tracking.GetRotation(yaw, pitch, roll)) {
+        out->flags |= CAMERAUNLOCK_STATE_ROTATION;
+        out->head_yaw = yaw;
+        out->head_pitch = pitch;
+        out->head_roll = roll;
+        out->yaw = camera::ScaleAngleForZoom(yaw * share, zoom);
+        out->pitch = camera::ScaleAngleForZoom(pitch * share, zoom);
+        out->roll = roll * present;
+        const effects::HeadEuler light =
+            effects::ScaleHeadEuler({out->yaw, out->pitch, out->roll}, s.settings.light_multiplier);
+        out->light_yaw = light.yaw;
+        out->light_pitch = light.pitch;
+        out->light_roll = light.roll;
+    }
+
+    float x, y, z;
+    const bool has_position = s.tracking.GetPositionOffset(x, y, z);
+    if (has_position) {
+        out->head_x = x;
+        out->head_y = y;
+        out->head_z = z;
+    }
+    if (!has_position || (input->flags & CAMERAUNLOCK_FRAME_LEAN) == 0) {
+        if (StopLean(s)) out->flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
+        s.release_rig = false;
+        return CAMERAUNLOCK_OK;
+    }
+
+    const float* m = input->tracker_to_world;
+    const math::Vec3 aim(input->aim_forward[0], input->aim_forward[1], input->aim_forward[2]);
+    Require(Finite(m, 9) && Finite(input->aim_forward, 3), "tracker_to_world or aim_forward holds something that is not a number");
+    Require(std::fabs(aim.Magnitude() - 1.0f) < 1e-3f, "aim_forward is not unit length");
+    Require(!std::isnan(input->forward_stop), "forward_stop is not a number");
+
+    const math::Vec3 head(x * share, y * share, z * share);
+    const math::Vec3 lean = camera::ScaleLeanForZoom(
+        math::Vec3(m[0] * head.x + m[1] * head.y + m[2] * head.z, m[3] * head.x + m[4] * head.y + m[5] * head.z,
+                   m[6] * head.x + m[7] * head.y + m[8] * head.z),
+        aim, zoom);
+    const float desired = lean.Magnitude();
+
+    PendingLean pending;
+    pending.lean = lean;
+    pending.aim = aim;
+    pending.query = s.settings.collision_enabled != 0 && desired > camera::LeanClamp::kMinimumLean;
+    pending.aiming = aiming;
+    pending.rig_available = (input->flags & CAMERAUNLOCK_FRAME_RIG_AVAILABLE) != 0;
+    pending.free_look = ads::IsFreeLook(aim_mode);
+    pending.delta_seconds = delta;
+    pending.forward_stop = input->forward_stop;
+    pending.now_ms = now_ms;
+    if (pending.query) {
+        out->flags |= CAMERAUNLOCK_STATE_LEAN_QUERY;
+        out->query_direction[0] = lean.x / desired;
+        out->query_direction[1] = lean.y / desired;
+        out->query_direction[2] = lean.z / desired;
+        out->query_reach = desired + s.clamp.Settings().skin;
+    }
+    s.pending = pending;
+    out->flags |= CAMERAUNLOCK_STATE_LEAN;
+    s.release_rig = false;
+    return CAMERAUNLOCK_OK;
+}
+
+std::int32_t LeanOf(std::int32_t view, const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    RequireStruct(out, "CameraUnlockLean");
+    const std::lock_guard<std::mutex> settings(session.settings);
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    if (!s.pending) {
+        throw std::logic_error("no lean is waiting" + (view == 0 ? std::string() : " for view " + std::to_string(view)) +
+                               ": it follows a frame whose flags carry CAMERAUNLOCK_STATE_LEAN, once");
+    }
+    const PendingLean pending = *s.pending;
+    s.pending.reset();
+
+    math::Vec3 lean = pending.lean;
+    if (s.settings.collision_enabled == 0) {
+        s.clamp.Reset();
+    } else {
+        camera::LeanObstruction hit;
+        if (pending.query) {
+            RequireStruct(obstruction, "CameraUnlockObstruction");
+            hit.queried = obstruction->queried != 0;
+            hit.blocked = obstruction->blocked != 0;
+            hit.distance = obstruction->distance;
+            Require(!hit.queried || !hit.blocked || (std::isfinite(hit.distance) && hit.distance >= 0.0f),
+                    "the obstruction's distance is negative or not a number");
+        }
+        lean = s.clamp.Apply(math::Vec3(), pending.lean, pending.delta_seconds, &HandBack, &hit);
+    }
+
+    s.handover.SetForwardStop(pending.forward_stop);
+    const ads::LeanShares shares = s.handover.Update(lean, pending.aim, pending.aiming, pending.free_look,
+                                                     pending.rig_available, pending.now_ms);
+
+    *out = {};
+    out->struct_size = sizeof(*out);
+    if (s.clamp.InContact()) out->flags |= CAMERAUNLOCK_LEAN_CONTACT;
+    if (s.clamp.LastQueryFailed()) out->flags |= CAMERAUNLOCK_LEAN_QUERY_FAILED;
+    out->camera[0] = shares.camera.x;
+    out->camera[1] = shares.camera.y;
+    out->camera[2] = shares.camera.z;
+    out->rig[0] = shares.rig.x;
+    out->rig[1] = shares.rig.y;
+    out->rig[2] = shares.rig.z;
+    out->asked = pending.lean.Magnitude();
+    out->given = lean.Magnitude();
+    return CAMERAUNLOCK_OK;
+}
+
+// ---- The config -------------------------------------------------------------------------------
+
+enum class HostEnum : std::int32_t {};
+using LocalValue = std::variant<bool, std::int32_t, float, HostEnum, std::string>;
+
+struct HostConfig : HeadTrackingConfig {
+    std::vector<LocalValue> locals;
+};
+
+enum class LocalKind { Bool, Int, Float, Enum, Text, Hotkey };
+
+struct LocalRow {
+    LocalKind kind;
+    std::string section;
+    std::string key;
+    std::string comment;
+    std::uint32_t flags = 0;
+    LocalValue start;
+    std::int32_t int_min = 0;
+    std::int32_t int_max = 0;
+    float float_min = 0.0f;
+    float float_max = 0.0f;
+    std::vector<std::string> tokens;
+    std::int32_t hotkey_bit = 0;
+    // What a key of the row answers once held, or 0 for a row whose keys answer as they go down.
+    std::int32_t held_bit = 0;
+    // What a key of the row answers tapped twice, three times and so on, empty for a row that
+    // counts no taps: hotkey_bit is what it answers tapped once.
+    std::vector<std::int32_t> more_tap_bits;
+    // The poller's ids for the row's keys, once cameraunlock_hotkeys_start has put them there.
+    std::vector<int> hotkey_ids;
+};
+
+struct ConceptRow {
+    cfg::schema::Concept id;
+    std::uint32_t flags = 0;
+    std::optional<std::string> comment;
+    std::optional<std::string> start;
+    // For a key list row of cameraunlock_config_concept_hotkey_taps, its bits as LocalRow's, and 0
+    // and empty for every other: one of the fleet's four answers its CAMERAUNLOCK_HOTKEY_*.
+    std::int32_t hotkey_bit = 0;
+    std::int32_t held_bit = 0;
+    std::vector<std::int32_t> more_tap_bits;
+    // The poller's ids for a key list row's keys, as LocalRow's.
+    std::vector<int> hotkey_ids;
+};
+
+struct ConfigState {
+    std::mutex mutex;
+    std::optional<std::string> display_name;
+    std::vector<ConceptRow> concepts;
+    std::vector<LocalRow> locals;
+    std::unique_ptr<cfg::ConfigOwner<HostConfig>> owner;
+    // The table the owner was given, for the options, which are places in it.
+    std::optional<cfg::ConfigTable<HostConfig>> table;
+    HostConfig loaded;
+    // Written under the mutex, and read without it by cameraunlock_hotkeys_drop.
+    std::atomic<input::HotkeyPoller*> poller{nullptr};
+    // The keys of cameraunlock_hotkeys_leave_out: no row's entry with one of them as its key is on the poller.
+    std::vector<int> left_out;
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+    // Where the DLL starts the poller's thread: a start that threw first leaves it unpolled.
+    bool polled = false;
+#endif
+    std::atomic<std::int32_t> pressed{0};
+};
+
+ConfigState& TheConfig() {
+    static ConfigState* state = new ConfigState();
+    return *state;
+}
+
+void RequireDescribing(const ConfigState& c) {
+    if (!c.display_name) throw std::logic_error("cameraunlock_config_describe has not run");
+    if (c.owner) throw std::logic_error("the file is loaded, and its rows are settled");
+}
+
+void RequireLoaded(const ConfigState& c) {
+    if (!c.owner) throw std::logic_error("cameraunlock_config_load has not run");
+}
+
+template <class Value>
+auto Getter(std::size_t row) {
+    return [row](const HostConfig& c) { return std::get<Value>(c.locals[row]); };
+}
+
+template <class Value>
+auto Setter(std::size_t row) {
+    return [row](HostConfig& c, Value value) { c.locals[row] = std::move(value); };
+}
+
+cfg::ConfigTable<HostConfig> BuildTable(const ConfigState& c) {
+    if (!c.display_name) throw std::logic_error("cameraunlock_config_describe has not run");
+
+    HostConfig defaults;
+    for (const LocalRow& row : c.locals) defaults.locals.push_back(row.start);
+    std::vector<cfg::schema::Concept> ids;
+    for (const ConceptRow& row : c.concepts) ids.push_back(row.id);
+    cfg::ConfigTable<HostConfig> table = cfg::HeadTrackingConfigTableFrom<HostConfig>(ids, std::move(defaults));
+
+    for (const ConceptRow& row : c.concepts) {
+        table.Select(row.id);
+        if (row.comment) table.Comment(row.comment->c_str());
+        if ((row.flags & CAMERAUNLOCK_ROW_PER_GAME) != 0) {
+            if (row.start) {
+                table.PerGame(*row.start);
+            } else {
+                table.PerGame();
+            }
+        } else if (row.start) {
+            table.Default(*row.start);
+        }
+        if ((row.flags & CAMERAUNLOCK_ROW_WRITABLE) != 0) table.Writable();
+    }
+
+    for (std::size_t i = 0; i < c.locals.size(); ++i) {
+        const LocalRow& row = c.locals[i];
+        const char* section = row.section.c_str();
+        const char* key = row.key.c_str();
+        const char* comment = row.comment.c_str();
+        switch (row.kind) {
+            case LocalKind::Bool:
+                table.Local(section, key, Getter<bool>(i), Setter<bool>(i), cfg::BoolCodec(), comment);
+                break;
+            case LocalKind::Int:
+                table.Local(section, key, Getter<std::int32_t>(i), Setter<std::int32_t>(i),
+                            cfg::IntCodec<std::int32_t>(row.int_min, row.int_max), comment);
+                break;
+            case LocalKind::Float:
+                table.Local(section, key, Getter<float>(i), Setter<float>(i),
+                            cfg::FloatCodec(row.float_min, row.float_max), comment);
+                break;
+            case LocalKind::Enum: {
+                std::vector<cfg::EnumToken<HostEnum>> tokens;
+                for (std::size_t t = 0; t < row.tokens.size(); ++t) {
+                    tokens.push_back({row.tokens[t], static_cast<HostEnum>(t)});
+                }
+                table.Local(section, key, Getter<HostEnum>(i), Setter<HostEnum>(i),
+                            cfg::EnumCodec<HostEnum>(std::move(tokens)), comment);
+                break;
+            }
+            case LocalKind::Text:
+                table.Local(section, key, Getter<std::string>(i), Setter<std::string>(i), cfg::StringCodec(), comment);
+                break;
+            case LocalKind::Hotkey:
+                table.Local(section, key, Getter<std::string>(i), Setter<std::string>(i), cfg::HotkeyCodec(), comment);
+                break;
+        }
+        if ((row.flags & CAMERAUNLOCK_ROW_WRITABLE) != 0) table.Writable();
+    }
+    return table;
+}
+
+// Under the config's mutex.
+std::int32_t AddLocal(ConfigState& c, const char* section, const char* key, const char* comment, std::uint32_t flags,
+                      LocalRow row) {
+    RequireDescribing(c);
+    Require(section != nullptr && key != nullptr && comment != nullptr, "a local row needs a section, a key and a comment");
+    Require((flags & ~(CAMERAUNLOCK_ROW_WRITABLE | CAMERAUNLOCK_ROW_LIVE)) == 0,
+            "a local row takes CAMERAUNLOCK_ROW_WRITABLE and CAMERAUNLOCK_ROW_LIVE only");
+    row.section = section;
+    row.key = key;
+    row.comment = comment;
+    row.flags = flags;
+    c.locals.push_back(std::move(row));
+    try {
+        BuildTable(c);
+    } catch (...) {
+        c.locals.pop_back();
+        throw;
+    }
+    return static_cast<std::int32_t>(c.locals.size() - 1);
+}
+
+const LocalRow& LocalAt(const ConfigState& c, std::int32_t row) {
+    if (row < 0 || static_cast<std::size_t>(row) >= c.locals.size()) {
+        throw std::invalid_argument("there is no local row " + std::to_string(row));
+    }
+    return c.locals[static_cast<std::size_t>(row)];
+}
+
+// The owner refuses a change to a row that is not Writable, but a field with no row at all would
+// save nothing and still answer SAVED.
+void RequireConcepts(const ConfigState& c, std::initializer_list<cfg::schema::Concept> ids) {
+    for (const cfg::schema::Concept id : ids) {
+        bool described = false;
+        for (const ConceptRow& row : c.concepts) described = described || row.id == id;
+        if (!described) {
+            throw std::logic_error(std::string("the mod did not describe the ") +
+                                   cfg::schema::kConcepts[static_cast<std::size_t>(id)].name + " row, so it cannot be saved");
+        }
+    }
+}
+
+std::int32_t Save(ConfigState& c, const std::function<void(HostConfig&)>& change) {
+    RequireLoaded(c);
+    const cfg::ConfigSaveResult saved = c.owner->Save(change);
+    LogLines(saved.log);
+    if (saved.status != cfg::ConfigSaveStatus::Saved) LogLine(saved.reason);
+    // The session runs on the new value whether or not the file took it, so it is what an option reads.
+    change(c.loaded);
+    return static_cast<std::int32_t>(saved.status);
+}
+
+// Under the config's mutex.
+cfg::ConfigOption OptionAt(const ConfigState& c, std::int32_t option) {
+    RequireLoaded(c);
+    const std::vector<cfg::ConfigOption> options = c.table->Options();
+    if (option < 0 || static_cast<std::size_t>(option) >= options.size()) {
+        throw std::invalid_argument("there is no option " + std::to_string(option));
+    }
+    return options[static_cast<std::size_t>(option)];
+}
+
+void RequireHotkeyBit(std::int32_t bit, const char* otherwise) {
+    Require(bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (bit & (bit - 1)) == 0, otherwise);
+}
+
+// Under the config's mutex. Whether a row of the description, a local one or a key list concept,
+// already answers `bit`.
+bool BitTaken(const ConfigState& c, std::int32_t bit) {
+    const auto answers = [bit](std::int32_t hotkey_bit, std::int32_t held_bit, const std::vector<std::int32_t>& taps) {
+        return hotkey_bit == bit || held_bit == bit || std::find(taps.begin(), taps.end(), bit) != taps.end();
+    };
+    for (const LocalRow& other : c.locals) {
+        if (answers(other.hotkey_bit, other.held_bit, other.more_tap_bits)) return true;
+    }
+    for (const ConceptRow& other : c.concepts) {
+        if (other.hotkey_bit != 0 && answers(other.hotkey_bit, other.held_bit, other.more_tap_bits)) return true;
+    }
+    return false;
+}
+
+// Under the config's mutex. Refuses bits another row answers.
+void RequireBitsFree(const ConfigState& c, std::int32_t hotkey_bit, std::int32_t held_bit,
+                     const std::vector<std::int32_t>& more_tap_bits) {
+    if (BitTaken(c, hotkey_bit)) {
+        throw std::invalid_argument(more_tap_bits.empty() ? "hotkey_bit is another row's" : "a bit of tap_bits is another row's");
+    }
+    for (const std::int32_t tap : more_tap_bits) {
+        if (BitTaken(c, tap)) throw std::invalid_argument("a bit of tap_bits is another row's");
+    }
+    if (held_bit != 0 && BitTaken(c, held_bit)) throw std::invalid_argument("held_bit is another row's");
+}
+
+// The tap and held bits a row of cameraunlock_config_*hotkey_taps is given, checked.
+std::vector<std::int32_t> TapBits(const std::int32_t* tap_bits, std::int32_t taps, std::int32_t held_bit,
+                                  const char* one_tap_call) {
+    Require(tap_bits != nullptr, "tap_bits is NULL");
+    if (taps < 2 || taps > CAMERAUNLOCK_MOST_TAPS) {
+        throw std::invalid_argument(std::string("taps is not 2 to CAMERAUNLOCK_MOST_TAPS: one tap and a hold is ") + one_tap_call);
+    }
+    std::int32_t all = 0;
+    for (std::int32_t i = 0; i < taps; ++i) {
+        RequireHotkeyBit(tap_bits[i], "a bit of tap_bits is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        Require((all & tap_bits[i]) == 0, "two of tap_bits are one bit, and each number of taps has to be told apart");
+        all |= tap_bits[i];
+    }
+    RequireHotkeyBit(held_bit, "held_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+    Require((all & held_bit) == 0, "held_bit is one of tap_bits, and taps and a hold have to be told apart");
+    return std::vector<std::int32_t>(tap_bits, tap_bits + taps);
+}
+
+// Under the config's mutex. `held_bit` is 0 for a row that has none, and `more_tap_bits` empty
+// for one that counts no taps.
+std::int32_t AddHotkeyRow(ConfigState& c, const char* key, const char* comment, std::uint32_t flags,
+                          const char* default_keys, std::int32_t hotkey_bit, std::int32_t held_bit,
+                          std::vector<std::int32_t> more_tap_bits) {
+    RequireBitsFree(c, hotkey_bit, held_bit, more_tap_bits);
+    const cfg::CodecParseResult<std::string> parsed = cfg::HotkeyCodec().Parse(default_keys);
+    if (!parsed.ok()) throw std::invalid_argument(std::string(default_keys) + ": " + parsed.error);
+    LocalRow row{LocalKind::Hotkey};
+    row.start = parsed.value;
+    row.hotkey_bit = hotkey_bit;
+    row.held_bit = held_bit;
+    row.more_tap_bits = std::move(more_tap_bits);
+    return AddLocal(c, "Hotkeys", key, comment, flags, std::move(row));
+}
+
+// The key list concepts: each one's keys in the config, and the bit they answer as a key goes down,
+// 0 for one with no bit of the fleet's, which is on the poller only as a row of
+// cameraunlock_config_concept_hotkey_taps.
+struct FleetKeyRow {
+    cfg::schema::Concept id;
+    std::string HeadTrackingConfig::*keys;
+    std::int32_t bit;
+};
+
+const FleetKeyRow kFleetKeys[] = {
+    {cfg::schema::Concept::ToggleKey, &HeadTrackingConfig::toggle_key_name, CAMERAUNLOCK_HOTKEY_TOGGLE},
+    {cfg::schema::Concept::CycleTrackingModeKey, &HeadTrackingConfig::cycle_tracking_mode_key_name,
+     CAMERAUNLOCK_HOTKEY_CYCLE_TRACKING_MODE},
+    {cfg::schema::Concept::YawModeKey, &HeadTrackingConfig::yaw_mode_key_name, CAMERAUNLOCK_HOTKEY_YAW_MODE},
+    {cfg::schema::Concept::TrueFreeLookKey, &HeadTrackingConfig::true_free_look_key_name, CAMERAUNLOCK_HOTKEY_AIM_MODE},
+    {cfg::schema::Concept::FirstPersonKey, &HeadTrackingConfig::first_person_key_name, 0},
+};
+
+const FleetKeyRow* FleetKeyOf(cfg::schema::Concept id) {
+    for (const FleetKeyRow& row : kFleetKeys) {
+        if (row.id == id) return &row;
+    }
+    return nullptr;
+}
+
+const char* ConceptName(cfg::schema::Concept id) {
+    return cfg::schema::kConcepts[static_cast<std::size_t>(id)].name;
+}
+
+// Under the config's mutex. The concept row of the description by its name in data/config-schema.json.
+ConceptRow& DescribedConcept(ConfigState& c, const char* name) {
+    Require(name != nullptr, "name is NULL");
+    const auto described = std::find_if(c.concepts.begin(), c.concepts.end(),
+                                        [&](const ConceptRow& row) { return std::strcmp(ConceptName(row.id), name) == 0; });
+    if (described == c.concepts.end()) throw std::invalid_argument(std::string(name) + " is not a concept row of the description");
+    return *described;
+}
+
+// A key list concept row as the poller takes it: one of the fleet's four answers its bit as a key
+// goes down, and one of cameraunlock_config_concept_hotkey_taps the bits it was given. Its
+// hotkey_bit is 0 for a row that is not on the poller.
+LocalRow FleetKey(const FleetKeyRow& fleet, const ConceptRow& described) {
+    LocalRow row{LocalKind::Hotkey};
+    row.key = ConceptName(fleet.id);
+    row.hotkey_bit = described.hotkey_bit != 0 ? described.hotkey_bit : fleet.bit;
+    row.held_bit = described.held_bit;
+    row.more_tap_bits = described.more_tap_bits;
+    return row;
+}
+
+// A row's key list on the poller, as the kind of row its bits make it, less the entries
+// cameraunlock_hotkeys_leave_out left out. Answers the poller's ids for it.
+std::vector<int> Register(ConfigState& c, input::HotkeyPoller& poller, const LocalRow& row, const std::string& keys) {
+    if (row.hotkey_bit == 0) return {};
+    input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
+    if (!parsed.ok()) throw std::runtime_error(row.key + "=" + keys + ": " + parsed.error);
+    parsed.bindings.erase(std::remove_if(parsed.bindings.begin(), parsed.bindings.end(),
+                                         [&c](const input::KeyBinding& binding) {
+                                             return std::find(c.left_out.begin(), c.left_out.end(), binding.vk) !=
+                                                    c.left_out.end();
+                                         }),
+                          parsed.bindings.end());
+    std::atomic<std::int32_t>* pressed = &c.pressed;
+    const auto answer = [pressed](std::int32_t bit) { return [pressed, bit] { pressed->fetch_or(bit); }; };
+    if (!row.more_tap_bits.empty()) {
+        std::vector<std::function<void()>> taps{answer(row.hotkey_bit)};
+        for (const std::int32_t tap : row.more_tap_bits) taps.push_back(answer(tap));
+        return input::RegisterTapKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, CAMERAUNLOCK_TAP_GAP_MS, taps,
+                                             answer(row.held_bit));
+    }
+    if (row.held_bit != 0) {
+        return input::RegisterHoldKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, answer(row.hotkey_bit),
+                                              answer(row.held_bit));
+    }
+    return input::RegisterKeyBindings(poller, parsed.bindings, answer(row.hotkey_bit));
+}
+
+// Under the config's mutex. A key list the host saved goes on the poller in place of the row's old
+// one, where cameraunlock_hotkeys_start has run, so the new keys work at once and the old ones stop.
+void Reregister(ConfigState& c, const LocalRow& row, std::vector<int>& ids, const std::string& keys) {
+    input::HotkeyPoller* poller = c.poller.load();
+    if (poller == nullptr) return;
+    for (const int id : ids) poller->RemoveHotkey(id);
+    ids = Register(c, *poller, row, keys);
+    // The player has most likely just pressed the new key to choose it.
+    poller->DisarmPresses();
+}
+
+// The canonical text of a key list a host hands in for a row.
+std::string CanonicalKeys(const std::string& row, const char* keys) {
+    Require(keys != nullptr, "keys is NULL");
+    const cfg::CodecParseResult<std::string> parsed = cfg::HotkeyCodec().Parse(keys);
+    if (!parsed.ok()) throw std::invalid_argument(row + "=" + keys + ": " + parsed.error);
+    return parsed.value;
+}
+
+// `text`, which is UTF-8, as a JSON string.
+std::string JsonText(std::string_view text) {
+    std::string json = "\"";
+    for (const char c : text) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (c == '"' || c == '\\') {
+            json.append("\\").push_back(c);
+        } else if (c == '\n') {
+            json += "\\n";
+        } else if (c == '\t') {
+            json += "\\t";
+        } else if (byte < 0x20) {
+            const char hex[] = "0123456789abcdef";
+            json.append("\\u00").push_back(hex[byte >> 4]);
+            json.push_back(hex[byte & 0xF]);
+        } else {
+            json.push_back(c);
+        }
+    }
+    return json + "\"";
+}
+
+std::string JsonNumber(double value) {
+    char text[32];
+    const std::to_chars_result written = std::to_chars(text, text + sizeof(text), value);
+    return std::string(text, written.ptr);
+}
+
+// Under the config's mutex. What cameraunlock_config_schema answers.
+std::string SchemaJson(const ConfigState& c) {
+    const cfg::ConfigTable<HostConfig> table = BuildTable(c);
+    cfg::RenderHeader header;
+    header.display_name = *c.display_name;
+    // Throws for a description that renders no fresh file, whose rows these would not be.
+    cfg::RenderCanonicalFresh(table, header);
+
+    std::string json = "{\"schema\":1,\"file\":\"CameraUnlock.ini\",\"rows\":[";
+    bool first = true;
+    for (const cfg::detail::RowDescription& row : cfg::detail::DescribeRows(table)) {
+        // A fresh file holds an Engine row as a comment, and a row edit finds no key in one.
+        if (row.engine) continue;
+        const std::string name = "[" + row.section + "] " + row.key;
+        const char* kind = nullptr;
+        switch (row.kind) {
+            case cfg::detail::RowKind::kBool: kind = "bool"; break;
+            case cfg::detail::RowKind::kInt: kind = "int"; break;
+            case cfg::detail::RowKind::kFloat: kind = "float"; break;
+            case cfg::detail::RowKind::kEnum: kind = "enum"; break;
+            case cfg::detail::RowKind::kText: kind = "text"; break;
+            case cfg::detail::RowKind::kHotkeys: kind = "hotkeys"; break;
+            case cfg::detail::RowKind::kOther:
+                throw std::invalid_argument(name + " holds neither a bool, a whole number, a float, a word from a list, "
+                                                   "text nor a key list, and the schema has a kind for nothing else");
+        }
+        if (row.kind == cfg::detail::RowKind::kText) Wide(row.default_text.c_str(), ("the default of " + name).c_str());
+        std::string help;
+        for (const std::string& line : row.comment) help += (help.empty() ? "" : "\n") + line;
+        const auto local = std::find_if(c.locals.begin(), c.locals.end(), [&](const LocalRow& described) {
+            return described.section == row.section && described.key == row.key;
+        });
+        const bool live = local != c.locals.end() && (local->flags & CAMERAUNLOCK_ROW_LIVE) != 0;
+
+        json += first ? "{" : ",{";
+        first = false;
+        json += "\"section\":" + JsonText(row.section) + ",\"key\":" + JsonText(row.key) + ",\"label\":" + JsonText(row.label) +
+                ",\"help\":" + JsonText(help) + ",\"kind\":\"" + kind + "\",\"default\":" + JsonText(row.default_text) +
+                ",\"follows_defaults\":" + (row.follows_defaults ? "true" : "false") + ",\"live\":" + (live ? "true" : "false") +
+                ",\"writable\":" + (row.writable ? "true" : "false");
+        if (row.kind == cfg::detail::RowKind::kInt) {
+            json += ",\"min\":" + std::to_string(static_cast<long long>(row.min)) +
+                    ",\"max\":" + std::to_string(static_cast<long long>(row.max));
+        } else if (row.kind == cfg::detail::RowKind::kFloat) {
+            json += ",\"min\":" + JsonNumber(row.min) + ",\"max\":" + JsonNumber(row.max);
+        } else if (row.kind == cfg::detail::RowKind::kEnum) {
+            json += ",\"choices\":[";
+            for (std::size_t i = 0; i < row.tokens.size(); ++i) json += (i == 0 ? "" : ",") + JsonText(row.tokens[i]);
+            json += "]";
+        }
+        json += "}";
+    }
+    return json + "]}";
+}
+
+}  // namespace
+
+// ---- Exports ----------------------------------------------------------------------------------
+
+std::int32_t cameraunlock_abi(void) {
+    return CAMERAUNLOCK_ABI;
+}
+
+std::int32_t cameraunlock_struct_size(std::int32_t which) {
+    return Guarded("cameraunlock_struct_size", [&] {
+        constexpr std::size_t sizes[] = {sizeof(CameraUnlockSettings), sizeof(CameraUnlockFrameInput),
+                                         sizeof(CameraUnlockFrame),    sizeof(CameraUnlockObstruction),
+                                         sizeof(CameraUnlockLean),     sizeof(CameraUnlockConfig),
+                                         sizeof(CameraUnlockOption)};
+        Require(which >= 0 && which < static_cast<std::int32_t>(std::size(sizes)), "which is not a CAMERAUNLOCK_STRUCT_*");
+        return static_cast<std::int32_t>(sizes[which]);
+    });
+}
+
+std::int32_t cameraunlock_last_error(char* buffer, std::int32_t capacity) {
+    return CopyOut(t_last_error, buffer, capacity, true);
+}
+
+std::int32_t cameraunlock_log_open(const char* path) {
+    return Guarded("cameraunlock_log_open", [&] {
+        const std::wstring file = Wide(path, "path");
+        LogState& log = TheLog();
+        const std::lock_guard<std::mutex> lock(log.mutex);
+        if (log.file) throw std::logic_error("the log is already open");
+        logging::Open(file);
+        if (!logging::IsOpen()) {
+            throw std::runtime_error(std::string(path) + " could not be created or written to");
+        }
+        log.file = true;
+        std::size_t start = 0;
+        while (start < log.pending.size()) {
+            const std::size_t end = log.pending.find('\n', start);
+            logging::Text(log.pending.substr(start, end - start));
+            start = end + 1;
+        }
+        log.pending.clear();
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_log_write(const char* line) {
+    return Guarded("cameraunlock_log_write", [&] {
+        Require(line != nullptr, "line is NULL");
+        LogState& log = TheLog();
+        const std::lock_guard<std::mutex> lock(log.mutex);
+        if (!log.file) throw std::logic_error("cameraunlock_log_open has not run");
+        logging::Text(line);
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_log_take(char* buffer, std::int32_t capacity) {
+    LogState& log = TheLog();
+    const std::lock_guard<std::mutex> lock(log.mutex);
+    const std::int32_t length = CopyOut(log.pending, buffer, capacity, false);
+    if (buffer != nullptr && capacity >= length) log.pending.clear();
+    return length;
+}
+
+std::int32_t cameraunlock_settings_defaults(CameraUnlockSettings* out) {
+    return Guarded("cameraunlock_settings_defaults", [&] {
+        RequireStruct(out, "CameraUnlockSettings");
+        *out = SettingsOf(HeadTrackingConfig{});
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_session_configure(const CameraUnlockSettings* settings) {
+    return Guarded("cameraunlock_session_configure", [&] {
+        RequireStruct(settings, "CameraUnlockSettings");
+        RequireSettings(*settings);
+        PositionSettings position;
+        position.limit_x = settings->limit_x;
+        position.limit_y = settings->limit_y;
+        position.limit_y_down = settings->limit_y_down;
+        position.limit_z = settings->limit_z;
+        position.limit_z_back = settings->limit_z_back;
+        camera::LeanClampSettings clamp;
+        clamp.skin = settings->collision_margin;
+        clamp.release_smoothing = settings->collision_release_smoothing;
+        Session& session = TheSession();
+        const std::lock_guard<std::mutex> configuring(session.settings);
+        for (View& s : session.views) {
+            const std::lock_guard<std::mutex> lock(s.mutex);
+            s.settings = *settings;
+            s.tracking.SetLocalSmoothing(settings->local_smoothing);
+            s.tracking.SetRemoteSmoothing(settings->remote_smoothing);
+            s.tracking.SetPositionSettings(position);
+            s.clamp.SetSettings(clamp);
+        }
+        session.mode().SetMode(static_cast<TrackingMode>(settings->tracking_mode));
+        session.aim_mode.store(settings->aim_mode);
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_session_start(std::int32_t udp_port) {
+    return Guarded("cameraunlock_session_start", [&] { return StartView(0, udp_port); });
+}
+
+std::int32_t cameraunlock_session_stop(void) {
+    return Guarded("cameraunlock_session_stop", [&] { return StopView(0); });
+}
+
+std::int32_t cameraunlock_view_start(std::int32_t view, std::int32_t udp_port) {
+    return Guarded("cameraunlock_view_start", [&] { return StartView(view, udp_port); });
+}
+
+std::int32_t cameraunlock_view_stop(std::int32_t view) {
+    return Guarded("cameraunlock_view_stop", [&] { return StopView(view); });
+}
+
+std::int32_t cameraunlock_session_cycle_tracking_mode(void) {
+    return Guarded("cameraunlock_session_cycle_tracking_mode",
+                   [&] { return static_cast<std::int32_t>(TheSession().mode().CycleMode()); });
+}
+
+std::int32_t cameraunlock_session_cycle_aim_mode(void) {
+    return Guarded("cameraunlock_session_cycle_aim_mode", [&] {
+        std::atomic<std::int32_t>& mode = TheSession().aim_mode;
+        std::int32_t now = mode.load();
+        std::int32_t next;
+        do {
+            next = static_cast<std::int32_t>(ads::NextAimMode(static_cast<ads::AimMode>(now)));
+        } while (!mode.compare_exchange_weak(now, next));
+        return next;
+    });
+}
+
+std::int32_t cameraunlock_session_set_aim_mode(std::int32_t aim_mode) {
+    return Guarded("cameraunlock_session_set_aim_mode", [&] {
+        Require(aim_mode >= 0 && aim_mode <= 3, "aim_mode is not a CAMERAUNLOCK_AIM_*");
+        TheSession().aim_mode.store(aim_mode);
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+const char* cameraunlock_aim_mode_label(std::int32_t aim_mode) {
+    const char* label = nullptr;
+    Guarded("cameraunlock_aim_mode_label", [&] {
+        Require(aim_mode >= 0 && aim_mode <= 3, "aim_mode is not a CAMERAUNLOCK_AIM_*");
+        label = ads::AimModeLabel(static_cast<ads::AimMode>(aim_mode));
+        return CAMERAUNLOCK_OK;
+    });
+    return label;
+}
+
+std::int32_t cameraunlock_session_frame(const CameraUnlockFrameInput* input, CameraUnlockFrame* out) {
+    return Guarded("cameraunlock_session_frame", [&] { return FrameOf(0, input, out); });
+}
+
+std::int32_t cameraunlock_session_lean(const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
+    return Guarded("cameraunlock_session_lean", [&] { return LeanOf(0, obstruction, out); });
+}
+
+std::int32_t cameraunlock_view_frame(std::int32_t view, const CameraUnlockFrameInput* input, CameraUnlockFrame* out) {
+    return Guarded("cameraunlock_view_frame", [&] { return FrameOf(view, input, out); });
+}
+
+std::int32_t cameraunlock_view_lean(std::int32_t view, const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
+    return Guarded("cameraunlock_view_lean", [&] { return LeanOf(view, obstruction, out); });
+}
+
+std::int32_t cameraunlock_config_describe(const char* display_name) {
+    return Guarded("cameraunlock_config_describe", [&] {
+        Require(display_name != nullptr, "display_name is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        if (c.owner) throw std::logic_error("the file is loaded, and its rows are settled");
+        c.display_name = display_name;
+        c.concepts.clear();
+        c.locals.clear();
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+namespace {
+
+// Under the config's mutex. `row` is the concept as named, with its flags, comment and start set
+// from these.
+void AddConcept(ConfigState& c, const char* name, std::uint32_t flags, const char* comment, const char* default_text,
+                ConceptRow row) {
+    RequireDescribing(c);
+    Require(name != nullptr, "name is NULL");
+    Require((flags & ~(CAMERAUNLOCK_ROW_WRITABLE | CAMERAUNLOCK_ROW_PER_GAME)) == 0,
+            "a concept row takes CAMERAUNLOCK_ROW_WRITABLE and CAMERAUNLOCK_ROW_PER_GAME only");
+    bool found = false;
+    for (const cfg::schema::ConceptInfo& info : cfg::schema::kConcepts) {
+        if (std::strcmp(info.name, name) == 0) {
+            row.id = info.id;
+            found = true;
+        }
+    }
+    if (!found) throw std::invalid_argument(std::string(name) + " is not a canonical concept of data/config-schema.json");
+    row.flags = flags;
+    if (comment != nullptr) row.comment = comment;
+    if (default_text != nullptr) row.start = default_text;
+    c.concepts.push_back(std::move(row));
+    try {
+        BuildTable(c);
+    } catch (...) {
+        c.concepts.pop_back();
+        throw;
+    }
+}
+
+}  // namespace
+
+std::int32_t cameraunlock_config_concept(const char* name, std::uint32_t flags, const char* comment,
+                                         const char* default_text) {
+    return Guarded("cameraunlock_config_concept", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        AddConcept(c, name, flags, comment, default_text, ConceptRow{});
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_concept_hotkey_taps(const char* name, std::uint32_t flags, const char* comment,
+                                                     const char* default_keys, const std::int32_t* tap_bits,
+                                                     std::int32_t taps, std::int32_t held_bit) {
+    return Guarded("cameraunlock_config_concept_hotkey_taps", [&] {
+        std::vector<std::int32_t> bits = TapBits(tap_bits, taps, held_bit, "not offered for a concept");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireDescribing(c);
+        Require(name != nullptr, "name is NULL");
+        const FleetKeyRow* fleet = nullptr;
+        for (const FleetKeyRow& row : kFleetKeys) {
+            if (std::strcmp(ConceptName(row.id), name) == 0) fleet = &row;
+        }
+        if (fleet == nullptr) throw std::invalid_argument(std::string(name) + " is not a key list concept");
+        if (fleet->bit != 0) {
+            throw std::invalid_argument(std::string(name) + " answers its CAMERAUNLOCK_HOTKEY_* bit, so it is described with "
+                                        "cameraunlock_config_concept");
+        }
+        ConceptRow row;
+        row.hotkey_bit = bits[0];
+        row.held_bit = held_bit;
+        row.more_tap_bits.assign(bits.begin() + 1, bits.end());
+        RequireBitsFree(c, row.hotkey_bit, row.held_bit, row.more_tap_bits);
+        std::string start;
+        if (default_keys != nullptr) start = CanonicalKeys(name, default_keys);
+        AddConcept(c, name, flags, comment, default_keys != nullptr ? start.c_str() : nullptr, std::move(row));
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_local_bool(const char* section, const char* key, const char* comment,
+                                            std::uint32_t flags, std::int32_t default_value) {
+    return Guarded("cameraunlock_config_local_bool", [&] {
+        LocalRow row{LocalKind::Bool};
+        row.start = default_value != 0;
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddLocal(c, section, key, comment, flags, std::move(row));
+    });
+}
+
+std::int32_t cameraunlock_config_local_int(const char* section, const char* key, const char* comment,
+                                           std::uint32_t flags, std::int32_t default_value, std::int32_t min,
+                                           std::int32_t max) {
+    return Guarded("cameraunlock_config_local_int", [&] {
+        LocalRow row{LocalKind::Int};
+        row.start = default_value;
+        row.int_min = min;
+        row.int_max = max;
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddLocal(c, section, key, comment, flags, std::move(row));
+    });
+}
+
+std::int32_t cameraunlock_config_local_float(const char* section, const char* key, const char* comment,
+                                             std::uint32_t flags, float default_value, float min, float max) {
+    return Guarded("cameraunlock_config_local_float", [&] {
+        LocalRow row{LocalKind::Float};
+        row.start = default_value;
+        row.float_min = min;
+        row.float_max = max;
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddLocal(c, section, key, comment, flags, std::move(row));
+    });
+}
+
+std::int32_t cameraunlock_config_local_enum(const char* section, const char* key, const char* comment,
+                                            std::uint32_t flags, const char* tokens, std::int32_t default_index) {
+    return Guarded("cameraunlock_config_local_enum", [&] {
+        Require(tokens != nullptr, "tokens is NULL");
+        LocalRow row{LocalKind::Enum};
+        const std::string list = tokens;
+        std::size_t start = 0;
+        while (start <= list.size()) {
+            std::size_t end = list.find(',', start);
+            if (end == std::string::npos) end = list.size();
+            row.tokens.push_back(list.substr(start, end - start));
+            start = end + 1;
+        }
+        Require(default_index >= 0 && static_cast<std::size_t>(default_index) < row.tokens.size(),
+                "default_index names no token");
+        row.start = static_cast<HostEnum>(default_index);
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddLocal(c, section, key, comment, flags, std::move(row));
+    });
+}
+
+std::int32_t cameraunlock_config_local_text(const char* section, const char* key, const char* comment,
+                                            std::uint32_t flags, const char* default_text) {
+    return Guarded("cameraunlock_config_local_text", [&] {
+        Require(default_text != nullptr, "default_text is NULL");
+        LocalRow row{LocalKind::Text};
+        // Throws for text the file cannot hold, before the row is added.
+        cfg::StringCodec().Render(default_text);
+        row.start = std::string(default_text);
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddLocal(c, section, key, comment, flags, std::move(row));
+    });
+}
+
+std::int32_t cameraunlock_config_local_hotkey(const char* key, const char* comment, std::uint32_t flags,
+                                              const char* default_keys, std::int32_t hotkey_bit) {
+    return Guarded("cameraunlock_config_local_hotkey", [&] {
+        Require(default_keys != nullptr, "default_keys is NULL");
+        Require(hotkey_bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (hotkey_bit & (hotkey_bit - 1)) == 0,
+                "hotkey_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, 0, {});
+    });
+}
+
+std::int32_t cameraunlock_config_local_hotkey_held(const char* key, const char* comment, std::uint32_t flags,
+                                                   const char* default_keys, std::int32_t hotkey_bit,
+                                                   std::int32_t held_bit) {
+    return Guarded("cameraunlock_config_local_hotkey_held", [&] {
+        Require(default_keys != nullptr, "default_keys is NULL");
+        Require(hotkey_bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (hotkey_bit & (hotkey_bit - 1)) == 0,
+                "hotkey_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        Require(held_bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (held_bit & (held_bit - 1)) == 0,
+                "held_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        Require(held_bit != hotkey_bit, "hotkey_bit and held_bit are one bit, and a tap has to be told from a hold");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, held_bit, {});
+    });
+}
+
+std::int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* comment, std::uint32_t flags,
+                                                   const char* default_keys, const std::int32_t* tap_bits,
+                                                   std::int32_t taps, std::int32_t held_bit) {
+    return Guarded("cameraunlock_config_local_hotkey_taps", [&] {
+        Require(default_keys != nullptr, "default_keys is NULL");
+        const std::vector<std::int32_t> bits = TapBits(tap_bits, taps, held_bit, "cameraunlock_config_local_hotkey_held");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddHotkeyRow(c, key, comment, flags, default_keys, bits[0], held_bit,
+                            std::vector<std::int32_t>(bits.begin() + 1, bits.end()));
+    });
+}
+
+std::int32_t cameraunlock_config_render(const char* path) {
+    return Guarded("cameraunlock_config_render", [&] {
+        const std::wstring file = Wide(path, "path");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        cfg::RenderHeader header;
+        const cfg::ConfigTable<HostConfig> table = BuildTable(c);
+        header.display_name = *c.display_name;
+        const std::string bytes = cfg::RenderCanonicalFresh(table, header);
+        // Win32 rather than a stream, so the WebAssembly build writes it as the DLL does.
+        const HANDLE handle =
+            CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            throw std::runtime_error("the rendered file could not be written to " + std::string(path) + ": " +
+                                     cfg::detail::OwnerErrorText(GetLastError()));
+        }
+        DWORD written = 0;
+        const BOOL wrote = WriteFile(handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+        const DWORD error = GetLastError();
+        CloseHandle(handle);
+        if (!wrote || written != bytes.size()) {
+            throw std::runtime_error("the rendered file could not be written to " + std::string(path) + ": " +
+                                     cfg::detail::OwnerErrorText(wrote ? ERROR_WRITE_FAULT : error));
+        }
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_schema(char* buffer, std::int32_t capacity) {
+    return Guarded("cameraunlock_config_schema", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return CopyOut(SchemaJson(c), buffer, capacity, true);
+    });
+}
+
+std::int32_t cameraunlock_config_load(const char* path, const char* defaults_path, CameraUnlockConfig* out) {
+    return Guarded("cameraunlock_config_load", [&] {
+        RequireStruct(out, "CameraUnlockConfig");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireDescribing(c);
+
+        cfg::ConfigOwnerOptions<HostConfig> options;
+        options.path = Wide(path, "path");
+        cfg::ConfigTable<HostConfig> table = BuildTable(c);
+        options.table = table;
+        options.header.display_name = *c.display_name;
+        options.defaults = defaults_path == nullptr ? cfg::DefaultsFile::PerUser()
+                                                    : cfg::DefaultsFile::At(Wide(defaults_path, "defaults_path"));
+        auto owner = std::make_unique<cfg::ConfigOwner<HostConfig>>(std::move(options));
+        cfg::ConfigLoadResult<HostConfig> loaded = owner->Load();
+        LogLines(loaded.log);
+        if (!loaded.reason.empty()) LogLine(loaded.reason);
+
+        CameraUnlockConfig filled = {};
+        filled.struct_size = sizeof(filled);
+        filled.udp_port = loaded.config.udp_port;
+        filled.enable_on_startup = loaded.config.enable_on_startup ? 1 : 0;
+        filled.world_space_yaw = loaded.config.world_space_yaw ? 1 : 0;
+        filled.settings = SettingsOf(loaded.config);
+
+        c.loaded = std::move(loaded.config);
+        c.owner = std::move(owner);
+        c.table = std::move(table);
+        *out = filled;
+        return static_cast<std::int32_t>(loaded.status);
+    });
+}
+
+std::int32_t cameraunlock_config_reload(void) {
+    return Guarded("cameraunlock_config_reload", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        if (!c.owner->FileChanged()) return static_cast<std::int32_t>(cfg::ConfigReloadStatus::Unchanged);
+        const cfg::ConfigReloadResult<HostConfig> reloaded = c.owner->Reload();
+        LogLines(reloaded.log);
+        if (reloaded.config) {
+            input::HotkeyPoller* poller = c.poller.load();
+            for (std::size_t i = 0; i < c.locals.size(); ++i) {
+                if ((c.locals[i].flags & CAMERAUNLOCK_ROW_LIVE) == 0) continue;
+                const bool rebind = c.locals[i].kind == LocalKind::Hotkey && poller != nullptr &&
+                                    c.loaded.locals[i] != reloaded.config->locals[i];
+                c.loaded.locals[i] = reloaded.config->locals[i];
+                if (rebind) {
+                    for (const int id : c.locals[i].hotkey_ids) poller->RemoveHotkey(id);
+                    c.locals[i].hotkey_ids = Register(c, *poller, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+                }
+            }
+        }
+        return static_cast<std::int32_t>(reloaded.status);
+    });
+}
+
+std::int32_t cameraunlock_config_watched(std::int32_t which, std::uint16_t* buffer, std::int32_t capacity,
+                                         std::uint64_t* recorded) {
+    return Guarded("cameraunlock_config_watched", [&] {
+        Require(recorded != nullptr, "recorded is NULL");
+        Require(which == CAMERAUNLOCK_WATCHED_FILE || which == CAMERAUNLOCK_WATCHED_DEFAULTS,
+                "which is not CAMERAUNLOCK_WATCHED_FILE or CAMERAUNLOCK_WATCHED_DEFAULTS");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const cfg::ConfigWatched watched = c.owner->Watched();
+        const bool file = which == CAMERAUNLOCK_WATCHED_FILE;
+        *recorded = file ? watched.write_time : watched.defaults_write_time;
+        // wchar_t is 32 bits in the WebAssembly build, where a code point past U+FFFF is one unit.
+        std::u16string units;
+        for (const wchar_t unit : file ? watched.path : watched.defaults_path.value_or(std::wstring())) {
+            const auto code = static_cast<std::uint32_t>(unit);
+            if (code > 0xFFFF) {
+                units.push_back(static_cast<char16_t>(0xD800 + ((code - 0x10000) >> 10)));
+                units.push_back(static_cast<char16_t>(0xDC00 + ((code - 0x10000) & 0x3FF)));
+            } else {
+                units.push_back(static_cast<char16_t>(code));
+            }
+        }
+        const auto length = static_cast<std::int32_t>(units.size());
+        if (buffer != nullptr && capacity >= length + 1) {
+            std::memcpy(buffer, units.data(), units.size() * sizeof(char16_t));
+            buffer[length] = 0;
+        }
+        return length;
+    });
+}
+
+std::int32_t cameraunlock_config_get_int(std::int32_t row, std::int32_t* out) {
+    return Guarded("cameraunlock_config_get_int", [&] {
+        Require(out != nullptr, "out is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        const LocalValue& value = c.loaded.locals[static_cast<std::size_t>(row)];
+        switch (described.kind) {
+            case LocalKind::Bool:
+                *out = std::get<bool>(value) ? 1 : 0;
+                break;
+            case LocalKind::Int:
+                *out = std::get<std::int32_t>(value);
+                break;
+            case LocalKind::Enum:
+                *out = static_cast<std::int32_t>(std::get<HostEnum>(value));
+                break;
+            default:
+                throw std::invalid_argument(described.key + " is not a bool, an int or an enum row");
+        }
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_get_float(std::int32_t row, float* out) {
+    return Guarded("cameraunlock_config_get_float", [&] {
+        Require(out != nullptr, "out is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        if (described.kind != LocalKind::Float) throw std::invalid_argument(described.key + " is not a float row");
+        *out = std::get<float>(c.loaded.locals[static_cast<std::size_t>(row)]);
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_get_text(std::int32_t row, char* buffer, std::int32_t capacity) {
+    return Guarded("cameraunlock_config_get_text", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        if (described.kind != LocalKind::Text && described.kind != LocalKind::Hotkey) {
+            throw std::invalid_argument(described.key + " is not a text row");
+        }
+        return CopyOut(std::get<std::string>(c.loaded.locals[static_cast<std::size_t>(row)]), buffer, capacity, true);
+    });
+}
+
+std::int32_t cameraunlock_config_get_concept_keys(const char* name, char* buffer, std::int32_t capacity) {
+    return Guarded("cameraunlock_config_get_concept_keys", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const FleetKeyRow* fleet = FleetKeyOf(DescribedConcept(c, name).id);
+        if (fleet == nullptr) throw std::invalid_argument(std::string(name) + " is not a key list row");
+        return CopyOut(c.loaded.*fleet->keys, buffer, capacity, true);
+    });
+}
+
+std::int32_t cameraunlock_config_save_int(std::int32_t row, std::int32_t value) {
+    return Guarded("cameraunlock_config_save_int", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        LocalValue next;
+        switch (described.kind) {
+            case LocalKind::Bool:
+                next = value != 0;
+                break;
+            case LocalKind::Int:
+                next = value;
+                break;
+            case LocalKind::Enum:
+                Require(value >= 0 && static_cast<std::size_t>(value) < described.tokens.size(), "value names no token");
+                next = static_cast<HostEnum>(value);
+                break;
+            default:
+                throw std::invalid_argument(described.key + " is not a bool, an int or an enum row");
+        }
+        const std::size_t index = static_cast<std::size_t>(row);
+        return Save(c, [&](HostConfig& config) { config.locals[index] = next; });
+    });
+}
+
+std::int32_t cameraunlock_config_save_float(std::int32_t row, float value) {
+    return Guarded("cameraunlock_config_save_float", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        if (described.kind != LocalKind::Float) throw std::invalid_argument(described.key + " is not a float row");
+        const std::size_t index = static_cast<std::size_t>(row);
+        return Save(c, [&](HostConfig& config) { config.locals[index] = value; });
+    });
+}
+
+std::int32_t cameraunlock_config_save_text(std::int32_t row, const char* value) {
+    return Guarded("cameraunlock_config_save_text", [&] {
+        Require(value != nullptr, "value is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        if (described.kind != LocalKind::Text) throw std::invalid_argument(described.key + " is not a text row");
+        cfg::StringCodec().Render(value);
+        const std::size_t index = static_cast<std::size_t>(row);
+        const std::string text = value;
+        return Save(c, [&](HostConfig& config) { config.locals[index] = text; });
+    });
+}
+
+std::int32_t cameraunlock_config_save_keys(std::int32_t row, const char* keys) {
+    return Guarded("cameraunlock_config_save_keys", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        LocalAt(c, row);
+        LocalRow& described = c.locals[static_cast<std::size_t>(row)];
+        if (described.kind != LocalKind::Hotkey) throw std::invalid_argument(described.key + " is not a key list row");
+        // Checked here and not left to the owner, as cameraunlock_config_save_rows checks it.
+        if ((described.flags & CAMERAUNLOCK_ROW_WRITABLE) == 0) {
+            throw std::invalid_argument(described.key + " is not marked Writable, so it is not saved");
+        }
+        const std::string text = CanonicalKeys(described.key, keys);
+        const std::size_t index = static_cast<std::size_t>(row);
+        const std::int32_t status = Save(c, [&](HostConfig& config) { config.locals[index] = text; });
+        Reregister(c, described, described.hotkey_ids, text);
+        return status;
+    });
+}
+
+std::int32_t cameraunlock_config_save_concept_keys(const char* name, const char* keys) {
+    return Guarded("cameraunlock_config_save_concept_keys", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        ConceptRow& described = DescribedConcept(c, name);
+        const FleetKeyRow* fleet = FleetKeyOf(described.id);
+        if (fleet == nullptr) throw std::invalid_argument(std::string(name) + " is not a key list row");
+        if ((described.flags & CAMERAUNLOCK_ROW_WRITABLE) == 0) {
+            throw std::invalid_argument(std::string(name) + " is not marked Writable, so it is not saved");
+        }
+        const std::string text = CanonicalKeys(name, keys);
+        const std::int32_t status = Save(c, [&](HostConfig& config) { config.*fleet->keys = text; });
+        Reregister(c, FleetKey(*fleet, described), described.hotkey_ids, text);
+        return status;
+    });
+}
+
+std::int32_t cameraunlock_config_save_rows(const std::int32_t* rows, const double* values, std::int32_t count) {
+    return Guarded("cameraunlock_config_save_rows", [&] {
+        Require(count > 0, "count is not 1 or more");
+        Require(rows != nullptr, "rows is NULL");
+        Require(values != nullptr, "values is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        std::vector<std::pair<std::size_t, LocalValue>> changes;
+        for (std::int32_t i = 0; i < count; ++i) {
+            const LocalRow& described = LocalAt(c, rows[i]);
+            const std::size_t index = static_cast<std::size_t>(rows[i]);
+            for (const auto& earlier : changes) {
+                if (earlier.first == index) throw std::invalid_argument(described.key + " is in rows twice");
+            }
+            // Checked here and not left to the owner: a load that could not use the file saves nothing
+            // and the session still takes the values, so a refusal there would come too late.
+            if ((described.flags & CAMERAUNLOCK_ROW_WRITABLE) == 0) {
+                throw std::invalid_argument(described.key + " is not marked Writable, so it is not saved");
+            }
+            const double value = values[i];
+            const bool whole = std::isfinite(value) && value == std::floor(value) &&
+                               value >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
+                               value <= static_cast<double>(std::numeric_limits<std::int32_t>::max());
+            LocalValue next;
+            switch (described.kind) {
+                case LocalKind::Bool:
+                    if (value != 0.0 && value != 1.0) throw std::invalid_argument(described.key + " is a bool row, saved as 0 or 1");
+                    next = value != 0.0;
+                    break;
+                case LocalKind::Int:
+                    if (!whole || value < described.int_min || value > described.int_max) {
+                        throw std::invalid_argument(described.key + " holds a whole number from " + std::to_string(described.int_min) +
+                                                    " to " + std::to_string(described.int_max));
+                    }
+                    next = static_cast<std::int32_t>(value);
+                    break;
+                case LocalKind::Enum:
+                    if (!whole || value < 0.0 || value >= static_cast<double>(described.tokens.size())) {
+                        throw std::invalid_argument(described.key + ": the value names no token");
+                    }
+                    next = static_cast<HostEnum>(static_cast<std::int32_t>(value));
+                    break;
+                case LocalKind::Float:
+                    if (!(value >= described.float_min && value <= described.float_max)) {
+                        const cfg::FloatCodec codec(described.float_min, described.float_max);
+                        throw std::invalid_argument(described.key + " holds a number from " + codec.Render(described.float_min) +
+                                                    " to " + codec.Render(described.float_max));
+                    }
+                    next = static_cast<float>(value);
+                    break;
+                default:
+                    throw std::invalid_argument(described.key + " is not a bool, an int, a float or an enum row");
+            }
+            changes.emplace_back(index, std::move(next));
+        }
+        return Save(c, [&](HostConfig& config) {
+            for (const auto& change : changes) config.locals[change.first] = change.second;
+        });
+    });
+}
+
+std::int32_t cameraunlock_config_save_tracking_mode(void) {
+    return Guarded("cameraunlock_config_save_tracking_mode", [&] {
+        const TrackingModeChannels channels = EncodeTrackingMode(TheSession().mode().GetMode());
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireConcepts(c, {cfg::schema::Concept::RotationEnabled, cfg::schema::Concept::PositionEnabled});
+        return Save(c, [&](HostConfig& config) {
+            config.rotation_enabled = channels.rotation_enabled;
+            config.position_enabled = channels.position_enabled;
+        });
+    });
+}
+
+std::int32_t cameraunlock_config_save_aim_mode(void) {
+    return Guarded("cameraunlock_config_save_aim_mode", [&] {
+        const ads::AimModeSettings mode = ads::EncodeAimMode(static_cast<ads::AimMode>(TheSession().aim_mode.load()));
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireConcepts(c, {cfg::schema::Concept::TrueFreeLook, cfg::schema::Concept::FreeLookMarker,
+                            cfg::schema::Concept::StockSights});
+        return Save(c, [&](HostConfig& config) {
+            config.true_free_look = mode.trueFreeLook;
+            config.free_look_marker = mode.freeLookMarker;
+            config.stock_sights = mode.stockSights;
+        });
+    });
+}
+
+std::int32_t cameraunlock_config_save_world_space_yaw(std::int32_t world_space_yaw) {
+    return Guarded("cameraunlock_config_save_world_space_yaw", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireConcepts(c, {cfg::schema::Concept::WorldSpaceYaw});
+        return Save(c, [&](HostConfig& config) { config.world_space_yaw = world_space_yaw != 0; });
+    });
+}
+
+std::int32_t cameraunlock_config_option_count(void) {
+    return Guarded("cameraunlock_config_option_count", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        return static_cast<std::int32_t>(c.table->Options().size());
+    });
+}
+
+std::int32_t cameraunlock_config_option(std::int32_t option, CameraUnlockOption* out) {
+    return Guarded("cameraunlock_config_option", [&] {
+        RequireStruct(out, "CameraUnlockOption");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        CameraUnlockOption filled = {};
+        filled.struct_size = sizeof(filled);
+        filled.kind = static_cast<std::int32_t>(described.kind);
+        filled.source = static_cast<std::int32_t>(described.source);
+        filled.choices = static_cast<std::int32_t>(described.choices.size());
+        filled.min = described.min;
+        filled.max = described.max;
+        filled.step = described.step;
+        *out = filled;
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_option_text(std::int32_t option, std::int32_t which, char* buffer,
+                                             std::int32_t capacity) {
+    return Guarded("cameraunlock_config_option_text", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        std::string text;
+        if (which == CAMERAUNLOCK_OPTION_TEXT_ID) {
+            text = described.id;
+        } else if (which == CAMERAUNLOCK_OPTION_TEXT_SECTION) {
+            text = described.section;
+        } else if (which == CAMERAUNLOCK_OPTION_TEXT_LABEL) {
+            text = described.label;
+        } else if (which == CAMERAUNLOCK_OPTION_TEXT_COMMENT) {
+            for (const std::string& line : described.comment) text += (text.empty() ? "" : "\n") + line;
+        } else {
+            Require(which >= CAMERAUNLOCK_OPTION_TEXT_CHOICE &&
+                        static_cast<std::size_t>(which - CAMERAUNLOCK_OPTION_TEXT_CHOICE) < described.choices.size(),
+                    "which is not a CAMERAUNLOCK_OPTION_TEXT_* of this option");
+            text = described.choices[static_cast<std::size_t>(which - CAMERAUNLOCK_OPTION_TEXT_CHOICE)];
+        }
+        return CopyOut(text, buffer, capacity, true);
+    });
+}
+
+std::int32_t cameraunlock_config_option_get(std::int32_t option, double* out) {
+    return Guarded("cameraunlock_config_option_get", [&] {
+        Require(out != nullptr, "out is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        if (described.source == cfg::OptionSource::kTrackingMode) {
+            *out = static_cast<double>(static_cast<std::int32_t>(TheSession().mode().GetMode()));
+        } else if (described.source == cfg::OptionSource::kAimMode) {
+            *out = static_cast<double>(TheSession().aim_mode.load());
+        } else {
+            *out = c.table->OptionValue(c.loaded, static_cast<std::size_t>(option));
+        }
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_option_save(std::int32_t option, double value) {
+    return Guarded("cameraunlock_config_option_save", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        const std::size_t index = static_cast<std::size_t>(option);
+        // On a copy first: a value the option does not hold throws here, before anything runs on it.
+        HostConfig checked = c.loaded;
+        c.table->SetOption(checked, index, value);
+        if (described.source == cfg::OptionSource::kTrackingMode) {
+            TheSession().mode().SetMode(static_cast<TrackingMode>(static_cast<std::int32_t>(value)));
+        } else if (described.source == cfg::OptionSource::kAimMode) {
+            TheSession().aim_mode.store(static_cast<std::int32_t>(value));
+        }
+        return Save(c, [&](HostConfig& config) { c.table->SetOption(config, index, value); });
+    });
+}
+
+std::int32_t cameraunlock_hotkeys_start(void) {
+    return Guarded("cameraunlock_hotkeys_start", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        if (c.poller.load() != nullptr) throw std::logic_error("the hotkeys are already started");
+        // Published only once it is started: one stored before a throw below would leave every
+        // later call refused as "already started" with no hotkeys polled.
+        auto poller = std::make_unique<input::HotkeyPoller>();
+        std::vector<std::vector<int>> concept_ids(c.concepts.size());
+        for (std::size_t i = 0; i < c.concepts.size(); ++i) {
+            if (const FleetKeyRow* fleet = FleetKeyOf(c.concepts[i].id)) {
+                concept_ids[i] = Register(c, *poller, FleetKey(*fleet, c.concepts[i]), c.loaded.*fleet->keys);
+            }
+        }
+        std::vector<std::vector<int>> local_ids(c.locals.size());
+        for (std::size_t i = 0; i < c.locals.size(); ++i) {
+            if (c.locals[i].kind == LocalKind::Hotkey) {
+                local_ids[i] = Register(c, *poller, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+            }
+        }
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+        // The WebAssembly build's host polls through cameraunlock_host_tick instead.
+        if (!poller->Start()) throw std::runtime_error("the hotkey poller did not start");
+#endif
+        for (std::size_t i = 0; i < c.concepts.size(); ++i) c.concepts[i].hotkey_ids = std::move(concept_ids[i]);
+        for (std::size_t i = 0; i < c.locals.size(); ++i) c.locals[i].hotkey_ids = std::move(local_ids[i]);
+        c.poller.store(poller.release());
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+        c.polled = true;
+#endif
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_hotkeys_leave_out(const char* keys) {
+    return Guarded("cameraunlock_hotkeys_leave_out", [&] {
+        Require(keys != nullptr, "keys is NULL");
+        const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
+        if (!parsed.ok()) throw std::invalid_argument(std::string(keys) + ": " + parsed.error);
+        std::vector<int> left_out;
+        for (const input::KeyBinding& binding : parsed.bindings) {
+            if (binding.modifiers != input::KeyModifiers::kNone) {
+                throw std::invalid_argument(std::string(keys) + ": a key is left out with every modifier, so the list names "
+                                            "keys alone");
+            }
+            left_out.push_back(binding.vk);
+        }
+        const std::string text = CanonicalKeys("keys", keys);
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        c.left_out = std::move(left_out);
+        if (input::HotkeyPoller* poller = c.poller.load()) {
+            for (ConceptRow& row : c.concepts) {
+                if (const FleetKeyRow* fleet = FleetKeyOf(row.id)) {
+                    for (const int id : row.hotkey_ids) poller->RemoveHotkey(id);
+                    row.hotkey_ids = Register(c, *poller, FleetKey(*fleet, row), c.loaded.*fleet->keys);
+                }
+            }
+            for (std::size_t i = 0; i < c.locals.size(); ++i) {
+                if (c.locals[i].kind != LocalKind::Hotkey) continue;
+                for (const int id : c.locals[i].hotkey_ids) poller->RemoveHotkey(id);
+                c.locals[i].hotkey_ids = Register(c, *poller, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+            }
+            poller->DisarmPresses();
+        }
+        LogLine(text.empty() ? "hotkeys: every key of every key list is listened for"
+                             : "hotkeys: " + text + " left out of every key list, with any modifiers");
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_window_center(std::uint64_t window) {
+    return Guarded("cameraunlock_window_center", [&] {
+        const bool centred = os::CenterWindowInWorkArea(
+            reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)),
+            [](os::WindowLogLevel, const char* message) { LogLine(message); });
+        return centred ? 1 : 0;
+    });
+}
+
+#ifdef CAMERAUNLOCK_C_TESTING
+
+std::int32_t cameraunlock_testing_reset(void) {
+    return Guarded("cameraunlock_testing_reset", [&] {
+        delete SessionSlot();
+        SessionSlot() = new Session();
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+namespace {
+
+std::int32_t DeliverTo(std::int32_t view, const void* datagram, std::int32_t length, std::int32_t remote) {
+    View& s = ViewAt(TheSession(), view);
+    Require(datagram != nullptr && length >= 0, "datagram is NULL or its length negative");
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    if (s.started) {
+        throw std::logic_error((view == 0 ? std::string("the session") : "view " + std::to_string(view)) +
+                               " is listening: a datagram is delivered to one that is not");
+    }
+    sockaddr_in sender = {};
+    sender.sin_family = AF_INET;
+    sender.sin_port = htons(4242);
+    inet_pton(AF_INET, remote != 0 ? "192.0.2.1" : "127.0.0.1", &sender.sin_addr);
+    // Each delivery is a later arrival than the last, as the session tells packets apart by it.
+    static std::int64_t last_arrival = 0;
+    const std::int64_t now = SteadyMicros();
+    last_arrival = now > last_arrival ? now : last_arrival + 1;
+    detail::UdpReceiverTestAccess::Deliver(s.receiver, datagram, length, sender, last_arrival);
+    return CAMERAUNLOCK_OK;
+}
+
+}  // namespace
+
+std::int32_t cameraunlock_testing_deliver(const void* datagram, std::int32_t length, std::int32_t remote) {
+    return Guarded("cameraunlock_testing_deliver", [&] { return DeliverTo(0, datagram, length, remote); });
+}
+
+std::int32_t cameraunlock_testing_deliver_view(std::int32_t view, const void* datagram, std::int32_t length,
+                                               std::int32_t remote) {
+    return Guarded("cameraunlock_testing_deliver_view", [&] { return DeliverTo(view, datagram, length, remote); });
+}
+
+std::int32_t cameraunlock_testing_defaults_path(char* buffer, std::int32_t capacity) {
+    std::int32_t length = CAMERAUNLOCK_ERROR;
+    const std::int32_t status = Guarded("cameraunlock_testing_defaults_path", [&] {
+        const cfg::detail::DefaultsResolution found = cfg::detail::ResolveDefaults(cfg::detail::ProbeDefaults());
+        const std::string text = found.candidates.empty() ? found.no_location : cfg::detail::DefaultsUtf8(found.candidates.front().path);
+        length = CopyOut(text, buffer, capacity, true);
+        return CAMERAUNLOCK_OK;
+    });
+    return status == CAMERAUNLOCK_OK ? length : status;
+}
+
+namespace {
+
+std::uint32_t Count(const std::string& text) {
+    std::uint32_t count = 0;
+    const char* end = text.data() + text.size();
+    const std::from_chars_result read = std::from_chars(text.data(), end, count);
+    if (text.empty() || read.ec != std::errc() || read.ptr != end) {
+        throw std::invalid_argument("argument is not a count that fits 32 bits: " + text);
+    }
+    return count;
+}
+
+std::string Win32Call(const std::string& call, const char* argument) {
+    const std::wstring wide = Wide(argument, "argument");
+    const auto failed = [&call](DWORD error) {
+        return std::runtime_error(call + " failed with Windows error " + std::to_string(error));
+    };
+    const auto lines = [&wide]() {
+        const std::size_t split = wide.find(L'\n');
+        Require(split != std::wstring::npos, "argument is not two lines");
+        return std::make_pair(wide.substr(0, split), wide.substr(split + 1));
+    };
+    if (call == "find") {
+        WIN32_FIND_DATAW found{};
+        const HANDLE search = FindFirstFileW(wide.c_str(), &found);
+        if (search == INVALID_HANDLE_VALUE) throw failed(GetLastError());
+        if (!FindClose(search)) throw failed(GetLastError());
+        return cfg::detail::DefaultsUtf8(found.cFileName);
+    }
+    if (call == "compare") {
+        const auto [a, b] = lines();
+        const int compared =
+            CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE);
+        if (compared == 0) throw failed(GetLastError());
+        return std::to_string(compared);
+    }
+    if (call == "code_page") return std::to_string(GetACP());
+    if (call == "narrow") {
+        const int length = static_cast<int>(wide.size());
+        const int needed = WideCharToMultiByte(CP_ACP, 0, wide.data(), length, nullptr, 0, nullptr, nullptr);
+        if (needed <= 0) throw failed(GetLastError());
+        std::string bytes(static_cast<std::size_t>(needed), '\0');
+        if (WideCharToMultiByte(CP_ACP, 0, wide.data(), length, bytes.data(), needed, nullptr, nullptr) != needed) {
+            throw failed(GetLastError());
+        }
+        static const char kDigits[] = "0123456789abcdef";
+        std::string hex;
+        for (const char byte : bytes) {
+            hex.push_back(kDigits[static_cast<unsigned char>(byte) >> 4]);
+            hex.push_back(kDigits[static_cast<unsigned char>(byte) & 0xF]);
+        }
+        return hex;
+    }
+    if (call == "read_from") {
+        const auto [offset, path] = lines();
+        const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) throw failed(GetLastError());
+        LARGE_INTEGER at{};
+        at.QuadPart = static_cast<LONGLONG>(Count(cfg::detail::DefaultsUtf8(offset)));
+        std::string text(256, '\0');
+        DWORD read = 0;
+        const bool done = SetFilePointerEx(file, at, nullptr, FILE_BEGIN) &&
+                          ReadFile(file, text.data(), static_cast<DWORD>(text.size()), &read, nullptr);
+        const DWORD error = done ? 0 : GetLastError();
+        CloseHandle(file);
+        if (!done) throw failed(error);
+        text.resize(read);
+        return text;
+    }
+    if (call == "error_text") return cfg::detail::OwnerErrorText(Count(argument));
+    if (call == "delete") {
+        if (!DeleteFileW(wide.c_str())) throw failed(GetLastError());
+        return "1";
+    }
+    if (call == "sleep") {
+        LARGE_INTEGER frequency{}, before{}, after{};
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&before);
+        Sleep(static_cast<DWORD>(Count(argument)));
+        QueryPerformanceCounter(&after);
+        return std::to_string((after.QuadPart - before.QuadPart) * 1000 / frequency.QuadPart);
+    }
+    throw std::invalid_argument("call is not one cameraunlock_testing_win32 makes: " + call);
+}
+
+}  // namespace
+
+std::int32_t cameraunlock_testing_win32(const char* call, const char* argument, char* buffer, std::int32_t capacity) {
+    std::int32_t length = CAMERAUNLOCK_ERROR;
+    const std::int32_t status = Guarded("cameraunlock_testing_win32", [&] {
+        Require(call != nullptr, "call is NULL");
+        length = CopyOut(Win32Call(call, argument), buffer, capacity, true);
+        return CAMERAUNLOCK_OK;
+    });
+    return status == CAMERAUNLOCK_OK ? length : status;
+}
+
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+std::int32_t cameraunlock_testing_trap(void) {
+    __builtin_trap();
+}
+#endif
+
+#endif
+
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+
+std::int32_t cameraunlock_host_tick(void) {
+    return Guarded("cameraunlock_host_tick", [&] {
+        ConfigState& c = TheConfig();
+        if (c.polled) c.poller.load()->Poll();
+        Session& session = TheSession();
+        for (View& view : session.views) {
+            if (view.receiver.IsSupervising()) view.receiver.SupervisorStep(SteadyMicros());
+        }
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_host_received(void* receiver, const char* buffer, std::int32_t bytes, std::int32_t error,
+                                        const void* sender) {
+    return Guarded("cameraunlock_host_received", [&] {
+        Require(receiver != nullptr && sender != nullptr && (bytes < 0 || buffer != nullptr),
+                "the receiver, the sender or the datagram is NULL");
+        static_cast<UdpReceiver*>(receiver)->Received(buffer, bytes, error, *static_cast<const sockaddr_in*>(sender));
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_host_receive_failed(void* receiver, const char* what) {
+    return Guarded("cameraunlock_host_receive_failed", [&] {
+        Require(receiver != nullptr && what != nullptr, "the receiver or the reason is NULL");
+        static_cast<UdpReceiver*>(receiver)->ReceiveLoopFailed(what);
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+#endif
+
+std::int32_t cameraunlock_hotkeys_take(void) {
+    return TheConfig().pressed.exchange(0);
+}
+
+void cameraunlock_hotkeys_drop(void) {
+    ConfigState& c = TheConfig();
+    // First, so a key down now ends as nothing: its tap or its hold would otherwise be answered
+    // after this, when the host is acting on keys again.
+    if (input::HotkeyPoller* poller = c.poller.load()) poller->DisarmPresses();
+    c.pressed.store(0);
+}

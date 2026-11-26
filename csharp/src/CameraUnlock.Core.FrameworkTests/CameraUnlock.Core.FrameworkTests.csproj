@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The xunit suite runs on net8.0 only, so this console runs the file-system
+       scenarios (the checked writer and the config owner, with killed-child runs of both) and the canonical INI reader, editor, key binding, value codec, config table, head-tracking table, Defaults.ini and its location, preferences and INI mutation fixtures, and the canonical config example, on the
+       desktop Framework runtimes the library ships for: net35 runs on CLR 2.0, net472 on CLR 4.
+       `pixi run test-framework` runs both. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net35;net472</TargetFrameworks>
+    <AssemblyName>CameraUnlock.Core.FrameworkTests</AssemblyName>
+    <RootNamespace>CameraUnlock.Core.Tests</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\CheckedFileWriterScenarios.cs" Link="CheckedFileWriterScenarios.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\ConfigOwnerScenarios.cs" Link="ConfigOwnerScenarios.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\CanonicalIniFixtures.cs" Link="CanonicalIniFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\IniEditorFixtures.cs" Link="IniEditorFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Input\KeyBindingFixtures.cs" Link="KeyBindingFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\ValueCodecFixtures.cs" Link="ValueCodecFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\ConfigTableFixtures.cs" Link="ConfigTableFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\HeadTrackingConfigTableFixtures.cs" Link="HeadTrackingConfigTableFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\DefaultsIniFixtures.cs" Link="DefaultsIniFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\DefaultsLocationFixtures.cs" Link="DefaultsLocationFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\PreferencesFixtures.cs" Link="PreferencesFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\IniMutationFixtures.cs" Link="IniMutationFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\CanonicalConfigExample.cs" Link="CanonicalConfigExample.cs" />
+    <Compile Include="..\..\testing\IniMutations.cs" Link="IniMutations.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CameraUnlock.Core\CameraUnlock.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,325 @@
+[workspace]
+name = "cameraunlock-core"
+version = "1.0.0"
+description = "Cross-platform head tracking library for Unity game mods"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-64"]
+
+[tasks]
+# Testing
+# The whole suite but test-linux-probe, which needs Docker: what a session runs on the
+# tree about to become main. `check` is what CI runs; the rest need what a CI runner
+# lacks (the Windows ".NET Framework 3.5" feature, core's full history, the desktop
+# session the input tests use).
+test = { depends-on = ["check", "test-powershell", "test-framework-net35", "test-isolated-input-host", "test-rig-guard"] }
+test-csharp = "dotnet test csharp --verbosity normal"
+test-quick = "dotnet test csharp --verbosity quiet"
+test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
+
+# The xunit suite runs on net8.0 only. CheckedFileWriter is File.Replace and File.Move,
+# and each runtime has its own implementation of those, so its scenarios run again here
+# on the desktop Framework runtimes the library ships for. net472 (CLR 4) is part of
+# `check`. net35 runs on CLR 2.0, which needs the Windows ".NET Framework 3.5" feature;
+# the CI image has not been checked for it, so net35 runs through `test-framework` only.
+build-framework-tests = "dotnet build csharp/src/CameraUnlock.Core.FrameworkTests -c Debug --nologo -v quiet"
+test-framework-net35 = { cmd = "csharp/src/CameraUnlock.Core.FrameworkTests/bin/Debug/net35/CameraUnlock.Core.FrameworkTests.exe", depends-on = ["build-framework-tests"] }
+test-framework-net472 = { cmd = "csharp/src/CameraUnlock.Core.FrameworkTests/bin/Debug/net472/CameraUnlock.Core.FrameworkTests.exe", depends-on = ["build-framework-tests"] }
+test-framework = { depends-on = ["test-framework-net35", "test-framework-net472"] }
+
+# The C++ half of the library has its own suite. It is a separate build system,
+# so it needs its own task - without one `pixi run test` silently covers only
+# the C# port, and a C++-only regression (the two interpolators, the projection
+# maths, the receivers) reaches every native mod ungated.
+test-cpp = { cmd = "ctest --test-dir cpp/build-test -C Release --output-on-failure", depends-on = ["build-cpp"] }
+# Windows, interactive desktop only, so not part of `check`: holds F24 down with SendInput and
+# checks that GetAsyncKeyState reports no code outside 0x01-0xFE for it, which normalisation N1
+# (a legacy hotkey code outside that range imports as unbound) rests on. Exit 2: no input desktop.
+probe-n1 = { cmd = "cpp/build-test/tests/Release/cameraunlock_tests.exe --probe-getasynckeystate", depends-on = ["build-cpp"] }
+# Needs Docker with a Linux engine, so not part of `check`: builds containers/linux-probe (Debian
+# pinned by digest, apt pinned to a snapshot, distro Wine and Mono, and wine-mono pinned by URL and
+# SHA-256), then runs the `--probe-defaults-ini` mode of the C++ test binary and of both
+# FrameworkTests builds in containers with no network, a read-only root and no capabilities: under
+# Wine over a non-ASCII home and each XDG_CONFIG_HOME case, and natively on Mono over the read-only
+# owner. Fails on any case that differs from its expectation; output under build-linux-probe/.
+test-linux-probe = { cmd = "node scripts/test-linux-probe.mjs", depends-on = ["build-cpp", "build-framework-tests"] }
+# Every optional module ON. They default OFF for a consumer that does not want them,
+# but a module nothing here configures is a module nothing here compiles: with the
+# defaults, `pixi run check` built none of the RE Engine driver, none of the Unreal
+# runtime helpers, and neither the hook manager nor camera discovery, so a compile
+# error in any of them reached a mod repo instead of this one. MinHook and the
+# REFramework SDK headers are both vendored, so this needs nothing off the network
+# and nothing from a game install.
+# The strict header TU is built in Debug as well: config_table.h once drew C4702 (unreachable
+# code) in Debug and not in Release, and mods build their /W4 /WX tests in Debug.
+build-cpp = { cmd = "cmake -S cpp -B cpp/build-test -DCAMERAUNLOCK_BUILD_HOOKS=ON -DCAMERAUNLOCK_BUILD_DISCOVERY=ON -DCAMERAUNLOCK_BUILD_UNREAL=ON -DCAMERAUNLOCK_BUILD_REFRAMEWORK=ON -DCAMERAUNLOCK_BUILD_C=ON && cmake --build cpp/build-test --config Release && cmake --build cpp/build-test --config Debug --target cameraunlock_headers_strict", env = { CMAKE_BUILD_TYPE = "Release" } }
+
+# Pipeline conformance vectors. data/pipeline-conformance.json is the executable
+# form of the "Check." paragraphs in docs/porting-the-pipeline.md, and the
+# language ports that reimplement the pipeline run the SAME file. Running it here
+# against both of our own implementations is what makes core the place a moved
+# constant or a reordered step fails first, rather than a mod repo six weeks
+# later. The two harnesses hold no assertion logic - run-vectors.mjs owns that,
+# so every implementation is checked by the same code.
+# (Distinct from `conformance` below, which lints mod REPOS against the
+# packaging invariants. This one checks the maths.)
+build-vectors-cpp = "cmake -S scripts/pipeline-vectors/harness/cpp -B scripts/pipeline-vectors/harness/cpp/build && cmake --build scripts/pipeline-vectors/harness/cpp/build --config Release"
+vectors-cpp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/cpp/build/Release/conformance_harness.exe", depends-on = ["build-vectors-cpp"] }
+
+build-vectors-csharp = "dotnet build scripts/pipeline-vectors/harness/csharp/ConformanceHarness.csproj -c Release --nologo -v quiet"
+vectors-csharp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/csharp/bin/Release/net8.0/ConformanceHarness.exe", depends-on = ["build-vectors-csharp"] }
+
+# The C interface (docs/c-interface.md), through CameraUnlockCoreTesting.dll and the C headers
+# alone. It has one entry to the pipeline, the frame, so it runs the vectors that go datagram in,
+# pose out, and holds the boundary a foreign host relies on: units, struct layout, call order.
+# Every other vector is named in scripts/pipeline-vectors/harness/c/expected-skips.txt and skipped
+# by the harness with its reason: the ones that drive an interpolator, a processor or the Euler
+# round trip on its own, the four that assert whether a datagram carried a trailer, which the
+# interface does not say, and the two whose stream drops to zero and repeats, which the
+# receiver's lost-tracker gate holds.
+build-vectors-c = "cmake -S scripts/pipeline-vectors/harness/c -B scripts/pipeline-vectors/harness/c/build && cmake --build scripts/pipeline-vectors/harness/c/build --config Release --target conformance_harness_c"
+vectors-c = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/c/build/Release/conformance_harness_c.exe --expect-skips-file scripts/pipeline-vectors/harness/c/expected-skips.txt", depends-on = ["build-vectors-c"] }
+
+# java/ (docs/java-agent-mod.md): the binding to the C interface a Java mod compiles into its own
+# jar, and the boot class of a Java agent mod. build-java compiles it for Java 22, the first
+# release where java.lang.foreign is final, and puts the three libraries its tests load beside the
+# class folders. They come out of the C harness's build tree, which build-vectors-c configures.
+# The DLL is Windows only; test-java-linux runs the module on Linux in a container.
+# The C interface as WebAssembly modules and their JVM classes (docs/core-jar.md), under cpp/build-wasm.
+# The toolchain is fetched once per user and checked against its pins (scripts/wasm-toolchain.mjs).
+build-wasm = "node scripts/build-wasm.mjs"
+build-java = { cmd = "cmake --build scripts/pipeline-vectors/harness/c/build --config Release --target cameraunlock_c cameraunlock_c_testing cameraunlock_c_other_abi && node scripts/build-java.mjs", depends-on = ["build-vectors-c", "build-wasm"] }
+# The binding against docs/c-interface.md's layout table and through CameraUnlockCoreTesting.dll,
+# a library of another ABI refused at load, and the boot class run as a game's launcher runs it.
+test-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests", depends-on = ["build-java"] }
+# The module on Linux, where PosixHost answers its Win32 calls, in a pinned Linux container.
+# Needs Docker with Linux containers, so it is not part of check.
+test-java-linux = { cmd = "node scripts/test-java-linux.mjs", depends-on = ["build-java"] }
+# What a load, a frame and a settings save cost on each backend: docs/core-jar.md quotes it.
+bench-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Bench && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Bench", depends-on = ["build-java"] }
+# The vectors the C harness runs, through the Java binding: what they hold is Java's declaration
+# of the three structs a frame crosses in, its units and its order of calls. The skips are the C
+# harness's, for its reasons.
+vectors-java = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness \"java --enable-native-access=ALL-UNNAMED -cp java/build/classes;java/build/test-classes;java/build/lib/* com.cameraunlock.core.ConformanceHarness\" --expect-skips-file scripts/pipeline-vectors/harness/c/expected-skips.txt && node scripts/pipeline-vectors/run-vectors.mjs --harness \"java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp java/build/classes;java/build/test-classes;java/build/lib/* com.cameraunlock.core.ConformanceHarness\" --expect-skips-file scripts/pipeline-vectors/harness/c/expected-skips.txt", depends-on = ["build-java"] }
+
+vectors = { depends-on = ["vectors-cpp", "vectors-csharp", "vectors-c", "vectors-java"] }
+
+# The powershell/ modules and the install bodies are a Windows surface; CI runs on
+# Windows too, so the suites that need no history, game or desktop are part of `check`.
+# They cover the vendoring soak that keeps update-deps off freshly-published upstream
+# releases, ReleaseWorkflow.psm1's release-path behaviour that only misbehaves under
+# Windows PowerShell 5.1, sync-core-notices.ps1 stamping the pin a merge or staged bump
+# will commit, and the install and uninstall bodies.
+test-powershell-soak = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ModLoaderSetup.Soak.Tests.ps1"
+test-powershell-release = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ReleaseWorkflow.Tests.ps1"
+test-sync-core-notices = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-sync-core-notices.ps1"
+# conformance.ps1's ci-minutes check over throwaway repos. Needs core's full history and pixi.
+test-ci-minutes = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-ci-minutes.ps1"
+# conformance.ps1's pipeline-port and changelog-unreleased checks over throwaway git repos. Needs git and pixi.
+test-conformance-checks = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-conformance-checks.ps1"
+# DifferentialGate.psm1 over a throwaway mod repo. Needs git and node.
+test-powershell-differential-gate = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/DifferentialGate.Tests.ps1"
+test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedGameTest.Tests.ps1"
+# HeadstartCatalog.psm1 rewriting a package manifest for a dev build. Reaches no network.
+test-powershell-headstart-catalog = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/HeadstartCatalog.Tests.ps1"
+# The rig lock and the session wrapper of IsolatedGameTest.psm1, with the takers as separate
+# processes and a windowless stand-in for the game. It starts no game and sends no input.
+test-powershell-game-rig = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/GameRig.Tests.ps1", depends-on = ["build-rig-guard"] }
+# The isolated-input host a C# mod loads for a background in-game test (docs/isolated-input.md):
+# cameraunlock/dev/isolated_input.h as a DLL. The build task is the only thing here that compiles
+# that header's Win32 half, and it leaves the DLL where IsolatedGameTest.psm1 copies it from:
+# cpp/tools/isolated_input_host/build/Release/CameraUnlockIsolatedInput.dll. The test starts it
+# from the net472 CameraUnlock.Core in a child Windows PowerShell and reads the key state functions
+# back. It detours user32 in that child alone, and sends no input to any window.
+build-isolated-input-host = "cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build && cmake --build cpp/tools/isolated_input_host/build --config Release"
+test-isolated-input-host = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedInputHost.Tests.ps1", depends-on = ["build-isolated-input-host", "build-debug"] }
+# The guarded launch of a background test's game (docs/isolated-input.md): the guard that ends a
+# game on its first foreground window or display mode change, the shim that keeps the game from
+# trying, and the misbehaving stand-in the test runs, each built for x64 and Win32 into
+# cpp/tools/rig_guard/build/out, where Start-IsolatedGame looks for them. The test starts no game:
+# it runs the stand-in for 60 seconds (or the number passed) with a second process writing down
+# every foreground and display change on the real desktop, and fails if any was the stand-in's.
+build-rig-guard = "cmake -S cpp/tools/rig_guard -B cpp/tools/rig_guard/build/x64 -A x64 && cmake --build cpp/tools/rig_guard/build/x64 --config Release && cmake -S cpp/tools/rig_guard -B cpp/tools/rig_guard/build/x86 -A Win32 && cmake --build cpp/tools/rig_guard/build/x86 --config Release"
+test-rig-guard = { args = [{ arg = "seconds", default = "60" }], cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/RigGuard.Tests.ps1 -Seconds {{ seconds }}", depends-on = ["build-rig-guard", "build-isolated-input-host"] }
+# The install and uninstall bodies, run through a real cmd.exe on synthetic game folders whose
+# paths hold `!`. They start no game and touch no real install.
+test-uninstall-preserve = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-preserve.ps1"
+test-install-prompt = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-install-prompt.ps1"
+test-javaagent-installer = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-javaagent-installer.ps1"
+test-shim-installers = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-shim-installers.ps1"
+test-loader-switch = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-loader-switch.ps1"
+test-cecil-installer = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-cecil-installer.ps1"
+# validate-manifest.mjs over manifest_variants packages, and Assert-ManifestSeedsMatchShipped. Needs node.
+test-manifest-variants = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-manifest-variants.ps1"
+test-install = { depends-on = ["test-uninstall-preserve", "test-install-prompt", "test-javaagent-installer", "test-shim-installers", "test-loader-switch", "test-cecil-installer", "test-manifest-variants"] }
+test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test", "test-powershell-headstart-catalog", "test-powershell-game-rig", "test-install"] }
+
+# Building
+build = "dotnet build csharp -c Release"
+build-debug = "dotnet build csharp -c Debug"
+clean = "dotnet clean csharp"
+restore = "dotnet restore csharp"
+
+# Full rebuild
+rebuild = { depends-on = ["clean", "build"] }
+
+# Packaging
+pack = "dotnet pack csharp -c Release -o dist"
+
+# Validate a built installer ZIP is a coherent manifest-mode package
+# (delivery_mode == "manifest" and every declared source exists in the zip).
+# No args (or "."): validates the host repo's own release/*-installer.zip - run after
+# packaging. In a repo converted to the canonical config format it also opens
+# the newest release/*-nexus.zip and fails when it carries a file at a path
+# data/config-format.json records as installed, or at the legacy file beside
+# one (or at a tail of either, for a ZIP extracted into the exe folder): an
+# update extracted over the game folder would replace the player's
+# CameraUnlock.ini with the defaults, or the legacy file an older build reads
+# and the mod imports while CameraUnlock.ini is absent. Unconverted repos are
+# not checked, so their Nexus ZIPs keep the config until their conversion
+# takes it out of the Nexus staging.
+# A manifest with a config descriptor (the `config` block a launcher reads to find the mod's
+# canonical config and the rows the game keeps for itself) has it held to every rule in
+# scripts/check-config-descriptor.mjs, against the repo the ZIP was built from. A converted
+# repo's package fails a seed or files[] row that writes its config or legacy file, with a
+# block or without one.
+# Or pass repo tokens / zip paths to validate across a checkout:
+#   pixi run validate-manifest
+#   pixi run validate-manifest dying-light-2 bioshock-remastered
+#   pixi run validate-manifest path/to/Mod-v1.0.0-installer.zip
+validate-manifest = "node scripts/validate-manifest.mjs"
+
+# Check THIRD-PARTY-NOTICES.md actually reproduces the licence of everything
+# compiled into the binary. Copy-LicenceNotices covers whether the file ships;
+# this covers whether its contents discharge the obligation.
+# No args: validates the host repo. Or pass repo tokens to sweep a checkout:
+#   pixi run validate-notices
+#   pixi run validate-notices witcher-3 subnautica-2
+validate-notices = "node scripts/validate-notices.mjs"
+
+# Lint a mod repo, or the whole fleet, against the invariants core owns: the
+# install/uninstall wrapper tails, the delayed-expansion pin that decides
+# whether a game path containing `!` installs, the arg-parser contract lopari
+# drives, .cmd line endings, the canonical pixi task set, SHA-pinned actions,
+# the notices/submodule core commit, launcher-manifest.json, LICENSE, the
+# README claims AGENTS.md forbids, and the canonical config format
+# (config-format, config-legacy-reader, config-preserve; see
+# scripts/check-canonical-config.mjs), and the launcher-manifest.json config descriptor
+# (config-descriptor; see scripts/check-config-descriptor.mjs), a port of the tracking pipeline
+# that runs no pipeline vectors or sits beside native code that links core (pipeline-port), and
+# an [Unreleased] changelog section of more than 50 bullets (changelog-unreleased, a warning).
+# Reports; sync-templates.ps1 fixes.
+#   pixi run conformance
+#   pixi run conformance -All
+#   pixi run conformance -All -Json
+#   pixi run conformance -Repo valheim -Check install-wrapper,action-pins
+conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/conformance.ps1"
+
+# Render the README sections core owns (the OpenTrack setup block, including the
+# Centring paragraph, and Community & Support) and, in a repo converted to the
+# canonical config format, the config block inside Configuration, and report
+# where a repo's copy has drifted. Everything else in a README is hand-written on
+# purpose; see scripts/templates/readme.md for which section is whose and why.
+#   pixi run readme                        # check this repo
+#   pixi run readme --all
+#   pixi run readme --all --write
+#   pixi run readme --print opentrack
+#   pixi run readme --print config         # this repo's config block, for NEXUS_MODS.md
+readme = "node scripts/generate-readme.mjs"
+
+# Holds the README config block to what it says about Defaults.ini for a committed file with
+# default rows, and to the block it rendered before Defaults.ini for a file of values.
+test-generate-readme = "node scripts/test-generate-readme.mjs"
+
+# Push core's templates back out across the fleet: install/uninstall wrapper
+# tails, the mechanical half of update-deps.ps1, GitHub Actions pins from
+# scripts/templates/action-pins.json, and the `sync` pixi task. Reports by
+# default; -Apply writes files and never stages or commits.
+#   pixi run sync-templates -All
+#   pixi run sync-templates -All -Apply
+#   pixi run sync-templates -Repo valheim -Only action-pins
+sync-templates = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-templates.ps1"
+
+# Schema gate for data/games.json. Nothing checked this file until now, which
+# is how a schema-v1 required key (`env_var`) went missing from an entry with
+# every test still green. Default run reads only data/games.json, so it is
+# safe in a clean CI checkout; -fleet adds the sibling-repo cross-checks
+# (launcher-manifest game_ids, repo ownership) that need the mods beside it.
+#
+# Belongs in conformance.ps1 as a rule once that file settles - it is the
+# same class of invariant as the rest of `pixi run conformance`, and lives
+# here separately only to keep out of a concurrent edit of that script.
+validate-games = "node scripts/validate-games.mjs"
+validate-games-fleet = "node scripts/validate-games.mjs --fleet"
+
+# data/config-schema.json is the single description of the config vocabulary; the C#
+# and C++ alias tables are generated from it. This fails when either generated file is
+# stale, which is the gate that stops the two languages drifting apart again. It also
+# covers the key-name tables from data/keys.json and the two C++ test expectations:
+# cpp/tests/preference_modes.g.h (data/pipeline-conformance.json's preference_modes) and
+# cpp/tests/concept_ranges.g.h (the schema's ranges).
+#   node scripts/generate-config-schema.mjs   regenerates them all
+check-config-schema = "node scripts/generate-config-schema.mjs --check"
+
+# data/config-format.json names the repos that migrate to the canonical config format and
+# where each one's config lives. This checks its shape and pins its `legacy` set, the repos
+# that published a pre-canonical build and so carry a legacy import: adding or removing a
+# name fails, because no repo publishes a pre-canonical build after the set lands.
+check-config-format = "node scripts/check-config-format.mjs"
+
+# scripts/lib/canonical-ini.mjs is the canonical INI grammar for core's scripts; this runs
+# data/fixtures/canonical-ini/reader/ through it, the fixtures the C++ and C# readers run,
+# and the hotkey codec in scripts/lib/key-bindings.mjs through keys/cases.tsv. It also holds
+# the canonical config lint (scripts/check-canonical-config.mjs) to its rules.
+check-canonical-ini-js = "node scripts/test-canonical-config.mjs"
+
+# The C++ and C# code in docs/*.md is taken from tests that compile and run it
+# (docs/canonical-config.md from cpp/tests/canonical_config_example_tests.cpp and
+# csharp/src/CameraUnlock.Core.Tests/Config/CanonicalConfigExample.cs). This fails when a
+# block no longer matches the lines it names, or a C++ or C# block names none.
+check-doc-examples = "node scripts/check-doc-examples.mjs"
+
+# scripts/check-config-descriptor.mjs holds the launcher-manifest.json config descriptor to its
+# rules; validate-manifest runs them on a built ZIP and conformance (config-descriptor) on the
+# committed manifest. This checks that a good descriptor passes and that one mutation per rule
+# fails, and runs the per_game generator, both callers and the packager's ConvertTo-Json round trip.
+# It also holds a converted repo's manifest and install scripts to seeding and shipping no config
+# (validate-manifest, conformance config-descriptor and config-preserve).
+# Windows: it runs conformance.ps1 and Windows PowerShell.
+test-config-descriptor = "node scripts/test-config-descriptor.mjs"
+
+# scripts/validate-manifest.mjs on built ZIPs: a patches[].tool must be in the ZIP, and it and the
+# files beside it in its folder are declared payload; with no arguments, only the Nexus ZIP of the
+# installer ZIP just validated is checked, and any other one is skipped as stale with a warning.
+test-validate-manifest = "node scripts/test-validate-manifest.mjs"
+# scripts/jvm-site-config.ps1 against data/fixtures/jvm-site-config/vectors.json, the cases
+# Lopari's jvm_site_config deploy step runs too, under Windows PowerShell 5.1 as install.cmd runs it.
+test-jvm-site-config = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-jvm-site-config.ps1"
+
+# The fleet report over every canonical repo checked out beside this core: game-local
+# (section, key) pairs shared by three or more repos (candidates for a concept), the
+# game-local section names in use, and concept values that differ from the schema default.
+# The lint itself runs in conformance (config-format), or on its own:
+#   node scripts/check-canonical-config.mjs valheim abzu
+config-report = "node scripts/check-canonical-config.mjs --report"
+
+# Development workflow.
+#
+# Ordered cheapest and most deterministic first, because pixi aborts on the first
+# failing dependency and the order decides how long a developer (and CI) waits to
+# find out. The eight node gates need no compiler and finish in seconds;
+# they used to sit at the END, behind a full C# build and both test suites, so a
+# stale generated alias table cost several minutes to discover. The vectors come
+# next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
+# so a syntax error in either surfaces here rather than in the slower full builds
+# below.
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-jvm-site-config", "test-generate-readme", "validate-games", "vectors", "test-java", "build-debug", "test-quick", "test-framework-net472", "test-cpp", "test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-powershell-differential-gate", "test-install"] }
+
+# Documentation
+# doc = "docfx docfx.json"
+
+[dependencies]
+# 20.12 for Dirent.parentPath, which the wasm and java build scripts read.
+nodejs = ">=20.12"
+# For java/. 25 is the runtime the one Java agent mod's game ships (Project Zomboid 42), and
+# build-java compiles for 22 with it.
+openjdk = ">=25,<26"

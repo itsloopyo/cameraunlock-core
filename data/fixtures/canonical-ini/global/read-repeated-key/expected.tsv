@@ -1,0 +1,4 @@
+# UdpPort three times across a repeated section: the last occurrence wins, whatever the earlier
+# ones hold.
+value	UdpPort	accepted	7	5001
+value	WorldSpaceYaw	accepted	4	false

@@ -1,0 +1,546 @@
+#include <cameraunlock/input/hotkey_poller.h>
+
+#include <algorithm>
+#include <vector>
+#include <stdexcept>
+
+#include "cameraunlock/os/win32.h"
+
+namespace cameraunlock::input {
+
+constexpr int kKeyPressedMask = 0x8000;
+
+HotkeyPoller::~HotkeyPoller() {
+    Stop();
+}
+
+// The polling thread captures a this-pointer, so the running thread cannot be
+// handed over: it is stopped on the source and restarted on the destination.
+// Without the restart, a poller moved into a container silently stopped firing
+// hotkeys.
+HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) {
+    const bool wasRunning = other.m_running.load();
+    const int interval = other.m_pollInterval.load();
+    other.Stop();
+
+    m_toggleKey.store(other.m_toggleKey.load());
+    m_recenterKey.store(other.m_recenterKey.load());
+    m_pollInterval.store(interval);
+    m_toggleCallback = std::move(other.m_toggleCallback);
+    m_recenterCallback = std::move(other.m_recenterCallback);
+
+    {
+        std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
+        m_hotkeys = std::move(other.m_hotkeys);
+        m_holdHotkeys = std::move(other.m_holdHotkeys);
+        m_tapHotkeys = std::move(other.m_tapHotkeys);
+        m_nextHotkeyId = other.m_nextHotkeyId;
+    }
+
+    if (wasRunning) Start(interval);
+}
+
+HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) {
+    if (this != &other) {
+        const bool wasRunning = other.m_running.load();
+        const int interval = other.m_pollInterval.load();
+        Stop();
+        other.Stop();
+
+        m_toggleKey.store(other.m_toggleKey.load());
+        m_recenterKey.store(other.m_recenterKey.load());
+        m_pollInterval.store(interval);
+        m_toggleCallback = std::move(other.m_toggleCallback);
+        m_recenterCallback = std::move(other.m_recenterCallback);
+
+        {
+            std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
+            m_hotkeys = std::move(other.m_hotkeys);
+            m_holdHotkeys = std::move(other.m_holdHotkeys);
+            m_tapHotkeys = std::move(other.m_tapHotkeys);
+            m_nextHotkeyId = other.m_nextHotkeyId;
+        }
+
+        if (wasRunning) Start(interval);
+    }
+    return *this;
+}
+
+void HotkeyPoller::SetToggleKey(int vkCode, HotkeyCallback callback) {
+    m_toggleKey.store(vkCode);
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    m_toggleCallback = std::move(callback);
+}
+
+void HotkeyPoller::SetRecenterKey(int vkCode, HotkeyCallback callback) {
+    m_recenterKey.store(vkCode);
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    m_recenterCallback = std::move(callback);
+}
+
+int HotkeyPoller::AddHotkey(int vkCode, HotkeyCallback callback) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    int id = m_nextHotkeyId++;
+    m_hotkeys.push_back({id, vkCode, false, std::move(callback)});
+    return id;
+}
+
+int HotkeyPoller::AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
+                                HotkeyCallback onDown) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    int id = m_nextHotkeyId++;
+    HoldHotkeyEntry entry;
+    entry.id = id;
+    entry.vkCode = vkCode;
+    entry.hold = std::chrono::milliseconds(holdMs);
+    entry.onTap = std::move(onTap);
+    entry.onHold = std::move(onHold);
+    entry.onDown = std::move(onDown);
+    m_holdHotkeys.push_back(std::move(entry));
+    return id;
+}
+
+int HotkeyPoller::AddTapHotkey(int vkCode, int holdMs, int tapGapMs, std::vector<HotkeyCallback> onTaps,
+                               HotkeyCallback onHold, std::function<bool()> accepts) {
+    if (onTaps.size() < 2) throw std::invalid_argument("AddTapHotkey needs an action for each of two taps or more");
+    for (const HotkeyCallback& onTap : onTaps) {
+        if (!onTap) throw std::invalid_argument("AddTapHotkey needs an action for every number of taps");
+    }
+    if (!onHold) throw std::invalid_argument("AddTapHotkey needs an action for a hold");
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    int id = m_nextHotkeyId++;
+    TapHotkeyEntry entry;
+    entry.id = id;
+    entry.vkCode = vkCode;
+    entry.hold = std::chrono::milliseconds(holdMs);
+    entry.tapGap = std::chrono::milliseconds(tapGapMs);
+    entry.onTaps = std::move(onTaps);
+    entry.onHold = std::move(onHold);
+    entry.accepts = std::move(accepts);
+    m_tapHotkeys.push_back(std::move(entry));
+    return id;
+}
+
+void HotkeyPoller::RemoveHotkey(int id) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    auto it = std::find_if(m_hotkeys.begin(), m_hotkeys.end(),
+        [id](const HotkeyEntry& entry) { return entry.id == id; });
+    if (it != m_hotkeys.end()) {
+        m_hotkeys.erase(it);
+    }
+    auto hold = std::find_if(m_holdHotkeys.begin(), m_holdHotkeys.end(),
+        [id](const HoldHotkeyEntry& entry) { return entry.id == id; });
+    if (hold != m_holdHotkeys.end()) {
+        m_holdHotkeys.erase(hold);
+    }
+    auto tap = std::find_if(m_tapHotkeys.begin(), m_tapHotkeys.end(),
+        [id](const TapHotkeyEntry& entry) { return entry.id == id; });
+    if (tap != m_tapHotkeys.end()) {
+        m_tapHotkeys.erase(tap);
+    }
+}
+
+bool HotkeyPoller::Start(int pollIntervalMs) {
+    if (m_running.load()) {
+        return true;
+    }
+
+    m_pollInterval.store(pollIntervalMs);
+    m_stopFlag.store(false);
+
+    m_toggleKeyDown.store(false);
+    m_recenterKeyDown.store(false);
+    {
+        std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+        for (auto& entry : m_hotkeys) {
+            entry.keyDown = false;
+        }
+        for (auto& entry : m_holdHotkeys) {
+            entry.keyDown = false;
+        }
+        for (auto& entry : m_tapHotkeys) {
+            entry.keyDown = false;
+            entry.press = TapHotkeyEntry::Press::kIgnored;
+            entry.waiting = false;
+            entry.taps = 0;
+        }
+        m_polled = false;
+    }
+
+    // m_running is set AFTER the thread exists, and rolled back if it does not.
+    // Setting it first meant a std::thread constructor that threw left m_running
+    // true with no thread behind it: Start() then returned true immediately on
+    // every subsequent call and IsRunning() reported healthy, so the mod's hotkeys
+    // were permanently dead while every API insisted they were fine. That is the
+    // silent failure the throw is supposed to replace, not accompany.
+    try {
+        m_thread = std::thread(&HotkeyPoller::PollLoop, this);
+    } catch (...) {
+        m_stopFlag.store(true);
+        throw;
+    }
+    m_running.store(true);
+    return true;
+}
+
+void HotkeyPoller::Stop() {
+    if (!m_running.load()) {
+        return;
+    }
+
+    m_stopFlag.store(true);
+
+    if (m_thread.joinable()) {
+        m_thread.join();
+    }
+
+    m_running.store(false);
+}
+
+void HotkeyPoller::SetToggleKeyCode(int vkCode) {
+    m_toggleKey.store(vkCode);
+}
+
+void HotkeyPoller::SetRecenterKeyCode(int vkCode) {
+    m_recenterKey.store(vkCode);
+}
+
+void HotkeyPoller::CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                              bool allowFire, KeyState isDown, std::vector<HotkeyCallback>& toFire) {
+    if (vkCode == 0 || !callback) return;
+
+    bool pressed = isDown(vkCode);
+    if (pressed && !keyDown.load()) {
+        keyDown.store(true);
+        if (allowFire) toFire.push_back(callback);
+    } else if (!pressed && keyDown.load()) {
+        keyDown.store(false);
+    }
+}
+
+void HotkeyPoller::PollLoop() {
+    while (!m_stopFlag.load()) {
+        Poll();
+
+        int interval = m_pollInterval.load();
+        std::this_thread::sleep_for(std::chrono::milliseconds(interval));
+    }
+}
+
+// GetAsyncKeyState sees keystrokes system-wide, so without a foreground guard
+// a user typing End/Home/PageUp in another window silently toggles the mod.
+// Key edges are still tracked while unfocused (allowFire=false) so a press
+// that starts in another window doesn't fire a stale callback on refocus.
+namespace {
+#if CAMERAUNLOCK_WIN32
+bool IsOwnProcessForeground() {
+    DWORD foregroundPid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
+    return foregroundPid == GetCurrentProcessId();
+}
+
+bool IsKeyDown(int vkCode) {
+    return (GetAsyncKeyState(vkCode) & kKeyPressedMask) != 0;
+}
+#else
+bool IsOwnProcessForeground() {
+    return true;
+}
+
+bool IsKeyDown(int) {
+    return false;
+}
+#endif
+}  // namespace
+
+void HotkeyPoller::Poll() {
+    PollAt(std::chrono::steady_clock::now(), IsOwnProcessForeground(), &IsKeyDown);
+}
+
+void HotkeyPoller::DisarmPresses() {
+    DisarmPressesWith(&IsKeyDown);
+}
+
+void HotkeyPoller::DisarmPressesWith(KeyState isDown) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    for (auto& entry : m_hotkeys) {
+        if (entry.vkCode != 0 && isDown(entry.vkCode)) entry.keyDown = true;
+    }
+    for (auto& entry : m_holdHotkeys) {
+        if (entry.vkCode == 0) continue;
+        // The key is read here as well: one that went down since the last poll is a
+        // press this call is for, and the next poll must not find it a new one.
+        if (entry.keyDown || isDown(entry.vkCode)) {
+            entry.keyDown = true;
+            entry.armed = false;
+        }
+    }
+    for (auto& entry : m_tapHotkeys) {
+        if (entry.vkCode == 0) continue;
+        entry.waiting = false;
+        entry.taps = 0;
+        if (entry.keyDown || isDown(entry.vkCode)) {
+            entry.keyDown = true;
+            entry.press = TapHotkeyEntry::Press::kIgnored;
+        }
+    }
+}
+
+void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowFire, KeyState isDown) {
+    // Edge detection happens under the lock; the callbacks themselves are collected and
+    // invoked after it is released. Firing in place deadlocked the polling thread against
+    // itself for any callback that rebinds a key, since AddHotkey / RemoveHotkey /
+    // SetToggleKey / SetRecenterKey all take one of these two (non-recursive) mutexes -
+    // and "re-register bindings on config reload, triggered by a hotkey" is a normal
+    // shape for a mod.
+    std::vector<HotkeyCallback> toFire;
+
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        CollectKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire, isDown, toFire);
+        CollectKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire, isDown, toFire);
+    }
+
+    // Check generic hotkeys
+    {
+        std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+        for (auto& entry : m_hotkeys) {
+            if (entry.vkCode == 0 || !entry.callback) continue;
+
+            bool pressed = isDown(entry.vkCode);
+            if (pressed && !entry.keyDown) {
+                entry.keyDown = true;
+                if (allowFire) toFire.push_back(entry.callback);
+            } else if (!pressed && entry.keyDown) {
+                entry.keyDown = false;
+            }
+        }
+
+        const bool gap = m_polled && now - m_polledAt > std::chrono::milliseconds(kMaxHoldPollGapMs);
+        m_polled = true;
+        m_polledAt = now;
+
+        for (auto& entry : m_holdHotkeys) {
+            if (entry.vkCode == 0) continue;
+
+            bool pressed = isDown(entry.vkCode);
+            if (pressed && entry.keyDown && !entry.held && gap) {
+                // The key may have come up and gone down again unseen, so its time down
+                // counts from here, and a press that may have begun in the background
+                // is not one begun in the foreground.
+                entry.downAt = now;
+                entry.armed = entry.armed && allowFire;
+            }
+            if (pressed && !entry.keyDown) {
+                entry.keyDown = true;
+                entry.armed = allowFire;
+                entry.held = false;
+                entry.downAt = now;
+                if (entry.armed && entry.onDown) toFire.push_back(entry.onDown);
+            }
+            if (pressed && entry.armed && !entry.held && now - entry.downAt >= entry.hold) {
+                // The press is a hold from here whether or not it may run: one that came
+                // of age while the process was in the background is not a tap at its release.
+                entry.held = true;
+                if (allowFire && entry.onHold) toFire.push_back(entry.onHold);
+            } else if (!pressed && entry.keyDown) {
+                entry.keyDown = false;
+                // A release first seen past the hold time was never seen held, and when
+                // the key came up between the two polls is not known: it runs nothing.
+                if (entry.armed && !entry.held && allowFire && now - entry.downAt < entry.hold && entry.onTap) {
+                    toFire.push_back(entry.onTap);
+                }
+            }
+        }
+
+        for (auto& entry : m_tapHotkeys) {
+            if (entry.vkCode == 0) continue;
+            using Press = TapHotkeyEntry::Press;
+
+            bool pressed = isDown(entry.vkCode);
+            if (gap) {
+                // What the key did unseen is not known: the run may have gone on, and a key
+                // still down may be a press begun since, in the foreground or not.
+                entry.waiting = false;
+                entry.taps = 0;
+                if (pressed && entry.keyDown && entry.press != Press::kIgnored && !entry.held) {
+                    entry.press = allowFire ? Press::kFirst : Press::kIgnored;
+                    entry.downAt = now;
+                } else if (!pressed && entry.press == Press::kLater) {
+                    // The run it was the next of is dropped above, so its release starts none.
+                    entry.press = Press::kIgnored;
+                }
+            }
+            // Before the key is looked at, so a press that goes down as the time runs out
+            // is a first press and not the next of the run.
+            if (entry.waiting && now - entry.releasedAt >= entry.tapGap) {
+                entry.waiting = false;
+                if (allowFire) toFire.push_back(entry.onTaps[entry.taps - 1]);
+                entry.taps = 0;
+            }
+            if (pressed && !entry.keyDown) {
+                entry.keyDown = true;
+                entry.held = false;
+                entry.downAt = now;
+                if (!allowFire || (entry.accepts && !entry.accepts())) {
+                    entry.press = Press::kIgnored;
+                } else if (entry.waiting) {
+                    entry.waiting = false;
+                    if (++entry.taps == entry.onTaps.size()) {
+                        entry.press = Press::kLast;
+                        toFire.push_back(entry.onTaps.back());
+                        entry.taps = 0;
+                    } else {
+                        entry.press = Press::kLater;
+                    }
+                } else {
+                    entry.press = Press::kFirst;
+                }
+            }
+            if (pressed && entry.press == Press::kFirst && !entry.held && now - entry.downAt >= entry.hold) {
+                entry.held = true;
+                if (allowFire) toFire.push_back(entry.onHold);
+            } else if (!pressed && entry.keyDown) {
+                entry.keyDown = false;
+                if (entry.press == Press::kFirst && !entry.held && allowFire && now - entry.downAt < entry.hold) {
+                    entry.taps = 1;
+                    entry.waiting = true;
+                    entry.releasedAt = now;
+                } else if (entry.press == Press::kLater && allowFire) {
+                    entry.waiting = true;
+                    entry.releasedAt = now;
+                } else if (entry.press == Press::kLater) {
+                    // Let go in the background: what the run would have been is not known.
+                    entry.taps = 0;
+                }
+                entry.press = Press::kIgnored;
+            }
+        }
+    }
+
+    for (auto& callback : toFire) {
+        callback();
+    }
+}
+
+const char* VirtualKeyToString(int vkCode) {
+    switch (vkCode) {
+        case 0x70: return "F1";
+        case 0x71: return "F2";
+        case 0x72: return "F3";
+        case 0x73: return "F4";
+        case 0x74: return "F5";
+        case 0x75: return "F6";
+        case 0x76: return "F7";
+        case 0x77: return "F8";
+        case 0x78: return "F9";
+        case 0x79: return "F10";
+        case 0x7A: return "F11";
+        case 0x7B: return "F12";
+        case 0x1B: return "Escape";
+        case 0x20: return "Space";
+        case 0x21: return "PageUp";
+        case 0x22: return "PageDown";
+        case 0x24: return "Home";
+        case 0x23: return "End";
+        case 0x2D: return "Insert";
+        case 0x2E: return "Delete";
+        case 0x60: return "NumPad0";
+        case 0x61: return "NumPad1";
+        case 0x62: return "NumPad2";
+        case 0x63: return "NumPad3";
+        case 0x64: return "NumPad4";
+        case 0x65: return "NumPad5";
+        case 0x66: return "NumPad6";
+        case 0x67: return "NumPad7";
+        case 0x68: return "NumPad8";
+        case 0x69: return "NumPad9";
+        case 0x6A: return "NumPad*";
+        case 0x6B: return "NumPad+";
+        case 0x6D: return "NumPad-";
+        case 0x6E: return "NumPad.";
+        case 0x6F: return "NumPad/";
+        case 0x90: return "NumLock";
+        case 0x91: return "ScrollLock";
+        case 0x13: return "Pause";
+        case 0x2C: return "PrintScreen";
+        // Number keys 0-9 (VK codes 0x30-0x39)
+        case 0x30: return "0";
+        case 0x31: return "1";
+        case 0x32: return "2";
+        case 0x33: return "3";
+        case 0x34: return "4";
+        case 0x35: return "5";
+        case 0x36: return "6";
+        case 0x37: return "7";
+        case 0x38: return "8";
+        case 0x39: return "9";
+        // Letter keys A-Z (VK codes 0x41-0x5A)
+        case 0x41: return "A";
+        case 0x42: return "B";
+        case 0x43: return "C";
+        case 0x44: return "D";
+        case 0x45: return "E";
+        case 0x46: return "F";
+        case 0x47: return "G";
+        case 0x48: return "H";
+        case 0x49: return "I";
+        case 0x4A: return "J";
+        case 0x4B: return "K";
+        case 0x4C: return "L";
+        case 0x4D: return "M";
+        case 0x4E: return "N";
+        case 0x4F: return "O";
+        case 0x50: return "P";
+        case 0x51: return "Q";
+        case 0x52: return "R";
+        case 0x53: return "S";
+        case 0x54: return "T";
+        case 0x55: return "U";
+        case 0x56: return "V";
+        case 0x57: return "W";
+        case 0x58: return "X";
+        case 0x59: return "Y";
+        case 0x5A: return "Z";
+        default:
+            return "Unknown";
+    }
+}
+
+bool IsValidHotkeyCode(int vkCode) {
+    // Function keys F1-F12
+    if (vkCode >= 0x70 && vkCode <= 0x7B) return true;
+
+    // NumPad keys
+    if (vkCode >= 0x60 && vkCode <= 0x6F) return true;
+
+    // Special keys
+    if (vkCode == 0x13) return true;  // Pause
+    if (vkCode == 0x2C) return true;  // PrintScreen
+    if (vkCode == 0x90) return true;  // NumLock
+    if (vkCode == 0x91) return true;  // ScrollLock
+    // Nav cluster. Home/End/PageUp/PageDown are the shared default bindings
+    // every mod ships (recenter / toggle / position / yaw mode), so all four
+    // have to pass - PageUp and PageDown were missing, which made this
+    // function reject half of its own convention.
+    if (vkCode == 0x21) return true;  // PageUp
+    if (vkCode == 0x22) return true;  // PageDown
+    if (vkCode == 0x24) return true;  // Home
+    if (vkCode == 0x23) return true;  // End
+    if (vkCode == 0x2D) return true;  // Insert
+    if (vkCode == 0x2E) return true;  // Delete
+
+    if (vkCode == 0x1B) return true;  // Escape
+    if (vkCode == 0x20) return true;  // Space
+
+    // Letters and digits. chord_hotkeys.h documents Ctrl+Shift+<letter> as the binding
+    // convention every mod registers, and VirtualKeyToString already names all 26 - so
+    // a mod validating a user's INI rebind through this function rejected the very keys
+    // the library tells it to use, and silently fell back to its default.
+    if (vkCode >= 0x30 && vkCode <= 0x39) return true;  // 0-9
+    if (vkCode >= 0x41 && vkCode <= 0x5A) return true;  // A-Z
+
+    return false;
+}
+
+} // namespace cameraunlock::input

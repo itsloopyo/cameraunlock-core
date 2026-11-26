@@ -1,0 +1,8 @@
+# A key line splits at its first '='; the rest, '=' and ']' included, is the value.
+status	Readable
+format	1
+stamp	false
+key	General	Key	a=b	2	-
+key	General	K2	=	3	-
+key	General	Url	http://x/?a=1&b=2	4	-
+key	General	A[0]	]	5	-

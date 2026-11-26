@@ -1,0 +1,4 @@
+# Defaults.ini gave the pair rotation off, position on.
+field	RotationEnabled	false
+defaults_ini	RotationEnabled
+defaults_ini	PositionEnabled

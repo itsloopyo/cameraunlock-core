@@ -1,0 +1,3 @@
+# PositionEnabled absent, RotationEnabled refused: the pair is refused, and its line names the one row.
+value	RotationEnabled	refused	2	General	RotationEnabled	nope	RotationEnabled: expected true or false, and the two are read together as the tracking mode
+pair	Defaults.ini: line 2: [General] RotationEnabled=nope is not read (RotationEnabled: expected true or false, and the two are read together as the tracking mode), so the built-in RotationEnabled=true and PositionEnabled=true are used.

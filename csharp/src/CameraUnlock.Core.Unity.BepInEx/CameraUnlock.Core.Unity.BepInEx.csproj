@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- net35 excluded: BepInEx requires .NET 4.x -->
+    <TargetFrameworks>net472;net48</TargetFrameworks>
+    <AssemblyName>CameraUnlock.Core.Unity.BepInEx</AssemblyName>
+    <RootNamespace>CameraUnlock.Core.Unity.BepInEx</RootNamespace>
+    <Version>1.0.0</Version>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <OutputType>Library</OutputType>
+    <Authors>CameraUnlock Mods</Authors>
+    <Description>BepInEx-specific utilities for CameraUnlock head tracking mods</Description>
+  </PropertyGroup>
+
+  <!-- Reference CameraUnlock.Core and CameraUnlock.Core.Unity -->
+  <ItemGroup>
+    <ProjectReference Include="..\CameraUnlock.Core\CameraUnlock.Core.csproj" />
+    <ProjectReference Include="..\CameraUnlock.Core.Unity\CameraUnlock.Core.Unity.csproj" />
+  </ItemGroup>
+
+  <!-- With no BepInExPath supplied, build against the reference stub this repo owns.
+       This used to point at a sibling valheim-headtracking checkout, which meant a clean
+       clone of core did not build - the exact game-install dependency AGENTS.md forbids,
+       one checkout removed. -->
+  <PropertyGroup Condition="'$(BepInExPath)' == ''">
+    <UseCameraUnlockBepInExStub>true</UseCameraUnlockBepInExStub>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockBepInExStub)' == 'true'">
+    <ProjectReference Include="..\..\stubs\BepInEx\Stubs.BepInEx.csproj" Private="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- BepInEx from the loader install a consuming mod points us at. -->
+  <ItemGroup Condition="'$(UseCameraUnlockBepInExStub)' != 'true'">
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExPath)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- With no UnityEnginePath supplied, build against the reference stubs this repo owns.
+       The valheim-checkout default this used to carry was also silently BROKEN on net472:
+       valheim's generated UnityEngine.dll is net48, so MSBuild dropped the reference as
+       too new, and this project only compiled because it picked UnityEngine up
+       transitively through CameraUnlock.Core.Unity. -->
+  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
+    <UseCameraUnlockUnityStubs>true</UseCameraUnlockUnityStubs>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' == 'true'">
+    <ProjectReference Include="..\..\stubs\UnityEngine\Stubs.UnityEngine.csproj" Private="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Unity references from the game install a consuming project points us at. -->
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' != 'true'">
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityEnginePath)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityEnginePath)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(UnityEnginePath)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

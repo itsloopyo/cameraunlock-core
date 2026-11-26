@@ -1,0 +1,297 @@
+#!/usr/bin/env node
+
+// Holds core's script-side config code to the shared fixtures and to its own rules:
+//
+// - scripts/lib/canonical-ini.mjs against every case in data/fixtures/canonical-ini/reader/,
+//   the files the C++ and C# readers run;
+// - scripts/lib/key-bindings.mjs against data/fixtures/canonical-ini/keys/cases.tsv, both
+//   dialects;
+// - scripts/lib/player-list.mjs against the player_list rows of
+//   data/fixtures/canonical-ini/codecs/cases.tsv;
+// - scripts/check-canonical-config.mjs's lint: the fresh-rendered fixture files pass it, and
+//   each rule fails a copy of one of them edited to break that rule alone.
+//
+//   node scripts/test-canonical-config.mjs      (pixi run check-canonical-ini-js)
+
+import fs from "node:fs";
+import path from "node:path";
+
+import { hasCanonicalStamp, parseCanonicalIni } from "./lib/canonical-ini.mjs";
+import { formatKeyBindings, parseKeyBindings } from "./lib/key-bindings.mjs";
+import { formatPlayerList, parsePlayerList } from "./lib/player-list.mjs";
+import { lintCanonicalConfig } from "./check-canonical-config.mjs";
+import { CORE_ROOT } from "./lib/repos.mjs";
+
+const FIXTURES = path.join(CORE_ROOT, "data", "fixtures", "canonical-ini");
+
+const failures = [];
+let checks = 0;
+const check = (ok, message) => {
+  checks++;
+  if (!ok) failures.push(message);
+};
+
+// The fixtures' byte escape: 0x20-0x7E other than '\' as themselves, '\' as '\\', every other
+// byte as \xHH.
+function escapeBytes(latin1) {
+  let out = "";
+  for (const c of latin1) {
+    const b = c.charCodeAt(0);
+    if (c === "\\") out += "\\\\";
+    else if (b >= 0x20 && b <= 0x7e) out += c;
+    else out += `\\x${b.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return out;
+}
+
+function unescapeBytes(text) {
+  return text.replace(/\\\\|\\x([0-9A-F]{2})/g, (m, hex) => (hex ? String.fromCharCode(parseInt(hex, 16)) : "\\"));
+}
+
+function tsvRows(file) {
+  return fs
+    .readFileSync(file, "latin1")
+    .split("\n")
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    .map((line) => line.split("\t"));
+}
+
+function readerRows(bytes) {
+  const doc = parseCanonicalIni(bytes);
+  const rows = [
+    doc.status === "NulByte" ? `status\tNulByte\t${doc.unreadableLine}` : `status\t${doc.status}`,
+    `format\t${doc.status === "Readable" ? doc.formatVersion : 0}`,
+    `stamp\t${hasCanonicalStamp(bytes)}`,
+  ];
+  if (doc.status !== "Readable") return rows;
+  const kept = doc.sections.flatMap((s) => s.values.map((v) => ({ section: s.name, ...v })));
+  kept.sort((a, b) => a.line - b.line);
+  for (const v of kept) {
+    const earlier = v.earlierLines.length === 0 ? "-" : v.earlierLines.join(",");
+    rows.push(["key", escapeBytes(v.section), escapeBytes(v.key), escapeBytes(v.value), v.line, earlier].join("\t"));
+  }
+  for (const d of doc.diagnostics) rows.push(`diagnostic\t${d.kind}\t${d.lines.join(",")}`);
+  return rows;
+}
+
+const readerDir = path.join(FIXTURES, "reader");
+const readerCases = fs.readdirSync(readerDir).filter((n) => fs.statSync(path.join(readerDir, n)).isDirectory());
+for (const name of readerCases) {
+  const bytes = fs.readFileSync(path.join(readerDir, name, "input.ini"));
+  const expected = tsvRows(path.join(readerDir, name, "expected.tsv")).map((r) => r.join("\t"));
+  const actual = readerRows(bytes);
+  check(
+    JSON.stringify(actual) === JSON.stringify(expected),
+    `reader/${name}: expected\n    ${expected.join("\n    ")}\n  read\n    ${actual.join("\n    ")}`,
+  );
+}
+
+const keyRows = tsvRows(path.join(FIXTURES, "keys", "cases.tsv"));
+for (const [dialect, input, result, canonical = ""] of keyRows) {
+  const text = unescapeBytes(input);
+  const parsed = parseKeyBindings(text, dialect);
+  const label = `keys ${dialect} '${input}'`;
+  if (result === "invalid") {
+    check(parsed.error !== undefined && parsed.bindings === undefined, `${label}: read, expected invalid`);
+    continue;
+  }
+  if (parsed.error) {
+    check(false, `${label}: ${parsed.error}`);
+    continue;
+  }
+  const written = formatKeyBindings(parsed.bindings, dialect);
+  check(written === unescapeBytes(canonical), `${label}: wrote '${written}', expected '${canonical}'`);
+  const reread = parseKeyBindings(written, dialect);
+  check(JSON.stringify(reread.bindings) === JSON.stringify(parsed.bindings), `${label}: '${written}' reads back differently`);
+}
+
+const playerRows = tsvRows(path.join(FIXTURES, "codecs", "cases.tsv")).filter((r) => r[0] === "player_list");
+check(playerRows.length > 0, "codecs/cases.tsv has player_list rows");
+for (const [, input, result, canonical = ""] of playerRows) {
+  const parsed = parsePlayerList(unescapeBytes(input));
+  const label = `player_list '${input}'`;
+  if (result === "invalid") {
+    check(parsed.error !== undefined && parsed.players === undefined, `${label}: read, expected invalid`);
+    continue;
+  }
+  if (parsed.error) {
+    check(false, `${label}: ${parsed.error}`);
+    continue;
+  }
+  const written = formatPlayerList(parsed.players);
+  check(written === unescapeBytes(canonical), `${label}: wrote '${written}', expected '${canonical}'`);
+  check(formatPlayerList(parsePlayerList(written).players) === written, `${label}: '${written}' reads back differently`);
+}
+check(parsePlayerList("2, 9").error === "'9' is not a player number from 1 to 8", "player_list names a number past 8");
+check(parsePlayerList("3, 03").error === "player 3 is listed twice", "player_list names a number given twice");
+
+// The lint. Every file below is a fresh render, `default` on every global concept row but the ones
+// its table marks PerGame(), and CollisionMargin and CollisionChannel, which are not global, at the
+// game's own default (CollisionChannel commented, an Engine row), so it has to pass with the PerGame() rows as per_game; each
+// mutation breaks one rule and must draw exactly the problem named.
+const fresh = [
+  ["head-tracking/all-concepts-fresh.ini", []],
+  ["table/global-render-fresh/fresh.ini", []],
+  ["example/CameraUnlock.ini", []],
+];
+for (const [rel, perGame] of fresh) {
+  for (const dialect of ["native", "unity"]) {
+    const problems = lintCanonicalConfig(fs.readFileSync(path.join(FIXTURES, rel)), { dialect, perGame });
+    check(problems.length === 0, `lint ${rel} (${dialect}) should pass, and says:\n    ${problems.join("\n    ")}`);
+  }
+}
+
+// A values render holds a value on every concept row, which passes only where per_game lists every
+// global one.
+const everyGlobalConcept = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-schema.json"), "utf8"))
+  .concepts.filter((c) => c.canonical && c.global)
+  .map((c) => c.id);
+const values = fs.readFileSync(path.join(FIXTURES, "head-tracking", "all-concepts.ini"));
+for (const dialect of ["native", "unity"]) {
+  const problems = lintCanonicalConfig(values, { dialect, perGame: everyGlobalConcept });
+  check(problems.length === 0, `lint head-tracking/all-concepts.ini (${dialect}) with every global concept per_game should pass, and says:\n    ${problems.join("\n    ")}`);
+}
+{
+  const problems = lintCanonicalConfig(values, { dialect: "native", perGame: [] });
+  check(
+    problems.length === 1 &&
+      problems[0].startsWith("lines 18, 22, 24 and 27 more: UdpPort, EnableOnStartup, WorldSpaceYaw, RotationEnabled,") &&
+      problems[0].includes(" hold values, and data/config-format.json per_game lists none of them for this repo"),
+    `lint head-tracking/all-concepts.ini with no per_game row should fail once for its 30 active global concept rows, got\n    ${problems.join("\n    ")}`,
+  );
+}
+
+const base = fs.readFileSync(path.join(FIXTURES, "head-tracking", "all-concepts-fresh.ini"), "latin1");
+const replace = (from, to) => {
+  if (!base.includes(from)) throw new Error(`the mutation base has no ${JSON.stringify(from)}`);
+  return base.replace(from, to);
+};
+const append = (lines) => `${base}\r\n${lines.join("\r\n")}\r\n`;
+const unlisted = "per_game does not list it for this repo; a committed file holds default on every global concept row but the ones per_game lists";
+
+// [label, text, expected problems, dialect, per_game rows]
+const mutations = [
+  ["an LF line", replace("UdpPort=default\r\n", "UdpPort=default\n"), "line 18 does not end in CRLF"],
+  ["no final CRLF", base.slice(0, -2), "line 107 does not end in CRLF"],
+  ["LF throughout", base.replace(/\r\n/g, "\n"), "lines 1, 2, 3 and 104 more do not end in CRLF"],
+  ["two non-ASCII lines", replace("; UDP port", "; UDP p\xF6rt").replace("; true: head", "; tr\xFCe: head"), "lines 17, 21 hold a byte above 0x7F"],
+  ["a UTF-8 mark", `\xEF\xBB\xBF${base}`, "starts with a UTF-8 byte order mark"],
+  ["a non-ASCII byte", replace("; UDP port", "; UDP p\xF6rt"), "line 17 holds a byte above 0x7F"],
+  ["a NUL byte", replace("UdpPort=default", "UdpPort=def\x00ault"), "is unreadable: line 18 holds a NUL byte"],
+  ["a UTF-16 mark", `\xFF\xFE${base}`, "is unreadable: it starts with a UTF-16 byte order mark"],
+  ["spaces around =", replace("UdpPort=default", "UdpPort = default"), "line 18 is not written Key=value"],
+  ["an indented key", replace("UdpPort=default", "  UdpPort=default"), "line 18 is not written Key=value"],
+  ["an indented header", replace("[Network]", "  [Network]"), "line 16 is not written [Network]"],
+  ["spaces inside a header", replace("[Network]", "[ Network ]"), "line 16 is not written [Network]"],
+  ["a repeated section", append(["[hotkeys]", "ZoomKey=F5"]), "line 109: [hotkeys] repeats the section begun on line 77"],
+  ["a note after a header", replace("[Network]", "[Network] ; port"), "line 16: \"; port\" follows [Network]"],
+  ["an unclosed header", replace("[Network]", "[Network"), ["line 16: \"[Network\" has no closing ]", "line 18: UdpPort is above every section header"]],
+  ["a line with no =", replace("UdpPort=default", "UdpPort"), "line 18: \"UdpPort\" is neither a setting"],
+  ["a repeated key", replace("UdpPort=default", "UdpPort=default\r\nUdpPort=default"), "[Network] UdpPort is set on lines 18, 19"],
+  ["no ConfigFormat", replace("ConfigFormat=1\r\n", ""), "line 12: [CameraUnlock] has no ConfigFormat"],
+  ["ConfigFormat newer", replace("ConfigFormat=1", "ConfigFormat=2"), "line 14: ConfigFormat=2 is newer than format 1"],
+  ["ConfigFormat padded", replace("ConfigFormat=1", "ConfigFormat=01"), "line 14: ConfigFormat=01 is written ConfigFormat=1"],
+  ["ConfigFormat miscased", replace("ConfigFormat=1", "configformat=1"), "line 14: configformat is spelled ConfigFormat"],
+  ["a mod key in the stamp", replace("ConfigFormat=1", "ConfigFormat=1\r\nContract=2"), "line 15: [CameraUnlock] Contract is not written by a mod"],
+  ["the stamp miscased", replace("[CameraUnlock]", "[cameraunlock]"), "line 12: [cameraunlock] is spelled [CameraUnlock]"],
+  ["a schema section miscased", replace("[Network]", "[network]"), "line 16: [network] is spelled [Network]"],
+  ["an alias", replace("UdpPort=default", "Port=default"), "line 18: [Network] Port is an alias of [Network] UdpPort"],
+  ["a concept miscased", replace("UdpPort=default", "udpport=default"), "line 18: [Network] udpport is spelled UdpPort"],
+  ["a concept with an underscore", replace("UdpPort=default", "Udp_Port=default"), "line 18: [Network] Udp_Port is spelled UdpPort"],
+  ["a concept in another section", replace("UdpPort=default", "").replace("[Light]\r\n", "[Light]\r\nUdpPort=default\r\n"), "[Light] UdpPort belongs in [Network]"],
+  ["a non-canonical concept", replace("[Light]\r\n", "[Light]\r\nRecenterKey=Home\r\n"), "[Light] RecenterKey: The mod keeps no centre of its own"],
+  ["a non-canonical alias", replace("[Light]\r\n", "[Light]\r\nInvertX=true\r\n"), "[Light] InvertX: The mod applies the head pose as the tracker sends it, with no axis inversion"],
+  ["a position sensitivity", replace("[Light]\r\n", "[Light]\r\nPositionSensitivityX=1.0\r\n"), "[Light] PositionSensitivityX: The mod applies the head pose as the tracker sends it, with no sensitivity"],
+  ["a deadzone", append(["[Camera]", "YawDeadzone=0.5"]), "line 110: [Camera] YawDeadzone: The mod applies the head pose as the tracker sends it, with no deadzone of its own."],
+  ["a deadzone in snake case", append(["[Camera]", "deadzone_deg=0.5"]), "line 110: [Camera] deadzone_deg: The mod applies the head pose as the tracker sends it, with no deadzone"],
+  ["the aim decoupling switch", replace("WorldSpaceYaw=default", "WorldSpaceYaw=default\r\nAimDecoupling=false"), "line 25: [General] AimDecoupling: Your aim always stays with the mouse or controller while your head moves the view."],
+  ["the BepInEx aim decoupling spelling", replace("WorldSpaceYaw=default", "WorldSpaceYaw=default\r\nEnableAimDecoupling=true"), "line 25: [General] EnableAimDecoupling: Your aim always stays with the mouse or controller while your head moves the view."],
+  ["the position switch", replace("PositionEnabled=default", "PositionEnabled=default\r\nPositionAllowed=false"), "line 47: [Position] PositionAllowed: Turn positional tracking off with the tracking mode: PositionEnabled=false, or the mode hotkey."],
+  ["a tracker pivot", replace("CollisionReleaseSmoothing=default", "CollisionReleaseSmoothing=default\r\nTrackerPivotForward=0.1"), "line 76: [Position] TrackerPivotForward: The neck pivot is not a setting."],
+  ["a tracker pivot by an alias", replace("CollisionReleaseSmoothing=default", "CollisionReleaseSmoothing=default\r\nPivotUp=0.03"), "line 76: [Position] PivotUp: The neck pivot is not a setting."],
+  ["a response curve", replace("[Light]\r\n", "[Light]\r\nResponseCurve=2\r\n"), "[Light] ResponseCurve: The mod applies the head pose as the tracker sends it, with no response curve of its own."],
+  ["a retired key", replace("LocalSmoothing=default", "LocalSmoothing=default\r\nSmoothing=0.1"), "[Smoothing] Smoothing is retired"],
+  ["a deadzone minimum", append(["[Rotation]", "DeadzoneMin=0.1"]), "line 110: [Rotation] DeadzoneMin: The mod applies the head pose as the tracker sends it, with no deadzone of its own."],
+  ["a curve strength", append(["[Rotation]", "CurveStrength=0.5"]), "line 110: [Rotation] CurveStrength: The mod applies the head pose as the tracker sends it, with no response curve of its own."],
+  ["a rotation scale", append(["[Tuning]", "rot_scale=1.5"]), "line 110: [Tuning] rot_scale: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["a yaw gain", append(["[ExtendedView]", "YawGain=1.5"]), "line 110: [ExtendedView] YawGain: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["a rotation sensitivity", append(["[Tracking]", "RotationSensitivity=1.0"]), "line 110: [Tracking] RotationSensitivity: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["one position sensitivity", replace("EnableOnStartup=default", "EnableOnStartup=default\r\nPositionSensitivity=1.0"), "[General] PositionSensitivity: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["a bare sensitivity", replace("TrueFreeLook=default", "TrueFreeLook=default\r\nSensitivity=1.0"), "[Position] Sensitivity: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["a position multiplier", replace("TrueFreeLook=default", "TrueFreeLook=default\r\nPositionMultiplier=1.0"), "[Position] PositionMultiplier: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["a lean scale", replace("TrueFreeLook=default", "TrueFreeLook=default\r\nLeanScale=1.0"), "[Position] LeanScale: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
+  ["an axis sign", append(["[Tuning]", "SignYaw=-1"]), "line 110: [Tuning] SignYaw: The mod applies the head pose as the tracker sends it, with no axis inversion of its own."],
+  ["a position scale", append(["[Camera]", "PositionScale=5000"]), "line 110: [Camera] PositionScale: The mod converts your head movement to the game's units itself"],
+  ["a world scale", replace("TrueFreeLook=default", "TrueFreeLook=default\r\nWorldScale=39.37"), "[Position] WorldScale: The mod converts your head movement to the game's units itself"],
+  ["[Sensitivity]", append(["[Sensitivity]", "Deadband=1"]), ["line 109: [Sensitivity] holds no canonical setting", "line 110: [Sensitivity] Deadband: The mod applies the head pose as the tracker sends it, with no deadzone of its own."]],
+  ["[Sensitivity] with a bare Yaw", append(["[Sensitivity]", "Yaw=1.0"]), ["line 109: [Sensitivity] holds no canonical setting", "line 110: [Sensitivity] Yaw: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."]],
+  ["[Inversion] with a bare Pitch", append(["[Inversion]", "Pitch=true"]), ["line 109: [Inversion] holds no canonical setting", "line 110: [Inversion] Pitch: The mod applies the head pose as the tracker sends it, with no axis inversion of its own."]],
+  ["[Deadzone] with a bare Yaw", append(["[Deadzone]", "Yaw=0.5"]), ["line 109: [Deadzone] holds no canonical setting", "line 110: [Deadzone] Yaw: The mod applies the head pose as the tracker sends it, with no deadzone of its own."]],
+  ["[Deadzone] with any key", append(["[Deadzone]", "; Degrees.", "Threshold=0.5"]), ["line 109: [Deadzone] holds no canonical setting", "line 111: [Deadzone] Threshold: The mod applies the head pose as the tracker sends it, with no deadzone of its own."]],
+  ["[deadzone] miscased", append(["[deadzone]", "YawDegrees=0.5"]), ["line 109: [deadzone] is not a PascalCase name", "line 109: [deadzone] holds no canonical setting", "line 110: [deadzone] YawDegrees: The mod applies the head pose as the tracker sends it, with no deadzone of its own."]],
+  ["[Reticle]", append(["[Reticle]"]), "line 109: [Reticle] holds no canonical setting"],
+  ["a bare noun", append(["[Flashlight]", "Enabled=true"]), "line 110: [Flashlight] Enabled: a bare Enabled"],
+  ["a chord switch", replace("EnableOnStartup=default", "EnableOnStartup=default\r\nChordToggle=true"), "line 23: [General] ChordToggle: a chord is an item of its action's key list"],
+  ["a chord letter row", replace("TrueFreeLookKey=default", "TrueFreeLookKey=default\r\nChord_Toggle_Key=Y"), "[Hotkeys] Chord_Toggle_Key: a chord is an item of its action's key list"],
+  ["true free look in snake case", replace("TrueFreeLook=default", "true_free_look=default"), "[Position] true_free_look is spelled TrueFreeLook"],
+  ["a snake_case key", append(["[Camera]", "yaw_limit=90"]), "line 110: [Camera] yaw_limit is not a PascalCase name"],
+  ["a lower-case section", append(["[target]", "CbSize=4"]), "line 109: [target] is not a PascalCase name"],
+  ["a key in two sections", append(["[Camera]", "Offset=1", "[Debug]", "Offset=2"]), "line 112: [Debug] Offset: Offset is also a key under [Camera]"],
+  ["a key in two sections, cased apart", append(["[Camera]", "Offset=1", "[Debug]", "OFFSET=2"]), "[Debug] OFFSET: OFFSET is also a key under [Camera]"],
+  ["a local hotkey that is no key", replace("YawModeKey=default", "YawModeKey=default\r\nZoomKey=Ctrl+"), "[Hotkeys] ZoomKey=Ctrl+ is not a native key list"],
+  ["a local hotkey row holding the word default", replace("YawModeKey=default", "YawModeKey=default\r\nZoomKey=default"), "[Hotkeys] ZoomKey=default is not a native key list"],
+
+  ["a concept row holding a value", replace("UdpPort=default", "UdpPort=4242"), `line 18: UdpPort holds a value, and data/config-format.json ${unlisted}`],
+  ["two concept rows holding values", replace("UdpPort=default", "UdpPort=4242").replace("EnableOnStartup=default", "EnableOnStartup=true"), "lines 18, 22: UdpPort, EnableOnStartup hold values, and data/config-format.json per_game lists none of them for this repo"],
+  ["a hotkey concept row holding the fleet's keys", replace("TrueFreeLookKey=default", "TrueFreeLookKey=Insert, Ctrl+Shift+U"), `line 86: TrueFreeLookKey holds a value, and data/config-format.json ${unlisted}`],
+  ["default with a note after it", replace("UdpPort=default", "UdpPort=default ; note"), `line 18: UdpPort holds a value, and data/config-format.json ${unlisted}`],
+  ["default in quotes", replace("EnableOnStartup=default", "EnableOnStartup=\"default\""), `line 22: EnableOnStartup holds a value, and data/config-format.json ${unlisted}`],
+  ["default in a key list", replace("ToggleKey=default", "ToggleKey=End, default"), `line 79: ToggleKey holds a value, and data/config-format.json ${unlisted}`],
+  ["Default", replace("UdpPort=default", "UdpPort=Default"), []],
+  ["DEFAULT on a hotkey row", replace("ToggleKey=default", "ToggleKey=DEFAULT"), []],
+  ["default on a local row", append(["[Camera]", "Mode=default"]), []],
+  ["a per_game row holding a value", replace("WorldSpaceYaw=default", "WorldSpaceYaw=false"), [], "native", ["WorldSpaceYaw"]],
+  ["a per_game row holding the token", base, "line 24: [General] WorldSpaceYaw=default: data/config-format.json per_game lists WorldSpaceYaw for this repo", "native", ["WorldSpaceYaw"]],
+  ["a per_game row holding DEFAULT", replace("WorldSpaceYaw=default", "WorldSpaceYaw=DEFAULT"), "line 24: [General] WorldSpaceYaw=DEFAULT: data/config-format.json per_game lists WorldSpaceYaw", "native", ["WorldSpaceYaw"]],
+  ["a per_game hotkey row holding another chord", replace("ToggleKey=default", "ToggleKey=End, Ctrl+Shift+T"), [], "native", ["ToggleKey"]],
+  ["a per_game hotkey row holding the token", base, "line 79: [Hotkeys] ToggleKey=default: data/config-format.json per_game lists ToggleKey", "native", ["ToggleKey"]],
+  ["a per_game hotkey row that is no key", replace("ToggleKey=default", "ToggleKey=Endd, Ctrl+Shift+Y"), "ToggleKey=Endd, Ctrl+Shift+Y is not a native key list: 'Endd' is not a key name", "native", ["ToggleKey"]],
+  ["a per_game player list row holding a list", replace("AccelaPlayers=default", "AccelaPlayers=3,2"), [], "native", ["AccelaPlayers"]],
+  ["a per_game player list row holding a number past 8", replace("AccelaPlayers=default", "AccelaPlayers=2, 9"), "line 41: [Smoothing] AccelaPlayers=2, 9 is not a player list: '9' is not a player number from 1 to 8", "native", ["AccelaPlayers"]],
+  ["a per_game player list row naming a player twice", replace("AccelaPlayers=default", "AccelaPlayers=2, 2"), "[Smoothing] AccelaPlayers=2, 2 is not a player list: player 2 is listed twice", "native", ["AccelaPlayers"]],
+  ["a hex per_game hotkey in a Unity mod", replace("YawModeKey=default", "YawModeKey=0x22, Ctrl+Shift+H"), "YawModeKey=0x22, Ctrl+Shift+H is not a unity key list", "unity", ["YawModeKey"]],
+  ["a hex per_game hotkey in a native mod", replace("YawModeKey=default", "YawModeKey=0x22, Ctrl+Shift+H"), [], "native", ["YawModeKey"]],
+  ["a commented concept row", replace("CollisionReleaseSmoothing=default", "; CollisionReleaseSmoothing=0.9"), "line 75: [Position] CollisionReleaseSmoothing is commented out, the form render-config gives an Engine row marked PerGame() at its default, and data/config-format.json per_game does not list CollisionReleaseSmoothing"],
+  ["a commented concept row with no space", replace("CollisionReleaseSmoothing=default", ";CollisionReleaseSmoothing=0.9"), "line 75: [Position] CollisionReleaseSmoothing is commented out"],
+  ["a commented per_game row", replace("CollisionReleaseSmoothing=default", "; CollisionReleaseSmoothing=0.5"), [], "native", ["CollisionReleaseSmoothing"]],
+  ["a concept row that is not global commented at another value", replace("; CollisionChannel=0", "; CollisionChannel=3"), []],
+  ["a concept row that is not global commented with no space", replace("CollisionMargin=0.1", ";CollisionMargin=10.0"), []],
+  ["concept rows that are not global holding values", replace("CollisionMargin=0.1", "CollisionMargin=10.0").replace("; CollisionChannel=0", "CollisionChannel=3"), []],
+  ["a concept row that is not global holding the token", replace("; CollisionChannel=0", "CollisionChannel=default"), "line 72: [Position] CollisionChannel=default: CollisionChannel is not global in data/config-schema.json, so the file holds the game's own value there, as render-config writes it"],
+  ["a concept row that is not global holding DEFAULT", replace("CollisionMargin=0.1", "CollisionMargin=DEFAULT"), "line 70: [Position] CollisionMargin=DEFAULT: CollisionMargin is not global"],
+  ["a commented concept key in another section", replace("[Light]\r\n", "[Light]\r\n; CollisionChannel=3\r\n"), []],
+  ["a comment naming a local key", replace("[Light]\r\n", "[Light]\r\n; Mode=3\r\n"), []],
+];
+for (const [label, text, expected, dialect = "native", perGame = []] of mutations) {
+  const want = [expected].flat();
+  const problems = lintCanonicalConfig(Buffer.from(text, "latin1"), { dialect, perGame });
+  check(
+    problems.length === want.length && want.every((w, i) => problems[i].includes(w)),
+    `lint mutation "${label}": expected ${want.map((w) => `"${w}"`).join(", ") || "no problem"}, got\n    ${problems.join("\n    ") || "(none)"}`,
+  );
+}
+
+let refused = false;
+try {
+  lintCanonicalConfig(Buffer.from(base, "latin1"), { dialect: "native" });
+} catch (err) {
+  refused = err.message.includes("needs perGame");
+}
+check(refused, "lint: a call without perGame should throw");
+
+if (failures.length > 0) {
+  console.error(`${failures.length} of ${checks} checks failed:`);
+  for (const f of failures) console.error(`  ${f}`);
+  process.exit(1);
+}
+console.log(`canonical INI scripts: ${readerCases.length} reader cases, ${keyRows.length} key cases, ${mutations.length} lint mutations; ${checks} checks passed`);

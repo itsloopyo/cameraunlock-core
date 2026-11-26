@@ -1,0 +1,415 @@
+# Porting the tracking pipeline to another language
+
+For mods that cannot link `cameraunlock-core` and reimplement its pipeline
+instead: CET Lua, UE4SS Lua, Rust ASI, Python add-ins. Those ports do not receive
+core's fixes, so every invariant below has to be re-implemented and re-tested
+locally.
+
+This document exists because of a measured pattern. An audit of four independent
+ports found that all four implemented the HCAM trailer correctly and **three of
+four** got the interpolator's angle handling wrong, in the same way. The
+difference is that HCAM has `hcam-inband-protocol.md` with a conformance vector
+and the pipeline had nothing. Each section below therefore ends with a check that
+fails on the wrong implementation, with the numbers a real port actually produced.
+
+## Before porting: if you can link the core, link it
+
+A port is only warranted where the host forbids native code. **If the mod already
+loads a native DLL of its own, link `cameraunlock` and do not port** - not the
+packet layer, not the interpolators, not the processors. A mod that has an ASI, a
+RED4ext plugin, a UE4SS C++ module or any other DLL of its own has already paid
+the cost that a port exists to avoid.
+
+The evidence is in the audit. Every port that hand-wrote the packet layer has a
+defect in it; the one port with a zero-defect packet layer is the one that did not
+write it. `cyberpunk-2077-headtracking` is Lua on top of a native DLL, and that
+DLL links the core (`native/CMakeLists.txt` links `cameraunlock`,
+`native/src/UdpReceiver.cpp` instantiates `cameraunlock::UdpReceiver`), so the
+finiteness gate, the cm-to-metres conversion and the trailer parse are the ones
+this library ships and fixes. Its remaining defects are all in the Lua half - the
+part it genuinely had to port.
+
+The same reasoning applies inside a port. Draw the native/scripted boundary as
+low as you can: everything below it is shared and maintained, everything above it
+is yours to re-test forever.
+
+Conformance holds a repo to both halves of this with its `pipeline-port` check
+(`pixi run conformance -Check pipeline-port`). It looks at the tracked `.java`,
+`.kt`, `.lua`, `.py` and `.rs` sources outside `cameraunlock-core/`, vendored
+folders, test folders and a Rust file's `#[cfg(test)]` modules, and finds a port
+by two of the stages below: the
+packet layer (a file that names OpenTrack, opens a UDP socket and reads from
+it) and the interpolator (a file that names a sample interval and
+extrapolates). A repo with either fails, quoting the paragraph above, when a
+`CMakeLists.txt` of its own links `cameraunlock` or a `build.rs` of its own
+compiles sources from `cameraunlock-core/cpp/`. Otherwise it fails unless
+`pixi run test` runs a task that calls `run-vectors.mjs`. A port of the
+processors or the lean clamp alone matches neither stage, so the check does
+not see it.
+
+## Conformance vectors
+
+`data/pipeline-conformance.json` is the executable form of the checks below -
+input sequence, expected output, tolerance - together with the constants block, so
+there is one source rather than a number restated in six repos. Run it instead of
+re-deriving the numbers:
+
+    node scripts/pipeline-vectors/run-vectors.mjs --harness "<your harness>"
+
+The runner owns every assertion; a port supplies only a small executor that reads
+a line-oriented command stream and prints one line of numbers per step (see the
+protocol comment at the top of `run-vectors.mjs`, and the C++ and C# harnesses in
+`scripts/pipeline-vectors/harness/` for two worked examples). `pixi run vectors`
+runs them against both of core's own implementations, so a change here fails in
+core before it reaches a mod. Every vector carries the `section` number of the
+invariant below that it comes from, so a failure names the paragraph that explains
+it.
+
+A port whose pipeline does not expose a unit answers `skip <reason>` for it and
+the runner reports it as SKIP rather than passing it silently. A harness must also
+skip on a configuration key it does not recognise: ignoring one would run a
+different test than the vector describes and report a pass.
+
+A skip still has to be declared. By default the runner accepts none, so a harness
+that answers `skip` to everything fails the run instead of reporting `0/0
+conformance vectors passed` and exiting 0; a run that executed nothing fails
+outright for the same reason. List the vectors your implementation genuinely does
+not cover with `--expect-skips <id,id>`, and the runner checks that list both ways
+- an undeclared skip fails, and so does a declared vector the harness turns out to
+run, so the list cannot rot into a standing excuse.
+
+Where a local test and a vector disagree, the vector is right. Several ports'
+hand-written tests encode the defect rather than catching it: one asserts the
+held-forever extrapolation value exactly, one builds its expected pivot input with
+the same wrong sign as the implementation so it passes either way, and one asserts
+only that the output is finite.
+
+The same file's `preference_modes` block is not read by the runner. It records how
+a runtime preference is stored in config: `tracking_mode` gives the
+`RotationEnabled` / `PositionEnabled` pair for each mode, in cycle order, and any
+pair it does not list, false/false included, names no mode. Core's C# and C++
+encode/decode are tested against it. A port that saves or reads the tracking mode
+should pin its own mapping to that block, as it pins the constants.
+
+## Ports found
+
+Checked against each repo on 2026-10-07. "Runs the vectors" means its `pixi.toml` has a task
+that calls `run-vectors.mjs`.
+
+| Repo | Language | Notes |
+|---|---|---|
+| `cyberpunk-2077-headtracking` | Lua over a native DLL | Links the core for the packet layer; only the Lua half is a port. Runs the vectors |
+| `the-pathless-headtracking` | Lua (UE4SS) | 3DOF only - no position processor and no interpolator. Runs the vectors |
+| `beamng-drive-headtracking` | Lua | `mod/lua/ge/extensions/headTracking/pipeline.lua`. No task that runs the vectors |
+| `minecraft-java-edition-headtracking` | Java | 15 hand-written classes under `core/src/main/java/com/cameraunlock/core/`; the submodule is present but the Gradle build compiles nothing from it. Runs the vectors with declared skips |
+| `project-zomboid-headtracking` | Java on core's jar | Core's C interface carried in the mod's jar as JVM classes ([core-jar.md](core-jar.md)); the mod writes none of the pipeline |
+| `fusion-360-headtracking` | Python | Runs the vectors |
+| `euro-truck-simulator-2-headtracking` | Python | `bridge/opentrack_to_freetrack.py` reads OpenTrack datagrams and hands them to FreeTrack. No core submodule, no interpolator |
+| `lopari` | Rust over C++ | Was a port: `src-tauri/src/opentrack.rs` read the packet and `src-tauri/src/bridge/interp.rs` interpolated. `src-tauri/build.rs` now compiles core's receiver, parser and session in behind `src-tauri/src/pose_feed.rs`, and no Rust there reads a datagram |
+
+`bioshock-infinite-headtracking` was listed here as Rust. It is C++ now and links the core.
+
+`bioshock-remastered-headtracking` was listed here as a Rust port that ran the vectors. Its
+`build.rs` now compiles `cpp/src/c/cameraunlock_c.cpp` and what it needs into the mod's own DLL,
+and its Rust calls `cameraunlock_session_frame` and `cameraunlock_session_lean` once a frame and
+keeps the engine boundary. A Rust mod that is a DLL already can do the same in place of loading
+`CameraUnlockCore.dll`.
+
+## Do not port: load the DLL
+
+A host that can load a DLL and call C functions needs none of the above. `CameraUnlockCore.dll`
+([c-interface.md](c-interface.md)) is the receiver, the interpolators, the processors, the lean
+clamp, the zoom compensation, the aim modes, the config owner and the hotkey poller as built from
+this repo, behind one call a frame. A Java agent (`java.lang.foreign`, Java 22 on), LuaJIT's
+`ffi`, Python's `ctypes` and Rust all reach it. What is left for the host to write is the axis
+conversion at its engine's boundary and its world query for the lean, and neither is in the
+checks below. A port is for a host that cannot load a native library at all: stock Lua in a
+sandbox, for one.
+
+A JVM host that can load a DLL but cannot ship one, as a Steam Workshop item cannot, does not
+port either: core's jar carries the same C++ as JVM classes ([core-jar.md](core-jar.md)).
+
+## 1. Yaw and roll traverse the shortest arc
+
+Reference: `cpp/include/cameraunlock/processing/pose_interpolator.h`,
+`math::ShortestAngleDelta` and `math::NormalizeAngle`.
+
+Angles arrive in `(-180, 180]`. A plain lerp between two samples that straddle
+the seam travels the long way round. This applies to **yaw and roll only** -
+pitch comes from `asin`, is bounded to +/-90, and cannot wrap, so giving it the
+same treatment is wrong.
+
+It has to be applied at **both** the output and the from-capture on a new sample.
+Fixing only the output leaves an unwrapped value stored as `from`, and the next
+segment goes the long way instead.
+
+**Check.** Interpolate yaw 175 -> -175. Every intermediate value must satisfy
+`|out| >= 175` and total travel must be 10 degrees, not 350. Test both
+directions: a sign error in the delta passes one and fails the other.
+
+Measured on real ports before fixing: quarter-way across the seam gave 87.5
+instead of 177.5 (Lua); a 2-degree turn with the origin near the seam drove the
+camera to -90 degrees and **held it** there until the head crossed back, because
+the ~360-degree difference was then clamped to the rotation limit.
+
+## 2. Extrapolation expires on a wall clock
+
+Reference: `PoseInterpolator::SegmentPosition`.
+
+Progress past 1.0 is a short prediction that keeps velocity continuous between
+samples. Clamping it to `1.0 + max_extrapolation_fraction` and then **holding**
+parks the output at up to 1.5x the last reported pose indefinitely whenever
+samples stop arriving - a tracker app streaming its last value while the face is
+lost, or a head so still that consecutive samples are bit-identical and the
+duplicate filter suppresses them. A 25-degree head turn renders as 37.5 and
+stays.
+
+So the prediction expires: hold for `kExtrapolationHoldSeconds` (0.25), then ease
+to 1.0 over `kExtrapolationDecaySeconds` (0.35) with smoothstep.
+
+The hold matters as much as the decay. A dropped packet or two is still a live
+feed and must behave as before - retreating on a dropped packet pulls the camera
+*backwards* against a head that is still turning, which reads worse than the flat
+spot it replaces.
+
+**Time it on the wall clock, not on progress.** Progress is measured in units of
+an estimated sample interval, and that estimate only updates when a new sample
+arrives - so it is stale by construction in exactly the stall case this exists to
+handle.
+
+**Check.** Feed samples, then stop. Output must settle on the last *reported*
+pose (25, not 37.5) and stay. A separate check must confirm a sub-0.25s dropout
+still reaches and holds the 1.5x cap, so the anti-judder behaviour was not traded
+away.
+
+## 3. The default sample interval is 1/30, not 1/60
+
+Reference: `kDefaultSampleInterval`.
+
+Before the first two samples establish a real interval, the estimate is a guess.
+Guessing 1/60 for a 30 Hz tracker makes the first second of a session jolt.
+Native mods had that jolt and Unity mods did not, because only one of them had
+the wrong default.
+
+**Check.** Drive a 30 Hz feed from cold and assert the first second contains no
+step larger than an ordinary inter-sample delta.
+
+## 4. Position clamps before AND after smoothing
+
+Reference: `cpp/include/cameraunlock/processing/position_processor.h`, `ClampToLimits`
+(called at both the pre-smoothing and post-smoothing sites).
+
+Clamping only the output lets the smoothing state itself wind up outside the
+limits, and the output then pins at a limit for hundreds of milliseconds after
+the head has already come back.
+
+Two further things ports get wrong here:
+
+- **The vertical clamp is asymmetric**: `[-limit_y_down, +limit_y]`. A mod whose
+  config exposes one vertical limit must mirror it into both (see
+  `PositionSettings::Symmetric`), otherwise the downward budget silently sits on
+  the core default, decoupled from the value the user set.
+- **Negative z is the forward lean.** Engines whose camera-local +z is forward
+  negate at the boundary, not with an `invert_z` flag.
+
+## 5. Gimbal lock - and it is not only in quaternion conversion
+
+Reference: `Quat4::ToEulerYXZ`, `QuaternionUtils.ToEulerYXZ`.
+
+Two separate bugs, and both are easy to reproduce in a port:
+
+- The lock branch must not reuse the general yaw formula. At exactly 90 degrees
+  of pitch both of its `atan2` arguments are zero, so it returns `atan2(0, 0)` =
+  0 and the rotation is discarded. Use
+  `atan2(2*(x*y - w*z), 1 - 2*(y*y + z*z))`.
+- The threshold must be `0.9999995`, not `1.0`. Testing `sinPitch >= 1.0`
+  essentially never fires: float error leaves it a shade under 1 even for a
+  quaternion built at exactly 90 degrees (measured 0.99999982), so the degenerate
+  branch runs anyway.
+
+**This singularity is not confined to quaternion->Euler.** A port with no
+quaternion type at all still has it wherever it decomposes an orientation -
+a matrix->Euler `basis_to_rotator` has exactly the same degenerate case. One
+Rust port concluded "not applicable, no quaternion conversion" and had a
+worst-case error of 1.5708 radians, a full right angle of rotation silently
+dropped.
+
+It is also not an edge case in practice: engines using a quantised integer
+rotator (Unreal's `FRotator`) quantise both the game's view pitch and the head
+pitch, so their sum lands on exactly 90 degrees regularly.
+
+**Check.** Decompose an orientation built at exactly 90 degrees of pitch and
+assert the heading survives. Sweep a few hundred thousand random orientations and
+assert worst-case round-trip error stays at the representation's quantisation
+floor rather than approaching a right angle.
+
+## 6. Pivot compensation is built on negative z, and defaults to off
+
+Reference: `PositionProcessor`, `TrackerPivotForward`.
+
+Head rotation moves the tracked point even when the body has not, and subtracting
+that artifact keeps a pure head turn from also panning the view. The pivot vector
+must be `(0, 0, -TrackerPivotForward)`.
+
+Rotation is linear, so `R(-v) - (-v) == -(R(v) - v)`: building it as `+z`
+computes the exact negation of the real artifact, and subtracting that **adds**
+the phantom translation instead of removing it, doubling it.
+
+The default is **0** - compensation off. The correct arm length is a property of
+the tracker app, not of this library: the Headcam Android app already applies its
+own eye-anchor offset while iOS applies none. A port that ships a non-zero
+default is guessing on the user's behalf.
+
+## 7. Deadzone must be continuous at its edge
+
+Reference: `math::deadzone_utils`, `DeadzoneSettings`.
+
+Subtract the deadzone in the input's direction rather than gating on it. Gating
+means an input just past the threshold jumps: with a deadzone of 5, an input of
+4.99 gives 0 and 5.01 gives 5.01, so a 0.02-degree movement pops the camera 5
+degrees. Note this fires on the DEFAULT settings, where `DeadzoneMax <=
+DeadzoneMin`.
+
+## 8. Reset the interpolator on recenter
+
+Reference: `PoseInterpolator::Reset`, documented "call on recenter".
+
+A recenter captures a neutral pose. If the interpolator is not reset first, what
+gets captured is whatever it is currently *showing* - a blend between two
+samples, or on a frame with no fresh packet, the entire pre-press pose.
+
+The residual is permanent and, because yaw and roll are inverted downstream, it
+is **mirrored** - the same visible symptom as the double-subtract bug that
+`hcam-inband-protocol.md` describes, and reachable without any double
+subtraction.
+
+It hides at 60 fps on a 60 Hz tracker, where `dt >= sampleInterval` and the
+blend completes within the frame. One Lua port measured, with 8 degrees of
+pre-press drift:
+
+| render fps | parked residual, mirrored |
+|---|---|
+| 60 | 0.000 |
+| 75 | 8.000 |
+| 144 | 4.847 |
+| 240 | 8.000 |
+
+Key the reset off the "capture armed" state rather than the keypress, so it
+covers every path that recenters - the hotkey and a remote HCAM press. Wiring it
+to the hotkey misses the other.
+
+**Check.** Arm a recenter at several render rates above the tracker rate and
+assert the captured neutral equals the raw pose the tracker reported, exactly.
+Cover a press while the head is *moving*, which is the local-hotkey form of the
+same defect.
+
+## 9. The HCAM trailer does not recenter
+
+A port must **parse** a 54-byte datagram - bytes 0-47 are the pose and it has to
+reach the pipeline like any other packet - and must **not** recenter on it.
+
+Headcam owns centring: it zeroes its own output when the player presses CENTER.
+With the mod-side centre at identity (invariant 10) that zeroed stream is already
+correct, so there is nothing left for the mod to do. Acting on the trailer as
+well is the double-centre this doctrine exists to prevent, reached through
+another door.
+
+Older Headcam builds still send the trailer, so ignoring it is a positive
+requirement, not an absence. Keep any `TryConsumeRecenterRequest`-shaped accessor
+you already expose and have it report nothing, rather than deleting it and
+breaking callers.
+
+**Check.** Send a trailered packet and assert two things: the pose it carried
+reaches the output, and no recenter happened. Then set a centre with the hotkey,
+send a trailered packet, and assert the hotkey centre survives.
+
+A datagram is also refused whole, like one holding a NaN, when an angle on any axis is past 360
+degrees or a position past 10000 cm, compared after the narrowing to float (constants
+`max_rotation_degrees` and `max_position_cm`). Any finite float used to pass, and two datagrams
+with pitch at opposite ends of a float's range made the interpolator's step between them
+infinite: the pose went to NaN and smoothing kept it. A refused datagram changes nothing, the
+source the receiver follows and the locality flag included.
+
+**Check.** `wire-rejects-a-pose-no-tracker-sends`.
+
+## 10. The mod-side center starts at identity
+
+The pipeline consumes the tracker's pose as absolute: the tracker owns the center
+and the mod does not keep one of its own until the player asks. Headcam zeroes at tracking start and on every CENTER press, opentrack
+centers on its own Center bind, so the stream arriving at a port is already
+centered.
+
+A port that captures the incoming pose as a center when the connection comes up
+puts a SECOND center in series with that one, and the two drift apart because
+each side recenters at moments the other cannot see. At startup both are near
+zero and it looks fine. The symptom shows up later: the player presses Center on
+a tracker that sends no HCAM trailer, the tracker's output drops to zero, the
+port keeps subtracting the pose it captured at session start, and the view parks
+at the negated drift until the player also presses the mod's hotkey. Two presses
+for one recenter.
+
+So the center is identity until the recenter hotkey or an HCAM trailer press sets
+one. This is the mistake most likely to be carried across from an older port: it
+was `cameraunlock-core`'s own behaviour until the CHANGELOG entry "the session no
+longer captures a center on connect", and every full local port copied it.
+
+**Check.** Feed an uncentered stream (yaw 40) for a few hundred frames, then drop
+the stream to zero with no trailer, and assert the output lands at zero rather
+than -40. Run it for position as well as rotation: the position center is captured
+separately and a rotation-only test passes with the position half broken.
+
+## 11. The engine boundary owns the z flip, never `InvertZ`
+
+Reference: `PositionApplicator`, `ViewMatrixModifier`, `PositionSettings.InvertZ`.
+
+Negative z is the forward lean everywhere inside the pipeline, and the asymmetric
+clamp is built on that: `[-LimitZ, +LimitZBack]` puts the generous 0.40m budget on
+the negative side. Most engines call +z forward, so exactly one flip is needed,
+and it belongs in the code that hands the offset to the engine.
+
+`InvertZ` cannot do that job. It is applied in step 2 of the processor, *before*
+the clamp, so a mod that flips there clamps an already-flipped axis: the forward
+lean gets the 0.10m backward allowance and the backward lean gets the 0.40m
+forward one. The direction looks right, which is why this survives testing - only
+the travel is wrong, and it has been found in production more than once. `InvertZ`
+is for a tracker whose z genuinely runs the other way, nothing else. The same
+applies to `InvertY` against a y-down engine.
+
+Beware a port that offers two apply paths. Ours does - a view-space matrix
+composition and a transform-space decomposition - and Unity's view space looks
+down -z while its transforms call +z forward, so one path needed the flip and the
+other did not. They disagreed, one mode leaned forward and the other backward, and
+the runtime yaw-mode toggle switched between them mid-session.
+
+**Check.** Feed the same forward-lean offset through every apply path with a
+rotated game camera and assert they place the camera at the same world point.
+
+## 12. A frame that froze catches up, it does not play out
+
+Reference: `PoseInterpolator::Update`, `kMaxIntervalGrowth`.
+
+When the game stalls, the next frame's `delta_time` is the whole stall. Two things in the
+interpolator must not take it at face value.
+
+The new segment runs from the pose shown before the stall to the newest sample. Advancing it by
+the stalled frame's `delta_time` drives progress straight to the `1.0 + max_extrapolation_fraction`
+cap, and the cap is a fraction of a segment that now spans the whole stall. So a frame whose
+`delta_time` is more than `sample_interval * (1 + max_extrapolation_fraction)`, taking the estimate
+as it stands before that frame's sample updates it, marks a long frame. The next new sample, on
+that frame or a later one (the first sample after a freeze can come a frame late), is drawn as it
+is and the segment starts from it (`from = to`), so the view holds on it until the sample after.
+Off a 30 Hz tracker turning 60 degrees a second, a 500 ms freeze drew 103 degrees for a head at 88
+and swung back over 150 ms. An ordinary hitch meets the same rule when it is long enough: off a
+60 Hz tracker, a frame over about 25 ms is one.
+
+The stall is the game's gap, not the tracker's. Folded whole into the interval estimate it set the
+estimate to 173 ms, and since every later segment is spread over the estimate, the view trailed
+the head by an extra 10 to 20 ms for 300 ms while the estimate shrank back. A gap counts into the
+estimate as at most `kMaxIntervalGrowth` (2) times the estimate, so the estimate still follows a
+tracker that really slows, by up to 1.3x a sample: from 30 Hz to 4 Hz in about 7 samples, where
+the whole gap took 4. The first measured gap is still taken whole.
+
+**Check.** A 30 Hz tracker turning 2 degrees a sample at 60 fps, then one 500 ms frame with the
+newest sample at 88: that frame draws 88, the next two draw no more than the newest sample, and
+14 frames (233 ms) on the view is back to its usual lag. The same with the freeze's sample
+coming on the frame after the long one: that frame draws it.

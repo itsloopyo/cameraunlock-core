@@ -1,0 +1,1605 @@
+#!/usr/bin/env pwsh
+# ReleaseWorkflow.psm1 - Shared module for mod release automation
+# Part of CameraUnlock-Core shared utilities
+
+$ErrorActionPreference = "Stop"
+
+Import-Module (Join-Path $PSScriptRoot 'DifferentialGate.psm1')
+
+<#
+.SYNOPSIS
+    Fast-forward the cameraunlock-core submodule to its origin/main tip.
+.DESCRIPTION
+    OPT-IN. Call this deliberately, or pass -RefreshCore to Copy-SharedBundle.
+    It used to run on every Copy-SharedBundle, which meant `pixi run package`
+    silently moved the submodule working tree out from under the developer -
+    the packaged artifact was then built against a core commit the mod's
+    history does not record, and `git status` grew an unexplained
+    ` M cameraunlock-core` that a later scripted commit could sweep up.
+    Moving the pin is a decision with a commit attached, not a side effect of
+    packaging.
+
+    What that costs, stated plainly: the old default was a "single source of
+    truth" guarantee - a body or games.json fix in cameraunlock-core reached a
+    mod's users on that mod's next release with no pointer bump. That is gone.
+    A mod now ships whatever core commit it pins, so a stale pin ships a stale
+    bundle. Copy-SharedBundle therefore prints the core commit it bundled, and
+    warns when that commit is behind origin/main, so a stale bundle is loud
+    instead of silent.
+
+    Locates the parent mod repo by walking one level up from CoreRoot
+    (the standard layout is <mod>/cameraunlock-core/) and runs
+    `git submodule update --remote --merge -- cameraunlock-core` against
+    it. `--merge` rebases any local cameraunlock-core commits on top of
+    origin/main; conflicts surface as a hard failure rather than a
+    silent stale-bundle release.
+.PARAMETER CoreRoot
+    Path to the cameraunlock-core checkout (i.e. the submodule path).
+#>
+function Update-CameraUnlockCoreToRemoteTip {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$CoreRoot)
+
+    $modRoot = [System.IO.Path]::GetFullPath((Join-Path $CoreRoot '..'))
+    if (-not (Test-Path (Join-Path $modRoot '.gitmodules'))) {
+        # Not running inside a mod repo with submodules - we're probably
+        # in the cameraunlock-core dev tree itself. Nothing to refresh.
+        return
+    }
+
+    if ($env:GITHUB_ACTIONS -eq 'true' -or $env:CI -eq 'true') {
+        # actions/checkout clones submodules shallow (--depth=1). A subsequent
+        # --remote --merge then fetches origin/main also shallow, and git sees
+        # two grafted roots with no common ancestor: "refusing to merge
+        # unrelated histories". CI must consume the committed submodule pointer
+        # as-is; bumping it is a deliberate dev action with a commit attached.
+        Write-Host "CI detected - skipping cameraunlock-core remote refresh (consuming committed pointer)." -ForegroundColor Gray
+        return
+    }
+
+    Write-Host "Refreshing cameraunlock-core submodule from origin/main..." -ForegroundColor Cyan
+    # Don't pipe stderr through 2>&1: in Windows PowerShell 5.1, native-command
+    # stderr lines (git prints progress like "From https://...") get wrapped
+    # as NativeCommandError records and turn a successful run (exit 0) into a
+    # terminating exception. Let git stream both streams to the console
+    # directly; we only care about $LASTEXITCODE for routing.
+    & git -C $modRoot submodule update --remote --merge -- cameraunlock-core
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to fast-forward cameraunlock-core (git exit $LASTEXITCODE). Resolve local conflicts in cameraunlock-core/ and re-run, or drop -RefreshCore to package against the pinned commit."
+    }
+
+    # The pointer has moved, so the commit THIRD-PARTY-NOTICES.md names is now
+    # the wrong one. Nothing else in a bump touches that file, which is how the
+    # two drift apart, so they move together here and get committed together.
+    $bumped = (& git -C $CoreRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $bumped) { throw "Could not read the bumped cameraunlock-core commit." }
+    $synced = Sync-CoreCommitInNotices -RepoRoot $modRoot -Commit $bumped
+    if ($synced.Updated) {
+        Write-Host "THIRD-PARTY-NOTICES.md now records cameraunlock-core $bumped - commit it alongside the pointer." -ForegroundColor Yellow
+    }
+}
+
+<#
+.SYNOPSIS
+    Stage the shared detection bundle into a release staging directory.
+.DESCRIPTION
+    Each mod's install.cmd / uninstall.cmd calls shared/find-game.ps1
+    at user-install time to resolve the game path via the canonical
+    games.json. This function copies games.json + GamePathDetection.psm1
+    + find-game.ps1 into <StagingDir>/shared/ so the release ZIP carries
+    them alongside install.cmd. Call this from each mod's
+    package-release.ps1 *after* creating the staging dir and *before*
+    compressing the zip.
+.PARAMETER StagingDir
+    Release staging directory (the one that's about to be zipped).
+.PARAMETER CoreRoot
+    Optional path to the cameraunlock-core checkout. Defaults to the
+    checkout this module lives in.
+#>
+# Reports which cameraunlock-core commit the shared bundle is being copied from,
+# and whether it is behind origin/main. Advisory only - it never fetches and never
+# fails the packaging run, because a release must not depend on network reachability.
+function Write-CoreBundleProvenance {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$CoreRoot)
+
+    # `2>$null` on its own is a trap: in Windows PowerShell 5.1 a native
+    # command's stderr becomes a NativeCommandError, and 30 of the fleet's
+    # package-release.ps1 scripts set $ErrorActionPreference = 'Stop', so
+    # `pixi run package` died with a stack trace instead of taking the
+    # "commit unknown" branch below. Both calls fail for ordinary reasons: a
+    # source tarball is not a git checkout, and a shallow submodule, an
+    # exported tree or a fork with another default branch has no origin/main.
+    # Drop to Continue for the calls and gate on $LASTEXITCODE, which is the
+    # real success signal for a native exe.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $head = & git -C $CoreRoot rev-parse --short HEAD 2>$null
+        $headOk = ($LASTEXITCODE -eq 0 -and $head)
+        # No fetch: report against whatever origin/main this checkout already knows.
+        $behind = if ($headOk) { & git -C $CoreRoot rev-list --count "HEAD..origin/main" 2>$null } else { $null }
+        $behindOk = ($LASTEXITCODE -eq 0 -and $behind)
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
+
+    if (-not $headOk) {
+        Write-Host "  Shared bundle: cameraunlock-core commit unknown (not a git checkout)." -ForegroundColor DarkYellow
+        return
+    }
+    Write-Host "  Shared bundle from cameraunlock-core $head" -ForegroundColor Gray
+
+    if (-not $behindOk) { return }
+    if ([int]$behind -gt 0) {
+        Write-Warning "cameraunlock-core is $behind commit(s) behind the origin/main it last saw, so this release ships an older shared bundle (install/uninstall bodies, find-game.ps1, games.json). If that is not deliberate, bump the submodule and commit the pointer before releasing."
+    }
+}
+
+function Copy-SharedBundle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$StagingDir,
+        [string]$CoreRoot,
+        # Opt in to fast-forwarding cameraunlock-core to origin/main before
+        # copying. OFF by default: packaging must not move the submodule the
+        # build just used, because the artifact would then be built against a
+        # commit the mod's history does not record. Bumping the pin is a
+        # deliberate act with a commit attached - run
+        # Update-CameraUnlockCoreToRemoteTip, or `git submodule update --remote`,
+        # and commit the pointer.
+        [switch]$RefreshCore,
+        # Deprecated and now redundant: not refreshing IS the default. Kept
+        # because most of the fleet's package-release.ps1 passes it, and
+        # removing a parameter breaks those callers for no gain. Accepted and
+        # ignored; it will be removed in a future major version.
+        [switch]$NoRefresh
+    )
+
+    if (-not $CoreRoot) {
+        # $PSScriptRoot is .../cameraunlock-core/powershell; the core root
+        # is one up. Normalize with GetFullPath to collapse the `..`.
+        $CoreRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    }
+
+    if ($RefreshCore -and $NoRefresh) {
+        throw "Copy-SharedBundle: -RefreshCore and -NoRefresh contradict each other. -NoRefresh is the default and deprecated; drop it and pass -RefreshCore only if you mean to move the submodule pointer."
+    }
+    if ($RefreshCore) {
+        Update-CameraUnlockCoreToRemoteTip -CoreRoot $CoreRoot
+    }
+
+    # Provenance, always. The bundle below is copied out of whatever core commit
+    # is checked out right now, and since that is no longer force-refreshed, the
+    # packager is the only place a stale pin can be caught before users get it.
+    Write-CoreBundleProvenance -CoreRoot $CoreRoot
+
+    # THIRD-PARTY-NOTICES.md is copied verbatim into the release ZIPs, so the
+    # cameraunlock-core commit it names is the attribution the user receives.
+    # A submodule bump does not touch it, so it is checked here rather than
+    # trusted - a wrong hash reads exactly like a right one.
+    $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $CoreRoot '..'))
+    Assert-CoreCommitInNotices -RepoRoot $repoRoot
+    Assert-LauncherManifestDelivery -RepoRoot $repoRoot
+    Assert-LauncherManifestConfig -RepoRoot $repoRoot -CoreRoot $CoreRoot
+
+    # install-body-* and uninstall-body are the per-strategy script bodies
+    # used by thin per-mod wrapper install.cmd / uninstall.cmd files. Every
+    # mod ships every body in shared/; the wrapper picks the one matching
+    # its FRAMEWORK_TYPE. Cheap (each body is ~10KB), and it means a mod
+    # changing strategy across versions doesn't require a release-tooling
+    # change. Enumerated rather than listed, so a body added to core reaches
+    # the fleet's release ZIPs without a second edit here - a list is one more
+    # place to forget, and the mod that forgot ships a wrapper whose body is
+    # not in the ZIP.
+    $sources = @(
+        @{ Src = 'data\games.json';                   Dest = 'games.json' }
+        @{ Src = 'powershell\GamePathDetection.psm1'; Dest = 'GamePathDetection.psm1' }
+        @{ Src = 'scripts\find-game.ps1';             Dest = 'find-game.ps1' }
+        @{ Src = 'scripts\install-all-bepinex.ps1';   Dest = 'install-all-bepinex.ps1' }
+        @{ Src = 'scripts\check-loader-arch.ps1';     Dest = 'check-loader-arch.ps1' }
+        @{ Src = 'scripts\cecil-marker-check.ps1';    Dest = 'cecil-marker-check.ps1' }
+        @{ Src = 'scripts\restore-kept-configs.ps1';  Dest = 'restore-kept-configs.ps1' }
+        @{ Src = 'scripts\jvm-site-config.ps1';       Dest = 'jvm-site-config.ps1' }
+    )
+    $bodyDir = Join-Path $CoreRoot 'scripts'
+    $bodies = @(Get-ChildItem -Path $bodyDir -File -Filter 'install-body-*.cmd' | Select-Object -ExpandProperty Name)
+    $bodies += 'uninstall-body.cmd'
+    foreach ($body in $bodies) {
+        $sources += @{ Src = "scripts\$body"; Dest = $body }
+    }
+
+    $sharedDir = Join-Path $StagingDir 'shared'
+    if (-not (Test-Path $sharedDir)) {
+        New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null
+    }
+
+    foreach ($s in $sources) {
+        $src = Join-Path $CoreRoot $s.Src
+        if (-not (Test-Path $src)) {
+            throw "Shared bundle source missing: $src. Is cameraunlock-core checked out?"
+        }
+        Copy-Item -Path $src -Destination (Join-Path $sharedDir $s.Dest) -Force
+        Write-Host "  shared/$($s.Dest)" -ForegroundColor Green
+    }
+}
+
+<#
+.SYNOPSIS
+    Tests if a version string is valid semantic versioning.
+.PARAMETER Version
+    Version string to validate (e.g., "1.0.1").
+.OUTPUTS
+    Boolean indicating if the version is valid.
+#>
+function Copy-LicenceNotices {
+    <#
+    .SYNOPSIS
+        Stage the licence notices that must accompany a binary distribution.
+    .DESCRIPTION
+        MIT, BSD-2-Clause and BSD-3-Clause all require the copyright notice,
+        the conditions and the disclaimer to travel with the binary, not just
+        with the source. Every ZIP we publish is a binary distribution, so
+        LICENSE and THIRD-PARTY-NOTICES.md belong at the root of each one -
+        the Nexus ZIP as much as the installer ZIP.
+
+        A missing notice is a licence violation, so this throws rather than
+        skipping. A silent skip turns a compliance failure into a green build.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$StagingDir,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        # Extra repo-root documents to stage alongside the notices.
+        [string[]]$Additional = @()
+    )
+
+    if (-not (Test-Path $StagingDir)) {
+        throw "Copy-LicenceNotices: staging directory does not exist: $StagingDir"
+    }
+
+    foreach ($doc in (@('LICENSE', 'THIRD-PARTY-NOTICES.md') + $Additional)) {
+        $src = Join-Path $ProjectRoot $doc
+        if (-not (Test-Path $src)) {
+            throw "Required notice file not found: $doc. Every published ZIP is a binary distribution and must carry it."
+        }
+        Copy-Item $src -Destination $StagingDir -Force
+        Write-Host "  $doc" -ForegroundColor Green
+    }
+
+    # cameraunlock-core is under its own licence, separate from the mod's
+    # LICENSE, and it is compiled into the shipped files, so its licence
+    # travels with them.
+    $coreLicence = Join-Path $PSScriptRoot '..\LICENSE'
+    if (-not (Test-Path $coreLicence)) {
+        throw "cameraunlock-core/LICENSE not found at $coreLicence. It is compiled into the shipped DLLs and its notice must travel with them."
+    }
+    $licencesDir = Join-Path $StagingDir 'licenses'
+    New-Item -ItemType Directory -Path $licencesDir -Force | Out-Null
+    Copy-Item $coreLicence -Destination (Join-Path $licencesDir 'cameraunlock-core-LICENSE.txt') -Force
+    Write-Host "  licenses/cameraunlock-core-LICENSE.txt" -ForegroundColor Green
+}
+
+function Test-SemanticVersion {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Version
+    )
+
+    return $Version -match '^\d+\.\d+\.\d+$'
+}
+
+<#
+.SYNOPSIS
+    Bumps a semantic version by the given component.
+.DESCRIPTION
+    Returns a new X.Y.Z by incrementing major, minor, or patch. Pre-release
+    and build suffixes on the input are dropped (a "patch" bump from
+    "1.2.3-rc.1" returns "1.2.4", not "1.2.4-rc.2"). The intent is that
+    callers feed in a release version and get a release version back.
+.PARAMETER Version
+    Current version (must be parseable as X.Y.Z, optionally with -prerelease).
+.PARAMETER Bump
+    One of major, minor, patch.
+.OUTPUTS
+    The bumped version string.
+#>
+function Step-SemanticVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Version,
+        [Parameter(Mandatory=$true)][ValidateSet('major','minor','patch')][string]$Bump
+    )
+
+    $core = ($Version -split '[-+]')[0]
+    if ($core -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        throw "Cannot bump '$Version': not in X.Y.Z form"
+    }
+    $maj = [int]$matches[1]
+    $min = [int]$matches[2]
+    $pat = [int]$matches[3]
+
+    switch ($Bump) {
+        'major' { return "$($maj + 1).0.0" }
+        'minor' { return "$maj.$($min + 1).0" }
+        'patch' { return "$maj.$min.$($pat + 1)" }
+    }
+}
+
+<#
+.SYNOPSIS
+    Resolves a release argument (literal version or major/minor/patch) into a concrete version.
+.DESCRIPTION
+    The mod release scripts accept either a literal X.Y.Z or one of the
+    bump keywords 'major', 'minor', 'patch'. This helper centralizes that
+    resolution so the call site stays a one-liner.
+.PARAMETER Argument
+    User-supplied argument: 'major', 'minor', 'patch', or a literal X.Y.Z[-prerelease].
+.PARAMETER CurrentVersion
+    Current version, used as the base when Argument is a bump keyword.
+.OUTPUTS
+    The resolved new version string. Throws on invalid input.
+#>
+function Resolve-ReleaseVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Argument,
+        [string]$CurrentVersion
+    )
+
+    $arg = $Argument.Trim().ToLowerInvariant()
+
+    if ($arg -in @('major','minor','patch')) {
+        if ([string]::IsNullOrWhiteSpace($CurrentVersion)) {
+            throw "Cannot bump '$arg': no current version available."
+        }
+        return Step-SemanticVersion -Version $CurrentVersion -Bump $arg
+    }
+
+    if ($Argument -notmatch '^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$') {
+        throw "Invalid version '$Argument'. Use 'major', 'minor', 'patch', or X.Y.Z[-prerelease]."
+    }
+    return $Argument
+}
+
+<#
+.SYNOPSIS
+    Checks if the git working directory is clean.
+.DESCRIPTION
+    The config differential's record (tests/config_differential/passed.json)
+    does not count: a nightly build that ran the differential writes it, and
+    the next release commits it with the version bump (Invoke-VersionCommit).
+.OUTPUTS
+    Boolean indicating if the working directory is clean.
+#>
+function Test-CleanGitStatus {
+    # Continue for the call, or the module's own 'Stop' turns git's stderr into
+    # a NativeCommandError and the "Not a git repository" diagnostic below is
+    # unreachable.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $gitStatus = git status --porcelain 2>$null
+    $ErrorActionPreference = $prevPref
+    if ($LASTEXITCODE -ne 0) {
+        throw "Not a git repository"
+    }
+    $stamp = Get-DifferentialStampRelativePath
+    return -not @($gitStatus | Where-Object { $_ -and $_.Substring(3).Trim('"') -ne $stamp })
+}
+
+<#
+.SYNOPSIS
+    Runs a mod's full test suite before a release, with the config differential
+    only when something it depends on changed since it last passed.
+.DESCRIPTION
+    A repo with tests/config_differential runs `pixi run test-unit` and then
+    Invoke-ConfigDifferential (DifferentialGate.psm1), which records a pass in
+    tests/config_differential/passed.json for Invoke-VersionCommit to commit.
+    Any other repo runs `pixi run test`. Throws when a test fails.
+.PARAMETER ProjectRoot
+    The mod repo.
+.PARAMETER Force
+    Run the differential whatever its record says.
+#>
+function Invoke-ReleaseTestSuite {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Force
+    )
+    Push-Location $ProjectRoot
+    try {
+        $hasDifferential = Test-Path -LiteralPath 'tests/config_differential' -PathType Container
+        $task = if ($hasDifferential) { 'test-unit' } else { 'test' }
+        $global:LASTEXITCODE = 0
+        & pixi run $task
+        if ($LASTEXITCODE -ne 0) { throw "pixi run $task failed ($LASTEXITCODE)" }
+        if ($hasDifferential) { Invoke-ConfigDifferential -Root $ProjectRoot -Force:$Force }
+    } finally {
+        Pop-Location
+    }
+}
+
+<#
+.SYNOPSIS
+    Checks if a git tag already exists.
+.PARAMETER Tag
+    Tag name to check for (e.g., "v1.0.1").
+.OUTPUTS
+    Boolean indicating if the tag exists.
+#>
+function Test-GitTagExists {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Tag
+    )
+
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $tagExists = git tag -l $Tag 2>$null
+    $ErrorActionPreference = $prevPref
+    return ($LASTEXITCODE -eq 0 -and $tagExists)
+}
+
+<#
+.SYNOPSIS
+    Tests if a commit subject is noise that should be filtered from changelogs and release notes.
+.PARAMETER Subject
+    Raw commit subject line (without any formatting prefix like "- ").
+.OUTPUTS
+    Boolean. $true if the commit is noise, $false if it should be included.
+#>
+function Test-NoiseCommit {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Subject
+    )
+
+    $noisePattern = '^(chore|refactor|internal|clean ?up|wip|fixup|squash|ci|build|test|style|docs)(\(.*?\))?:'
+    return (
+        $Subject -match $noisePattern -or
+        $Subject -match '^Merge ' -or
+        $Subject -match '^Release v\d+' -or
+        $Subject -match '^(bump|release|version)' -or
+        $Subject -match '^Update (cameraunlock|submodule)'
+    )
+}
+
+<#
+.SYNOPSIS
+    Updates the version in a manifest.json file.
+.PARAMETER ManifestPath
+    Path to the manifest.json file.
+.PARAMETER Version
+    New version to set.
+.PARAMETER VersionProperty
+    Property name for version (defaults to trying "version" then "Version").
+.OUTPUTS
+    Hashtable with OldVersion and Updated status.
+#>
+function Update-ManifestVersion {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ManifestPath,
+        [Parameter(Mandatory=$true)]
+        [string]$Version,
+        [string]$VersionProperty = $null
+    )
+
+    if (-not (Test-Path $ManifestPath)) {
+        throw "Manifest file not found: $ManifestPath"
+    }
+
+    $manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+
+    $propName = $VersionProperty
+    if (-not $propName) {
+        if ($manifest.PSObject.Properties['version']) {
+            $propName = 'version'
+        } elseif ($manifest.PSObject.Properties['Version']) {
+            $propName = 'Version'
+        } else {
+            throw "Could not find version property in manifest"
+        }
+    }
+
+    $oldVersion = $manifest.$propName
+
+    if ($oldVersion -eq $Version) {
+        return @{
+            OldVersion = $oldVersion
+            Updated = $false
+        }
+    }
+
+    $manifest.$propName = $Version
+    $manifest | ConvertTo-Json -Depth 10 | Set-Content $ManifestPath
+
+    return @{
+        OldVersion = $oldVersion
+        Updated = $true
+    }
+}
+
+function Write-ChangelogText {
+    param([string]$ChangelogPath, [string]$Text)
+    # BOM-less UTF-8: Set-Content's default is the ANSI codepage on 5.1, which
+    # writes the mojibake the UTF-8 read avoids. .NET resolves a relative path
+    # against the process directory, not the PowerShell location, so the path is
+    # made absolute first.
+    $changelogFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ChangelogPath)
+    [System.IO.File]::WriteAllText($changelogFullPath, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+<#
+.SYNOPSIS
+    Writes the changelog entry for a release.
+.DESCRIPTION
+    An entry for Version already there is left as written, except that a
+    `## [Version] - yyyy-mm-dd` heading takes today's date: it was written ahead
+    of the release. A `## [Unreleased]` section holding any non-blank line is the
+    release's notes: its heading becomes `## [Version] - date` where it stands,
+    its content is kept as written, and no commit is read. On a first release (no
+    `v*` tag), with no such [Unreleased], the first `## [x.y.z]` section was never
+    released, so it is renamed the same way. Otherwise an entry is generated from
+    the commit subjects since the last version tag. It replaces an empty
+    `## [Unreleased]`, or goes directly above the first `## [` heading, or at the
+    end of a file that has none. No new `## [Unreleased]` is written.
+.PARAMETER ChangelogPath
+    Path to the CHANGELOG.md file. It must exist and hold a `# ` title line.
+.PARAMETER Version
+    Version for the new changelog entry.
+.PARAMETER Maintenance
+    Where there is nothing to list (no commit in range, or a first release with
+    no user-facing commit), write a maintenance entry instead of throwing:
+    `- Maintenance release (no user-facing changes).` under `### Changed`, or
+    `First release.` on a first release.
+.OUTPUTS
+    Hashtable: AlreadyExists, Promoted (true when a section was renamed),
+    Maintenance, Generic, and the counts Features, Fixes and Changes. For a
+    generated entry these count the bullets written under Added, Fixed and
+    Changed. For a promoted section they count the lines starting `- ` under its
+    `### Added`, `### Fixed` and `### Changed` headings; bullets under any other
+    heading are not counted.
+#>
+function New-ChangelogFromCommits {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ChangelogPath,
+        [Parameter(Mandatory=$true)]
+        [string]$Version,
+        [string[]]$ArtifactPaths,
+        [switch]$IncludeAll,
+        [switch]$Maintenance
+    )
+
+    if (-not (Test-Path -LiteralPath $ChangelogPath)) {
+        throw "CHANGELOG.md not found: $ChangelogPath"
+    }
+
+    # The manifest ships at the installer ZIP root and decides how the launcher
+    # deploys the mod, so a manifest-only fix is a release. No caller's list
+    # carried it, and such a fix then hit the empty-range throw below.
+    if ($ArtifactPaths -and ($ArtifactPaths -notcontains 'launcher-manifest.json')) {
+        $ArtifactPaths = @($ArtifactPaths) + 'launcher-manifest.json'
+    }
+
+    # CHANGELOG.md is UTF-8. Windows PowerShell 5.1 reads with the ANSI codepage
+    # by default, so an existing entry with an en dash or an accented name comes
+    # back mojibaked and is rewritten that way.
+    $changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
+    if ($null -eq $changelog -or $changelog -notmatch '(?m)^# ') {
+        throw "$ChangelogPath has no '# ' title line such as '# Changelog', so no entry is written to it"
+    }
+
+    $nl = if ($changelog.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $date = Get-Date -Format 'yyyy-MM-dd'
+    $escaped = [regex]::Escape($Version)
+
+    if ($changelog -match "\[$escaped\]") {
+        $stamped = [regex]::Replace($changelog, '(?m)^(## \[' + $escaped + '\] - )\d{4}-\d{2}-\d{2}(?=[ \t]*\r?$)', "`${1}$date", 1)
+        if ($stamped -cne $changelog) {
+            Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($stamped.TrimEnd() + $nl)
+        }
+        return @{
+            AlreadyExists = $true
+            Features = 0
+            Fixes = 0
+            Changes = 0
+        }
+    }
+
+    # Match version tags only. The nightly publisher moves the rolling `dev` tag
+    # to the tip on every build, so an unfiltered describe resolves to `dev`
+    # sitting at or just behind HEAD: a first release is not seen as one, and a
+    # later one diffs against last night's build instead of the previous version.
+    # Both surface as the empty-range throw further down.
+    # generate-release-notes.ps1 already filters this way. Errors are allowed so
+    # git describe doesn't throw when there are no tags.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $lastTag = git describe --tags --abbrev=0 --match 'v[0-9]*' 2>$null
+    $ErrorActionPreference = $prevPref
+    $firstRelease = $LASTEXITCODE -ne 0
+
+    $unreleased = [regex]::Match($changelog, '(?ms)^(?<heading>## \[Unreleased\][^\r\n]*?)\r?$(?<body>.*?)(?=^## |\z)')
+    $release = $null
+    if ($unreleased.Success -and $unreleased.Groups['body'].Value.Trim()) {
+        $release = $unreleased
+    } elseif ($firstRelease) {
+        $untagged = [regex]::Match($changelog, '(?ms)^(?<heading>## \[\d+\.\d+\.\d+\][^\r\n]*?)\r?$(?<body>.*?)(?=^## |\z)')
+        if ($untagged.Success) { $release = $untagged }
+    }
+
+    if ($release) {
+        $body = $release.Groups['body'].Value
+        $countUnder = {
+            param([string]$Heading)
+            $section = [regex]::Match($body, '(?ms)^### ' + $Heading + '[ \t]*\r?$(.*?)(?=^### |\z)')
+            if (-not $section.Success) { return 0 }
+            return [regex]::Matches($section.Groups[1].Value, '(?m)^- ').Count
+        }
+        $heading = $release.Groups['heading']
+        $changelog = $changelog.Remove($heading.Index, $heading.Length).Insert($heading.Index, "## [$Version] - $date")
+        Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($changelog.TrimEnd() + $nl)
+        return @{
+            AlreadyExists = $false
+            Promoted = $true
+            Maintenance = $false
+            Features = & $countUnder 'Added'
+            Fixes = & $countUnder 'Fixed'
+            Changes = & $countUnder 'Changed'
+            Generic = $false
+        }
+    }
+
+    if ($firstRelease) {
+        $commitRange = "HEAD"
+    } else {
+        $commitRange = "$lastTag..HEAD"
+    }
+
+    # git emits UTF-8, but a native command's output is decoded with
+    # [Console]::OutputEncoding - OEM 437/850 on a stock Windows console - so a
+    # commit subject with an en dash or an accented name arrives mojibaked and
+    # is committed that way, then served as the GitHub release body.
+    $prevConsoleEncoding = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    try {
+        if ($ArtifactPaths) {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+        } else {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
+        }
+    } finally {
+        [Console]::OutputEncoding = $prevConsoleEncoding
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "git log failed (exit code $LASTEXITCODE) for range '$commitRange'. Check that the range is valid and the repository is not corrupt."
+    }
+
+    $isMaintenance = $false
+    if (-not $commits) {
+        # An empty range means a re-tag of an already-released commit or a bad
+        # pathspec, never a core-only release (those still carry the submodule
+        # pointer bump), so the generic fallback below must not apply.
+        if (-not $Maintenance) {
+            throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
+        }
+        $isMaintenance = $true
+    }
+
+    # Filter out noise commits before categorization
+    if ($IncludeAll) {
+        $commits = @($commits)
+    } else {
+        $commits = @($commits | Where-Object { -not (Test-NoiseCommit $_) })
+    }
+
+    if ($commits.Count -eq 0 -and $firstRelease) {
+        if (-not $Maintenance) {
+            throw "No user-facing commits found for the first release. Use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
+        }
+        $isMaintenance = $true
+    }
+
+    # Categorize commits using conventional commit format
+    $features = @()
+    $fixes = @()
+    $changes = @()
+    $other = @()
+
+    $generic = ($commits.Count -eq 0 -and -not $isMaintenance)
+    if ($generic) {
+        # Core-only release: everything since the last tag is a submodule
+        # pointer bump or other noise-filtered commit, so there is nothing
+        # mod-local to list. The shared bundle still picks up the new core at
+        # package time, so release with a generic entry instead of blocking.
+        $changes += '- Performance and stability improvements'
+    }
+    if ($isMaintenance -and -not $firstRelease) {
+        $changes += '- Maintenance release (no user-facing changes).'
+    }
+
+    foreach ($commit in $commits) {
+        if ($commit -match '^feat(\(.*?\))?!?:\s*(.+)$') {
+            $features += "- $($matches[2])"
+        } elseif ($commit -match '^fix(\(.*?\))?!?:\s*(.+)$') {
+            $fixes += "- $($matches[2])"
+        } elseif ($commit -match '^perf(\(.*?\))?!?:\s*(.+)$') {
+            $changes += "- $($matches[2])"
+        } else {
+            $other += "- $commit"
+        }
+    }
+
+    $newEntry = "## [$Version] - $date$nl$nl"
+
+    if ($isMaintenance -and $firstRelease) {
+        $newEntry += "First release.$nl$nl"
+    }
+
+    if ($features.Count -gt 0) {
+        $newEntry += "### Added$nl$nl"
+        $newEntry += ($features -join $nl) + "$nl$nl"
+    }
+
+    if ($changes.Count -gt 0) {
+        $newEntry += "### Changed$nl$nl"
+        $newEntry += ($changes -join $nl) + "$nl$nl"
+    }
+
+    if ($fixes.Count -gt 0) {
+        $newEntry += "### Fixed$nl$nl"
+        $newEntry += ($fixes -join $nl) + "$nl$nl"
+    }
+
+    if ($other.Count -gt 0) {
+        $newEntry += "### Other$nl$nl"
+        $newEntry += ($other -join $nl) + "$nl$nl"
+    }
+
+    if ($unreleased.Success) {
+        $changelog = $changelog.Remove($unreleased.Index, $unreleased.Length).Insert($unreleased.Index, $newEntry)
+    } else {
+        # Before the newest version's heading, found by the heading itself: the entry once went
+        # after the first blank line below "# Changelog", which in a changelog with no blank
+        # line under the header is the one inside the newest entry.
+        $firstVersion = [regex]::Match($changelog, '(?m)^## \[')
+        if ($firstVersion.Success) {
+            $changelog = $changelog.Insert($firstVersion.Index, $newEntry)
+        } else {
+            $changelog = $changelog.TrimEnd() + $nl + $nl + $newEntry
+        }
+    }
+
+    Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($changelog.TrimEnd() + $nl)
+
+    return @{
+        AlreadyExists = $false
+        Promoted = $false
+        Maintenance = $isMaintenance
+        Features = $features.Count
+        Fixes = $fixes.Count
+        Changes = $changes.Count
+        Generic = $generic
+    }
+}
+
+<#
+.SYNOPSIS
+    Gets the changelog section for a specific version.
+.PARAMETER ChangelogPath
+    Path to the CHANGELOG.md file.
+.PARAMETER Version
+    Version to get the section for.
+.OUTPUTS
+    String containing the changelog section or empty string if not found.
+#>
+function Get-ChangelogSection {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ChangelogPath,
+        [Parameter(Mandatory=$true)]
+        [string]$Version
+    )
+
+    if (-not (Test-Path -LiteralPath $ChangelogPath)) {
+        return ""
+    }
+
+    # This section becomes the GitHub release body, so it reads with the same
+    # explicit UTF-8 the writer uses.
+    $changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
+
+    if ($changelog -match "(?s)## \[$Version\].*?(?=(## \[|\z))") {
+        return $matches[0].Trim()
+    }
+
+    return ""
+}
+
+<#
+.SYNOPSIS
+    Commits version bump changes.
+.PARAMETER Version
+    Version string for the commit message.
+.PARAMETER Files
+    Array of file paths to stage and commit.
+.OUTPUTS
+    Boolean indicating if a commit was made.
+#>
+function Invoke-VersionCommit {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Version,
+        [Parameter(Mandatory=$true)]
+        [string[]]$Files
+    )
+
+    # The config differential's record, when the release suite just wrote it.
+    $stamp = Get-DifferentialStampRelativePath
+    $Files = @($Files) + @(if (Test-Path -LiteralPath $stamp) { $stamp })
+
+    foreach ($file in $Files) {
+        if (Test-Path $file) {
+            git add -- $file
+            if ($LASTEXITCODE -ne 0) { throw "git add failed for $file" }
+        }
+    }
+
+    $stagedChanges = git diff --cached --name-only
+    if (-not $stagedChanges) {
+        return $false
+    }
+
+    git commit -m "chore: bump version to $Version"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to commit changes"
+    }
+
+    return $true
+}
+
+<#
+.SYNOPSIS
+    Creates and pushes a release tag.
+.PARAMETER Version
+    Version string (without 'v' prefix).
+.PARAMETER Message
+    Tag message/annotation.
+.PARAMETER Branch
+    Branch to push to (default: main).
+.OUTPUTS
+    None. Throws on failure.
+#>
+function New-ReleaseTag {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Version,
+        [Parameter(Mandatory=$true)]
+        [string]$Message,
+        [string]$Branch = "main"
+    )
+
+    $tag = "v$Version"
+
+    Assert-ReleaseNotBelowCanonicalSince -RepoRoot (git rev-parse --show-toplevel).Trim() -Version $Version
+
+    git tag -a $tag -m $Message
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create git tag"
+    }
+
+    git push origin $Branch
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to push commits. Tag created locally. Run: git push origin $Branch; git push origin $tag"
+    }
+
+    # Push only the tag being released. `--tags` pushes every local tag, so a
+    # remote missing older ones (a recreated repo, a fresh fork) gets them all
+    # at once - release.yml fires per tag and republishes stale versions
+    # alongside this one, each with its own Discord announcement.
+    git push origin $tag
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to push tag $tag. Run manually: git push origin $tag"
+    }
+}
+
+<#
+.SYNOPSIS
+    Gets the version from a .csproj file.
+.PARAMETER CsprojPath
+    Path to the .csproj file.
+.OUTPUTS
+    String containing the version.
+#>
+function Get-CsprojVersion {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$CsprojPath
+    )
+
+    if (-not (Test-Path $CsprojPath)) {
+        throw "csproj not found: $CsprojPath"
+    }
+
+    $content = Get-Content $CsprojPath -Raw
+    if ($content -match '<Version>([^<]+)</Version>') {
+        # Trimmed: a pretty-printed <Version> element puts newlines and indentation in
+        # the capture, and the CI gate compares it to the git tag with -ne. That fails
+        # with both sides printing an identical-looking version and no visible cause.
+        return $matches[1].Trim()
+    }
+
+    throw "No <Version> element found in $CsprojPath"
+}
+
+<#
+.SYNOPSIS
+    Reads the authoritative version out of whichever file a mod keeps it in.
+.DESCRIPTION
+    The fleet keeps its version in whichever file its toolchain already had:
+    a .csproj <Version>, a CMakeLists project(... VERSION ...), Cargo.toml,
+    pixi.toml, a JSON manifest, or - for the largest group, the ASI mods - a
+    plain C++ header. Everything downstream of the tag-vs-file check is
+    loader-agnostic, so the reusable release workflow parameterises just this
+    one read rather than shipping a workflow per toolchain.
+
+    'regex' is the deliberate escape hatch for the last of those. A version in
+    src/version.h, gradle.properties or install.cmd's `set "MOD_VERSION=..."`
+    has no schema to parse, only a line to match, and enumerating a named
+    Source per spelling would mean editing this module every time a mod picks
+    a new macro name. Multiple capture groups are joined with '.', which is
+    what the VERSION_MAJOR / VERSION_MINOR / VERSION_PATCH headers need.
+
+    This lives here, not in workflow YAML, for the same reason the build does:
+    a developer running the release script and CI validating the tag have to
+    read the version the same way or the check passes locally and fails on the
+    tag push.
+.PARAMETER Source
+    csproj | cmake | cargo | pixi | manifest | regex
+.PARAMETER Path
+    Path to the file holding the version.
+.PARAMETER Key
+    Manifest only. Dotted path to the version property, for manifests that nest
+    it (launcher-manifest.json keeps it at mod_info.version). Defaults to
+    'version'.
+.PARAMETER Pattern
+    Regex only, and required there. Must capture the version; if it captures
+    several groups they are joined with '.'.
+.OUTPUTS
+    String containing the version.
+#>
+function Get-ProjectVersion {
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateSet('csproj', 'cmake', 'cargo', 'pixi', 'manifest', 'regex')]
+        [string]$Source,
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [string]$Key = 'version',
+        [string]$Pattern
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Version source not found: $Path (source type '$Source')"
+    }
+
+    switch ($Source) {
+        'csproj' { return Get-CsprojVersion $Path }
+
+        'cmake' {
+            $content = Get-Content -LiteralPath $Path -Raw
+            # project(Name VERSION x.y.z LANGUAGES ...). CMake allows up to four
+            # components; the tag check wants exactly what is written here, so the
+            # capture is left as-is rather than normalised to three.
+            if ($content -match '(?is)\bproject\s*\([^)]*?\bVERSION\s+([0-9]+(?:\.[0-9]+)*)') {
+                return $matches[1]
+            }
+            throw "No project(... VERSION ...) found in $Path"
+        }
+
+        'cargo' { return Get-TomlTableVersion -Path $Path -Tables @('package') }
+
+        # 'project' is the deprecated spelling of pixi's workspace table. Both are
+        # still on disk across the fleet, so both are accepted here.
+        'pixi' { return Get-TomlTableVersion -Path $Path -Tables @('workspace', 'project') }
+
+        'manifest' {
+            $json = (Get-Content -LiteralPath $Path -Raw).TrimStart([char]0xFEFF) | ConvertFrom-Json
+            $node = $json
+            foreach ($segment in ($Key -split '\.')) {
+                if ($null -eq $node -or -not $node.PSObject.Properties[$segment]) {
+                    throw "No '$Key' property in $Path (stopped at '$segment')"
+                }
+                $node = $node.$segment
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$node)) {
+                throw "Property '$Key' in $Path is empty"
+            }
+            return [string]$node
+        }
+
+        'regex' {
+            if ([string]::IsNullOrWhiteSpace($Pattern)) {
+                throw "Source 'regex' needs -Pattern; there is nothing to match in $Path without one."
+            }
+            $content = Get-Content -LiteralPath $Path -Raw
+            $match = [regex]::Match($content, $Pattern)
+            if (-not $match.Success) {
+                throw "Pattern '$Pattern' did not match anything in $Path"
+            }
+            $groups = @($match.Groups | Select-Object -Skip 1 | Where-Object { $_.Success })
+            if ($groups.Count -eq 0) {
+                throw "Pattern '$Pattern' matched in $Path but captured no group, so there is no version to read."
+            }
+            return (($groups | ForEach-Object { $_.Value.Trim() }) -join '.')
+        }
+    }
+}
+
+# Narrow TOML read: walk table headers and return `version` from the first of
+# $Tables that has one. Deliberately not a TOML parser - a `version = ` under
+# [dependencies] is the failure mode this exists to avoid, and scoping to a
+# named table is all that takes.
+function Get-TomlTableVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string[]]$Tables
+    )
+
+    $current = ''
+    $found = @{}
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[\[?([^\]]+)\]\]?') { $current = $matches[1].Trim(); continue }
+        if ($current -notin $Tables) { continue }
+        if ($trimmed -match '^version\s*=\s*"([^"]+)"') { $found[$current] = $matches[1] }
+    }
+
+    foreach ($table in $Tables) {
+        if ($found.ContainsKey($table)) { return $found[$table] }
+    }
+    throw "No version under [$($Tables -join '] or [')] in $Path"
+}
+
+<#
+.SYNOPSIS
+    Sets the version in a .csproj file.
+.PARAMETER CsprojPath
+    Path to the .csproj file.
+.PARAMETER Version
+    New version to set.
+#>
+function Set-CsprojVersion {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$CsprojPath,
+        [Parameter(Mandatory=$true)]
+        [string]$Version
+    )
+
+    if (-not (Test-Path $CsprojPath)) {
+        throw "csproj not found: $CsprojPath"
+    }
+
+    # A .csproj is UTF-8. Windows PowerShell 5.1 reads with the ANSI codepage
+    # and Set-Content writes with it, so a project carrying an accented
+    # <Authors> or a non-ASCII <Description> came back mojibaked and was written
+    # back that way - and the BOM, which MSBuild and every editor here expect,
+    # was dropped. Read and write explicitly, and keep the file's own BOM state.
+    $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CsprojPath)
+    $bytes = [System.IO.File]::ReadAllBytes($full)
+    $hadBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $content = [System.IO.File]::ReadAllText($full)
+
+    if ($content -notmatch '<Version>[^<]+</Version>') {
+        throw "No <Version> element found in $CsprojPath"
+    }
+
+    $content = $content -replace '<Version>[^<]+</Version>', "<Version>$Version</Version>"
+    [System.IO.File]::WriteAllText($full, $content, (New-Object System.Text.UTF8Encoding($hadBom)))
+}
+
+<#
+.SYNOPSIS
+    Read the cameraunlock-core commit a mod repo has committed as its
+    submodule pointer.
+.DESCRIPTION
+    This is the commit whose source is compiled into the mod binary, which
+    is what THIRD-PARTY-NOTICES.md has to name. It is read from the parent
+    repo's index entry, not from the submodule working tree, because a
+    working tree that has been moved but not staged is not what a release
+    ships. It is not read from HEAD's tree either: mid-merge, or after a
+    bump that is staged but not committed, HEAD still names the old pointer
+    while the index holds the one the next commit records.
+
+    HEAD's tree is read only when the index has no entry for the path at
+    all. An unresolved merge conflict on the pointer throws: there is no
+    pinned commit until someone picks one, and falling back to either side
+    would stamp a guess.
+
+    Returns $null for a repo that does not consume core as a submodule -
+    a real layout in this fleet, not an error.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+#>
+function Get-PinnedCoreCommit {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+
+    if (-not (Test-Path (Join-Path $RepoRoot '.gitmodules'))) { return $null }
+
+    # ls-files and ls-tree answer an absent path with empty output and exit 0,
+    # not with stderr: under Windows PowerShell 5.1 a native command's stderr
+    # becomes a NativeCommandError record, which an $ErrorActionPreference =
+    # 'Stop' caller turns into a terminating error. A repo that vendors no core
+    # is an ordinary answer here, not a failure. Mode 160000 is a gitlink; a
+    # plain cameraunlock-core directory is not a submodule pin.
+    $staged = @(& git -C $RepoRoot ls-files --stage -- cameraunlock-core |
+                ForEach-Object {
+                    if ($_ -match '^160000 ([0-9a-f]+) ([0-3])\tcameraunlock-core$') {
+                        [PSCustomObject]@{ Commit = $Matches[1]; Stage = $Matches[2] }
+                    }
+                })
+    if ($LASTEXITCODE -ne 0) { throw "git ls-files failed in $RepoRoot." }
+
+    if (@($staged | Where-Object { $_.Stage -ne '0' }).Count -gt 0) {
+        throw "cameraunlock-core has an unresolved merge conflict in $RepoRoot, so no commit is pinned yet. Stage the commit the merge should keep (git add cameraunlock-core), then re-run."
+    }
+    if ($staged.Count -gt 0) { return $staged[0].Commit }
+
+    $head = & git -C $RepoRoot rev-parse --quiet --verify HEAD
+    if ($LASTEXITCODE -ne 0 -or -not $head) { return $null }
+    $recorded = @(& git -C $RepoRoot ls-tree HEAD -- cameraunlock-core |
+                  ForEach-Object {
+                      if ($_ -match '^160000 commit ([0-9a-f]+)\tcameraunlock-core$') { $Matches[1] }
+                  })
+    if ($LASTEXITCODE -ne 0) { throw "git ls-tree failed in $RepoRoot." }
+    if ($recorded.Count -eq 0) { return $null }
+    return $recorded[0]
+}
+
+<#
+.SYNOPSIS
+    Rewrite the cameraunlock-core commit recorded in a mod's
+    THIRD-PARTY-NOTICES.md so it names the commit the mod actually pins.
+.DESCRIPTION
+    The notices file ships at the root of every release ZIP and is the
+    attribution the user receives, so the commit it names has to be the one
+    compiled into the binary. Nothing about bumping the submodule pointer
+    touches that file, so the two drift apart the moment the pin moves -
+    silently, because a wrong commit hash reads exactly like a right one.
+
+    Rewritten hashes are those on a line that mentions cameraunlock-core, or
+    on any line inside the file's `## cameraunlock-core` section. Length is
+    preserved, so a table cell carrying a short hash keeps its short form.
+    Everything else in the file, including the hashes of other dependencies,
+    is left alone.
+
+    A file that records no cameraunlock-core hash at all is reported through
+    Recorded = 0 and left untouched; where to introduce the record is a
+    judgement about that mod's notices layout, not something to guess at.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+.PARAMETER ReadOnly
+    Report what would change without writing the file.
+.OUTPUTS
+    PSCustomObject with RepoRoot, Pin, Recorded (hashes found), Stale (the
+    distinct wrong hashes found) and Updated (whether the file was written).
+#>
+function Sync-CoreCommitInNotices {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [string]$Commit,
+        [switch]$ReadOnly
+    )
+
+    # $Commit exists for the bump path: immediately after `git submodule
+    # update --remote` the working tree holds the new commit while the index
+    # still holds the old one, so the pointer the notices must name is not yet
+    # readable from the parent's index. Both get committed together.
+    $pin = if ($Commit) { $Commit } else { Get-PinnedCoreCommit -RepoRoot $RepoRoot }
+    if (-not $pin) {
+        throw "$RepoRoot does not pin cameraunlock-core as a submodule, so there is no commit to record."
+    }
+
+    $noticesPath = Join-Path $RepoRoot 'THIRD-PARTY-NOTICES.md'
+    if (-not (Test-Path $noticesPath)) {
+        throw "THIRD-PARTY-NOTICES.md not found at $noticesPath. cameraunlock-core is compiled into the mod binary and its notice must travel with it."
+    }
+
+    # Split on `n only, so each element keeps any trailing `r: joining them
+    # back reproduces the file's own line endings rather than normalising a
+    # whole file to CRLF for the sake of one hash.
+    #
+    # Read and write through the same strict UTF-8 encoding. Windows PowerShell
+    # 5.1's Get-Content decodes a BOM-less file as the ANSI codepage, so each
+    # restamp turned every non-ASCII byte of the file into mojibake and wrote
+    # that back out as UTF-8, compounding on every bump. Strict decoding throws
+    # on a file that is not valid UTF-8 instead of rewriting it.
+    $utf8  = New-Object System.Text.UTF8Encoding($false, $true)
+    $raw   = [System.IO.File]::ReadAllText($noticesPath, $utf8)
+    $lines = $raw -split "`n"
+
+    $inCoreSection = $false
+    $recorded = 0
+    $stale    = @()
+    $changed  = $false
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+
+        # Headings and prose both spell it several ways across the fleet -
+        # `## cameraunlock-core`, `### CameraUnlock Core`, `## CameraUnlock-Core
+        # (shared)`. Matching one spelling leaves a stale hash sitting under
+        # the others, which is the failure this function exists to prevent.
+        if ($line -match '^#{1,6}\s') {
+            $inCoreSection = $line -match '^#{1,6}\s+cameraunlock[- ]core\b'
+        }
+
+        # Which lines may carry OUR hash. Anything looser rewrites another
+        # dependency's commit into core's, silently, in the one file whose whole
+        # job is attribution - and core vendoring MinHook makes that a real
+        # shape rather than a hypothetical one.
+        #
+        #   - a table row, only when its first cell names cameraunlock-core, so
+        #     `| MinHook | abc1234 | MIT | vendored beside cameraunlock-core |`
+        #     is left alone;
+        #   - any other line that names cameraunlock-core;
+        #   - inside the `## cameraunlock-core` section, a bullet whose label is
+        #     the commit itself (`- Pinned commit:`, `- **Version:** commit`),
+        #     which is every shape the fleet writes. A bullet that names another
+        #     project first is that project's.
+        $eligible = if ($line -match '^\s*\|') {
+            $line -match '^\s*\|\s*`?\s*cameraunlock[- ]core\b'
+        } elseif ($line -match 'cameraunlock[- ]core') {
+            $true
+        } else {
+            $inCoreSection -and $line -match '(?i)^\s*[-*+]\s*\**\s*(pinned\s+)?(commit|version|revision|sha)\b'
+        }
+        if (-not $eligible) { continue }
+
+        # A hash needs a digit to be a hash. Without that, ordinary words
+        # spelled from a-f ("acceded", "defaced") match the character class
+        # and get rewritten into the middle of a sentence.
+        $hits = @([regex]::Matches($line, '(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])') |
+                  Where-Object { $_.Value -match '[0-9]' })
+        if ($hits.Count -eq 0) { continue }
+
+        $updated = $line
+        for ($j = $hits.Count - 1; $j -ge 0; $j--) {
+            $hit = $hits[$j]
+            $recorded++
+            $want = $pin.Substring(0, $hit.Length)
+            if ($hit.Value -eq $want) { continue }
+            $stale += $hit.Value
+            $updated = $updated.Remove($hit.Index, $hit.Length).Insert($hit.Index, $want)
+        }
+        if ($updated -ne $line) {
+            $lines[$i] = $updated
+            $changed = $true
+        }
+    }
+
+    if ($changed -and -not $ReadOnly) {
+        [System.IO.File]::WriteAllText($noticesPath, ($lines -join "`n"), $utf8)
+    }
+
+    return [PSCustomObject]@{
+        RepoRoot = $RepoRoot
+        Pin      = $pin
+        Recorded = $recorded
+        Stale    = @($stale | Select-Object -Unique)
+        Updated  = ($changed -and -not $ReadOnly)
+    }
+}
+
+<#
+.SYNOPSIS
+    Fail packaging when THIRD-PARTY-NOTICES.md names a cameraunlock-core
+    commit other than the one being compiled in.
+.DESCRIPTION
+    Checked rather than trusted: the notices file is copied verbatim into
+    the release ZIPs, so a stale hash is a wrong attribution shipped to
+    every user, and it is invisible on inspection.
+
+    A repo that does not pin cameraunlock-core as a submodule is skipped.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+#>
+function Assert-CoreCommitInNotices {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+
+    $pinned = Get-PinnedCoreCommit -RepoRoot $RepoRoot
+    if (-not $pinned) { return }
+
+    # Packaging consumes the checkout, including a submodule bump waiting for
+    # the parent commit. The parent's index still names the previous build.
+    $compiledCommit = & git -C (Join-Path $RepoRoot 'cameraunlock-core') rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Cannot read the core checkout at $RepoRoot." }
+    $state = Sync-CoreCommitInNotices -RepoRoot $RepoRoot -Commit $compiledCommit.Trim() -ReadOnly
+    $fix   = "powershell -ExecutionPolicy Bypass -File cameraunlock-core\scripts\sync-core-notices.ps1 -Repo ."
+    # sync-core-notices stamps the gitlink in the index, so a bump that is checked out but not
+    # staged has to be staged first or the script writes the commit this build does not compile.
+    if ($pinned -ne $compiledCommit.Trim()) { $fix = "git add cameraunlock-core, then $fix" }
+
+    if ($state.Recorded -eq 0) {
+        throw "THIRD-PARTY-NOTICES.md records no cameraunlock-core commit, but $($state.Pin) is compiled into this build. Add the pinned commit to the cameraunlock-core entry, then re-run."
+    }
+    if ($state.Stale.Count -gt 0) {
+        throw "THIRD-PARTY-NOTICES.md records cameraunlock-core $($state.Stale -join ', ') but this build compiles $($state.Pin). Run: $fix - then commit the notices and re-run."
+    }
+}
+
+<#
+.SYNOPSIS
+    Fails packaging when a launcher-manifest.json seed no longer matches the file it seeds.
+.DESCRIPTION
+    A manifest seed carries a base64 copy of a config file that the launcher writes
+    into the game directory on install. The committed manifest is the authoritative
+    copy: it is reviewable, diffable and in git, where the blob inside a release ZIP
+    is a build product. So packaging ships the committed blob unchanged, and this is
+    the gate that keeps the committed blob honest.
+
+    Refreshing the blob from disk at package time instead would hide the drift: the
+    ZIP would be right, the committed manifest would stay wrong, every review of it
+    would read a stale config, and scripts/conformance.ps1's manifest-seed check
+    would go on reporting a failure nobody could reproduce from a build.
+
+    The rule for pairing a seed with a file is the same one conformance.ps1 uses -
+    the single file under the repo whose leaf name matches the seed target - so the
+    two cannot disagree about what a seed is meant to match. A seed with no
+    counterpart is the loader's own config (BepInEx writes BepInEx.cfg; we ship no
+    copy of it) and there is nothing to check it against.
+.PARAMETER ManifestPath
+    Path to the committed launcher-manifest.json.
+.PARAMETER ProjectRoot
+    Repo root the shipped config files are searched under.
+#>
+function Assert-ManifestSeedsMatchShipped {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$ManifestPath,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
+    )
+
+    if (-not (Test-Path $ManifestPath)) { throw "Manifest file not found: $ManifestPath" }
+
+    $manifest = [System.IO.File]::ReadAllText($ManifestPath).TrimStart([char]0xFEFF) | ConvertFrom-Json
+
+    $seeds = New-Object System.Collections.Generic.List[object]
+    if ($manifest.PSObject.Properties.Name -contains 'loader' -and $manifest.loader -and
+        $manifest.loader.PSObject.Properties.Name -contains 'seed') {
+        foreach ($s in @($manifest.loader.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+    if ($manifest.PSObject.Properties.Name -contains 'seed') {
+        foreach ($s in @($manifest.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+    # A variant package carries no top-level loader, so its seeds live one level
+    # down. Without this the loop below finds nothing to compare and the gate
+    # passes by having stopped looking, which is worse than not having it.
+    if ($manifest.PSObject.Properties.Name -contains 'variants') {
+        foreach ($variant in @($manifest.variants)) {
+            if (-not $variant) { continue }
+            if ($variant.PSObject.Properties.Name -notcontains 'loader') { continue }
+            if (-not $variant.loader) { continue }
+            if ($variant.loader.PSObject.Properties.Name -notcontains 'seed') { continue }
+            foreach ($s in @($variant.loader.seed)) { if ($s) { $seeds.Add($s) } }
+        }
+    }
+
+    $root = (Resolve-Path $ProjectRoot).ProviderPath
+    $normalise = { param($t) (($t -replace "^$([char]0xFEFF)", '') -replace "`r`n", "`n").TrimEnd() }
+
+    foreach ($seed in $seeds) {
+        if ($seed.PSObject.Properties.Name -notcontains 'content_b64') { continue }
+        if ($seed.PSObject.Properties.Name -notcontains 'target') { continue }
+        $leaf = ($seed.target -split '[\\/]')[-1]
+
+        $shipped = @(Get-ChildItem -LiteralPath $root -File -Filter $leaf -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '(?i)\\(\.git|\.pixi|\.lab|\.vs|cameraunlock-core|vendor|node_modules|obj|bin|build|release|dist)\\' })
+
+        if ($shipped.Count -eq 0) { continue }
+        if ($shipped.Count -gt 1) {
+            throw "launcher-manifest.json seeds $($seed.target) and this repo holds $($shipped.Count) files named $leaf, so nothing says which one the blob is meant to match. Rename or relocate the duplicates, then re-run."
+        }
+
+        try {
+            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($seed.content_b64))
+        } catch {
+            throw "launcher-manifest.json content_b64 for $($seed.target) is not valid base64: $($_.Exception.Message)"
+        }
+
+        $file = $shipped[0].FullName
+        if ((& $normalise $decoded) -eq (& $normalise ([System.IO.File]::ReadAllText($file)))) { continue }
+
+        $rel = $file.Substring($root.Length).TrimStart('\') -replace '\\', '/'
+        throw "launcher-manifest.json seeds $($seed.target) from a base64 blob that no longer matches $rel, so installing would write the stale copy over the defaults this mod ships. The committed manifest is the authoritative copy: re-stamp its content_b64 from $rel and commit that, then re-run."
+    }
+}
+
+<#
+.SYNOPSIS
+    Fails packaging when launcher-manifest.json would not get native deployment
+    and does not say why.
+.DESCRIPTION
+    Lopari deploys natively only for "manifest", "manifest_variants" and
+    "manifest_versioned" whose schema_version it knows (a Lopari older than
+    the manifest's schema_version installs it through install.cmd), and for
+    "external" with an external.owml_mod_id, matched case-sensitively.
+    Every other string installs through install.cmd without a word: an absent
+    field, a typo, a value in another case and a value it has never heard of.
+    "external" passes here because an external mod is routed by the catalog's
+    install_strategy, not by this field. Black Mesa
+    shipped "installer" that way and twenty mods sat on "install_cmd" with
+    nobody deciding they should. So install_cmd is allowed only when the
+    manifest names what the deploy engine cannot express, in
+    install_cmd_reason. The launcher ignores that field; it is for the next
+    person to read the manifest. A JSON null is refused like an unknown mode,
+    since Lopari cannot parse it at all.
+
+    Same rule as validate-manifest.mjs, which checks the built ZIP, and it
+    must stay identical: names and values are compared case-sensitively here
+    as there. This runs from Copy-SharedBundle so it holds in every package
+    script, including the ones that never call the validator.
+
+    A repo with no launcher-manifest.json is skipped: the manifest is only
+    warranted once the mod is in the launcher's catalog.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+#>
+function Assert-LauncherManifestDelivery {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+
+    $path = Join-Path $RepoRoot 'launcher-manifest.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+
+    $manifest = [System.IO.File]::ReadAllText($path).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $modeProperty = @($manifest.PSObject.Properties | Where-Object { $_.Name -ceq 'delivery_mode' })
+    $reasonProperty = @($manifest.PSObject.Properties | Where-Object { $_.Name -ceq 'install_cmd_reason' })
+
+    if ($modeProperty.Count -gt 0) {
+        $mode = $modeProperty[0].Value
+        $isString = $mode -is [string]
+        if ($isString -and $mode -cin @('manifest', 'manifest_variants', 'manifest_versioned', 'external')) { return }
+        if (-not ($isString -and $mode -ceq 'install_cmd')) {
+            $text = if ($null -eq $mode) { 'null' } else { "$mode" }
+            throw "launcher-manifest.json has delivery_mode `"$text`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`", `"manifest_versioned`" or `"external`") and declare the payload in files / loader."
+        }
+    }
+    $shown = if ($modeProperty.Count -gt 0) { '"install_cmd"' } else { 'absent (the launcher reads that as "install_cmd")' }
+    $reason = if ($reasonProperty.Count -gt 0 -and $reasonProperty[0].Value -is [string]) { $reasonProperty[0].Value } else { '' }
+    if (-not $reason.Trim()) {
+        throw "launcher-manifest.json delivery_mode is $shown with no install_cmd_reason. Move the package to `"manifest`" delivery, or, if the deploy engine really cannot express what install.cmd does, set install_cmd_reason to exactly what it cannot express."
+    }
+}
+
+<#
+.SYNOPSIS
+    Fails packaging when launcher-manifest.json breaks a config rule of
+    scripts/check-config-descriptor.mjs: a config block that breaks the
+    descriptor rules, a rows field or a stale per_game included, or, in a
+    converted repo with a block or without one, a seed or files[] row that
+    writes CameraUnlock.ini, the legacy file or a file named like the
+    committed config.
+.DESCRIPTION
+    The block tells a launcher where the mod's CameraUnlock.ini is and which of
+    its rows the game keeps for itself, with the values the committed config
+    holds there. A per_game that no longer matches the committed config shows
+    the player a value the game does not use. A converted release seeds
+    nothing: a seeded CameraUnlock.ini stops the legacy import on an update,
+    and a seeded legacy file is imported on a fresh install. The same rules
+    run in validate-manifest on the built ZIP, which most package scripts
+    never call; this runs from Copy-SharedBundle so they hold in every one.
+    In a GitHub Actions build for a v<x.y.z> tag it also fails a
+    canonical_since above x.y.z. Any other build below canonical_since is a
+    pre-release of it and packages, and validate-manifest warns.
+
+    Whether a repo is converted is decided by the [CameraUnlock] stamp in its
+    committed config, which only the node checker reads, so every repo with a
+    manifest needs node on PATH to package. A converted repo with no block
+    yet is conformance's finding and does not fail here.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+.PARAMETER CoreRoot
+    Root of the cameraunlock-core checkout the repo vendors.
+#>
+function Assert-LauncherManifestConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [Parameter(Mandatory=$true)][string]$CoreRoot
+    )
+
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'launcher-manifest.json'))) { return }
+
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $node) {
+        throw "Packaging holds launcher-manifest.json to the config rules of scripts/check-config-descriptor.mjs, and running them needs node on PATH."
+    }
+    $script = Join-Path $CoreRoot 'scripts\check-config-descriptor.mjs'
+    $global:LASTEXITCODE = 0
+    $output = (& $node.Source $script --package $RepoRoot | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+        throw "launcher-manifest.json breaks the config rules (docs/canonical-config.md, The config descriptor). render-config rewrites a stale per_game, and a rows field is replaced with `"per_game`": {} by hand; a seed or files[] row of the config comes out of the manifest by hand.`n$output"
+    }
+    if ($output) { Write-Host $output }
+}
+
+<#
+.SYNOPSIS
+    Fails a release whose version is below the canonical_since of the
+    committed launcher-manifest.json's config block.
+.DESCRIPTION
+    canonical_since names the first version that ships CameraUnlock.ini. A
+    converted repo sets it to the version it converts in and keeps the last
+    release's version until the release bumps it, so packaging below it only
+    warns (the build is a pre-release of that version). A release below it is
+    refused here, by scripts/check-config-descriptor.mjs --release, which
+    holds the rule. New-ReleaseTag runs this before it tags. Call it from a
+    release script as soon as the version is resolved, before any file is
+    written, so a refused release leaves no version bump behind. A GitHub
+    Actions build for a v<x.y.z> tag runs the same rule in packaging.
+
+    A repo with no launcher-manifest.json has no config block and is skipped.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+.PARAMETER Version
+    The version being released, x.y.z.
+.PARAMETER CoreRoot
+    Root of the cameraunlock-core checkout the repo vendors. Defaults to the
+    checkout this module was loaded from.
+#>
+function Assert-ReleaseNotBelowCanonicalSince {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [Parameter(Mandatory=$true)][string]$Version,
+        [string]$CoreRoot
+    )
+
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'launcher-manifest.json'))) { return }
+    if (-not $CoreRoot) { $CoreRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')) }
+
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $node) {
+        throw "Releasing v$Version holds launcher-manifest.json's canonical_since to it with scripts/check-config-descriptor.mjs, and running that needs node on PATH."
+    }
+    $script = Join-Path $CoreRoot 'scripts\check-config-descriptor.mjs'
+    $global:LASTEXITCODE = 0
+    $output = (& $node.Source $script --release $Version $RepoRoot | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Refusing to release v${Version}; nothing was tagged or pushed.`n$output"
+    }
+}
+
+Export-ModuleMember -Function @(
+    'Update-CameraUnlockCoreToRemoteTip',
+    'Get-PinnedCoreCommit',
+    'Sync-CoreCommitInNotices',
+    'Assert-CoreCommitInNotices',
+    'Write-CoreBundleProvenance',
+    'Copy-SharedBundle',
+    'Copy-LicenceNotices',
+    'Test-SemanticVersion',
+    'Step-SemanticVersion',
+    'Resolve-ReleaseVersion',
+    'Test-CleanGitStatus',
+    'Invoke-ReleaseTestSuite',
+    'Test-GitTagExists',
+    'Test-NoiseCommit',
+    'Update-ManifestVersion',
+    'Assert-ManifestSeedsMatchShipped',
+    'Assert-LauncherManifestDelivery',
+    'Assert-LauncherManifestConfig',
+    'Assert-ReleaseNotBelowCanonicalSince',
+    'New-ChangelogFromCommits',
+    'Get-ChangelogSection',
+    'Invoke-VersionCommit',
+    'New-ReleaseTag',
+    'Get-CsprojVersion',
+    'Set-CsprojVersion',
+    'Get-ProjectVersion'
+)

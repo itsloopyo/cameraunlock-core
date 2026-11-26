@@ -1,0 +1,7 @@
+# Every line ends in a lone CR. A change to rotation keeps the endings.
+binds	three-state
+preference	tracking_mode	both	both
+preference	world_space_yaw	false	false
+preference	true_free_look	true	true
+preference	launch_enabled	false	false
+change	tracking_mode	rotation

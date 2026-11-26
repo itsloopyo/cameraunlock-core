@@ -1,0 +1,4 @@
+# A file holding only a UTF-8 byte order mark has no lines.
+status	Readable
+format	1
+stamp	false

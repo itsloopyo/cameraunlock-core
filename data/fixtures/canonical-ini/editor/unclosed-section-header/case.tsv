@@ -1,0 +1,3 @@
+# A header with no ']' ends the previous section but names none, so [Broken] is created at
+# the end rather than matched.
+set_or_insert	Broken	A	2

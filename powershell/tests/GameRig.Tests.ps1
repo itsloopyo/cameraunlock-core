@@ -1,0 +1,1067 @@
+#!/usr/bin/env pwsh
+#Requires -Version 5.1
+# ============================================================================
+# Tests for the rig lock and the session wrapper in IsolatedGameTest.psm1
+# ============================================================================
+# Run: pixi run test-powershell-game-rig
+#
+# Enter-GameRig / Exit-GameRig, Start- / Stop- / Invoke-IsolatedGameSession and the
+# process sampler, with the takers as real separate processes and a stand-in for the
+# game: a windowless exe compiled here that sleeps. The rig root is a temp folder
+# (CAMERAUNLOCK_RIG_ROOT), so no real session's lock is met. No game is started, no
+# window is shown and no input is sent. No Pester dependency, matching the other
+# tests.
+# ============================================================================
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'IsolatedGameTest.psm1'
+Import-Module $modulePath -Force
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'FileHash.psm1')
+
+$script:Failures = 0
+function Check {
+    param([string]$Name, [bool]$Condition, [string]$Detail = '')
+    if ($Condition) {
+        Write-Host "PASS  $Name" -ForegroundColor Green
+    } else {
+        Write-Host "FAIL  $Name - $Detail" -ForegroundColor Red
+        $script:Failures++
+    }
+}
+
+function Throws {
+    param([scriptblock]$Block, [string]$Pattern)
+    try { & $Block | Out-Null; return $false } catch { return $_.Exception.Message -match $Pattern }
+}
+
+$root = Join-Path $env:TEMP ("game-rig-test-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force $root | Out-Null
+$env:CAMERAUNLOCK_RIG_ROOT = Join-Path $root 'rig'
+# Run under an agent with hivemind installed, the rig is copied to the hivemind board. A board of
+# this run's own keeps it off the real one, which every agent on the machine reads.
+$env:HIVEMIND_HOME = Join-Path $root 'hivemind'
+$board = ($env:CLAUDECODE -or $env:CODEX_THREAD_ID -or $env:CODEX_SESSION_ID) -and (Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue)
+if ($board) { hivemind join --name rig-test 'GameRig tests' | Out-Null }
+function Get-BoardHold {
+    param([string]$Resource)
+    @((hivemind state | Out-String | ConvertFrom-Json).reservations | Where-Object { $_.resource -eq $Resource })
+}
+$started = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
+
+# The stand-in game: its process name is this run's own, so two runs of these tests never meet.
+$gameName = 'CuRigGame' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+$gameExe = Join-Path $root "$gameName.exe"
+Add-Type -TypeDefinition 'public static class StandInGame { public static void Main() { System.Threading.Thread.Sleep(600000); } }' `
+    -OutputAssembly $gameExe -OutputType WindowsApplication
+function Start-StandIn {
+    $process = Start-Process $gameExe -PassThru
+    $started.Add($process)
+    $process
+}
+function Stop-StandIn {
+    Get-Process -Name $gameName -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force; $_.WaitForExit() }
+}
+
+# A taker in a process of its own. When a gate file is named it says it is ready ("<gate>.<owner>")
+# and waits for the gate, so several ask at the same moment. It logs "in <owner>" and "out <owner>" round its hold, and writes
+# "<log>.<owner>" when it is refused. With -Release it holds until that file is there: a hold the
+# test must still find held is ended by the test, never by a clock, because the next taker is a new
+# process that needs a second or more to load the module before it asks. Given a -Pool (names joined by commas) it asks for any of them
+# and writes the one it got to "<log>.<owner>.game". A file the test waits for appears with its
+# content in it, by a rename: the test reads it the moment it is there.
+$taker = Join-Path $root 'taker.ps1'
+Set-Content $taker -Encoding ASCII -Value @'
+param([string]$Module, [string]$Game, [string]$Owner, [string]$Log, [int]$HoldMs = 0, [string]$Gate = '', [int]$WaitSeconds = 3600,
+      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '', [switch]$WholeGpu, [string]$Pool = '',
+      [string]$Release = '')
+$ErrorActionPreference = 'Stop'
+function Trace { param([string]$Step) Add-Content "$Log-trace.$Owner" "$(Get-Date -Format HH:mm:ss.fff) $Owner $Step, $([int]((Get-Date) - (Get-Process -Id $PID).StartTime).TotalMilliseconds) ms after its process started" }
+Trace 'running'
+Import-Module $Module
+Trace 'has the module'
+if ($Gate) { Set-Content "$Gate.$Owner" ''; while (-not (Test-Path $Gate)) { Start-Sleep -Milliseconds 10 } }
+$which = $(if ($Pool) { @{ Pool = $Pool -split ',' } } else { @{ Game = $Game } })
+try { $rig = Enter-GameRig @which -Owner $Owner -WaitSeconds $WaitSeconds -StateFolder $StateFolder -WholeGpu:$WholeGpu 6>$null }
+catch { Trace 'was refused'; Set-Content "$Log.$Owner" "$_"; exit 3 }
+Trace 'has the rig'
+Add-Content $Log "in $Owner"
+function Tell { param([string]$Path, [string]$Text) Set-Content "$Path.part" $Text; Move-Item "$Path.part" $Path }
+if ($Pool) { Tell "$Log.$Owner.game" $rig.Game }
+if ($TokenFile) { Tell $TokenFile $rig.Token }
+if ($SaveFile) { Save-GameTestState -Files $SaveFile -Folder $StateFolder }
+Start-Sleep -Milliseconds $HoldMs
+if ($Release) { while (-not (Test-Path $Release)) { Start-Sleep -Milliseconds 20 } }
+Add-Content $Log "out $Owner"
+if (-not $Abandon) { Exit-GameRig -Rig $rig }
+'@
+function Start-Taker {
+    param([hashtable]$With)
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$taker`"", '-Module', "`"$modulePath`"")
+    foreach ($name in $With.Keys) {
+        if ($With[$name] -is [bool]) { if ($With[$name]) { $arguments += "-$name" } }
+        else { $arguments += "-$name"; $arguments += "`"$($With[$name])`"" }
+    }
+    $process = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList $arguments
+    $started.Add($process)
+    $process
+}
+# The waits are bounds on a failure, not on a pass: a taker is a new PowerShell process, and on a busy
+# machine one took 22 seconds to reach its first line and 3 more to load the module.
+function Wait-All { param($Processes, [int]$Seconds = 240) foreach ($p in $Processes) { if (-not $p.WaitForExit($Seconds * 1000)) { throw "taker $($p.Id) did not end in $Seconds s" } } }
+function Get-RigPicture {
+    $rigRoot = $env:CAMERAUNLOCK_RIG_ROOT
+    $held = @(Get-ChildItem $rigRoot -Recurse -Filter 'owner.json' -ErrorAction SilentlyContinue | ForEach-Object {
+        $owner = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+        if ($owner) { "$($owner.Key) by $($owner.Owner) (pid $($owner.ProcessId))" }
+    })
+    $waiting = @(Get-ChildItem (Join-Path $rigRoot '_queue') -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+        $ticket = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+        if ($ticket) { "$($ticket.Owner) (pid $($ticket.ProcessId)) for $(@($ticket.Keys) -join '/')$(if ($ticket.WholeGpu) { ' and the whole card' })" }
+    })
+    $trace = @(Get-ChildItem $root -Filter '*-trace.*' | ForEach-Object { Get-Content $_.FullName } | Sort-Object | Select-Object -Last 8)
+    "held: $($held -join '; '). waiting, oldest first: $($waiting -join '; '). the takers' last steps: $($trace -join '; ')"
+}
+function Wait-Until { param([scriptblock]$Condition, [int]$Seconds = 120)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while (-not (& $Condition)) {
+        if ((Get-Date) -gt $deadline) { throw "waited $Seconds seconds for {$("$Condition".Trim())} and it never held. $(Get-RigPicture)" }
+        Start-Sleep -Milliseconds 100
+    }
+}
+function Test-Waiting { param([string]$Game, [string]$Owner)
+    $state = $(if ($Game) { Get-GameRig -Game $Game } else { Get-GameRig })
+    [bool]($state -and $state.Waiting -contains $Owner)
+}
+$absent = 'CuRigNoSuchGame'
+
+try {
+    # --- two takers and one lock --------------------------------------------
+    # Six processes ask in the same moment and none of them waits: one gets the rig.
+    $log = Join-Path $root 'race.log'
+    $gate = Join-Path $root 'race.gate'
+    $takers = 1..6 | ForEach-Object { Start-Taker @{ Game = 'race'; Owner = "t$_"; Log = $log; Release = "$log.release"; Gate = $gate; WaitSeconds = 0 } }
+    Wait-Until { @(Get-ChildItem $root -Filter 'race.gate.t*').Count -eq 6 }
+    Set-Content $gate ''
+    # Whoever got the rig keeps it until all six have had their answer.
+    Wait-Until { @(Get-Content $log -ErrorAction SilentlyContinue | Where-Object { $_ -like 'in *' }).Count + @(Get-ChildItem $root -Filter 'race.log.t*').Count -eq 6 }
+    Set-Content "$log.release" ''
+    Wait-All $takers
+    $in = @(Get-Content $log | Where-Object { $_ -like 'in *' })
+    $refused = @(Get-ChildItem $root -Filter 'race.log.t?')
+    Check 'of six takers at once, one gets the rig' ($in.Count -eq 1) "$($in.Count) got it"
+    # Told who has it, or, for one whose turn came before the winner's, who was ahead of it.
+    Check 'and the other five are refused, told who has it' ($refused.Count -eq 5 -and @($refused | Where-Object { (Get-Content $_.FullName -Raw) -match 'the rig is in use: t\d \(pid \d+, since |waiting behind t\d \(pid \d+\)' }).Count -eq 5) `
+        (($refused | ForEach-Object { Get-Content $_.FullName -Raw }) -join ' | ')
+    Check 'a released rig leaves nothing behind' ($null -eq (Get-GameRig -Game 'race'))
+
+    # Five ask at once and wait: each has the rig alone, and all five get it.
+    $log = Join-Path $root 'turns.log'
+    $gate = Join-Path $root 'turns.gate'
+    $takers = 1..5 | ForEach-Object { Start-Taker @{ Game = 'turns'; Owner = "t$_"; Log = $log; HoldMs = 300; Gate = $gate } }
+    Wait-Until { @(Get-ChildItem $root -Filter 'turns.gate.t*').Count -eq 5 }
+    Set-Content $gate ''
+    Wait-All $takers
+    $lines = @(Get-Content $log)
+    $alone = $lines.Count -eq 10
+    for ($i = 0; $alone -and $i -lt 10; $i += 2) { $alone = $lines[$i] -like 'in *' -and $lines[$i + 1] -eq ($lines[$i] -replace '^in', 'out') }
+    Check 'five waiting takers each hold the rig alone, and all are served' $alone ($lines -join ', ')
+
+    # --- queue order --------------------------------------------------------
+    $log = Join-Path $root 'queue.log'
+    $mine = Enter-GameRig -Game 'queue' -Owner 'first' -WaitSeconds 0
+    $takers = foreach ($name in 'w1', 'w2', 'w3') {
+        Start-Taker @{ Game = 'queue'; Owner = $name; Log = $log; HoldMs = 200 }
+        Wait-Until { Test-Waiting 'queue' $name }
+    }
+    $state = Get-GameRig -Game 'queue'
+    Check 'the rig says who holds it and who waits, in the order they asked' `
+        ($state.Holder.Owner -eq 'first' -and $state.Holder.ProcessId -eq $PID -and $state.Live -and ($state.Waiting -join ',') -eq 'w1,w2,w3') ($state.Waiting -join ',')
+    Wait-All @(Start-Taker @{ Game = 'queue'; Owner = 'counted'; Log = $log; WaitSeconds = 0 })
+    Check 'a session that asks is told how many asked before it' ((Get-Content "$log.counted" -Raw) -match 'the rig is in use: first \(.*\), and 3 asked before this session') (Get-Content "$log.counted" -Raw)
+    Exit-GameRig -Rig $mine
+    Wait-All $takers
+    Check 'waiters are served oldest first' ((@(Get-Content $log | Where-Object { $_ -like 'in *' }) -join ',') -eq 'in w1,in w2,in w3') ((Get-Content $log) -join ', ')
+
+    # A waiter that gives up leaves the queue.
+    $mine = Enter-GameRig -Game 'queue' -Owner 'first' -WaitSeconds 0
+    Wait-All @(Start-Taker @{ Game = 'queue'; Owner = 'late'; Log = $log; WaitSeconds = 1 })
+    Check 'a wait that runs out throws, naming the holder' ((Get-Content "$log.late" -Raw) -match 'the rig is in use: first .*Waited 1 seconds')
+    Check 'and its ticket is gone' (@((Get-GameRig -Game 'queue').Waiting).Count -eq 0)
+    Check 'a process that asks again for a rig it holds is told so, and does not wait on itself' (Throws { Enter-GameRig -Game 'queue' -Owner 'first' } 'already holds the rig')
+    Exit-GameRig -Rig $mine
+
+    # The block a waiter passes is handed what it waits on.
+    $tokenFile = Join-Path $root 'told.token'
+    $toldRelease = Join-Path $root 'told.release'
+    $holder = Start-Taker @{ Game = 'told'; Owner = 'holder'; Log = $log; Release = $toldRelease; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    $told = New-Object System.Collections.Generic.List[string]
+    $mine = Enter-GameRig -Game 'told' -Owner 'waiter' -WaitSeconds 120 -Waiting { param($line) $told.Add($line); Set-Content $toldRelease '' } 6>$null
+    Check 'the waiting block is handed each line the wait says, and the rig then comes' ($told.Count -ge 1 -and $told[0] -match '^the rig is in use: holder \(pid \d+' -and (Get-GameRig -Game 'told').Holder.Owner -eq 'waiter') ($told -join ' | ')
+    Exit-GameRig -Rig $mine
+    Wait-All @($holder)
+
+    # --- a lock left with its game ------------------------------------------
+    # The run that leaves the game up is a process of its own, and stays alive: the next run
+    # still takes the lock back, because it was left with the game and not with that process.
+    $keptFile = Join-Path $root 'kept.json'
+    $keeper = Join-Path $root 'keeper.ps1'
+    Set-Content $keeper -Encoding ASCII -Value @'
+param([string]$Module, [string]$Game, [string]$Exe, [string]$KeptIn, [string]$Done)
+$ErrorActionPreference = 'Stop'
+function Trace { param([string]$Step) Add-Content "$Done-trace.keeper" "$(Get-Date -Format HH:mm:ss.fff) keeper $Step" }
+Import-Module $Module
+Trace 'has the module'
+$rig = Enter-GameRig -Game $Game -Owner 'keeper' -KeptIn $KeptIn -WaitSeconds 0
+Trace 'has the rig'
+Start-Process $Exe
+while (-not (Get-Process -Name $Game -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 50 }
+Trace 'sees the game up'
+Exit-GameRig -Rig $rig -KeptIn $KeptIn
+Trace 'left the rig with the game'
+Set-Content $Done ''
+Start-Sleep 600
+'@
+    $keeperDone = Join-Path $root 'keeper.done'
+    $keeperProcess = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$keeper`"",
+        '-Module', "`"$modulePath`"", '-Game', $gameName, '-Exe', "`"$gameExe`"", '-KeptIn', "`"$keptFile`"", '-Done', "`"$keeperDone`"")
+    $started.Add($keeperProcess)
+    Wait-Until { Test-Path $keeperDone }
+    $state = Get-GameRig -Game $gameName
+    Check 'a lock left with its running game is still held and live, with no process of its own' ($state.Live -and $state.Holder.Owner -eq 'keeper' -and $state.Holder.ProcessId -eq 0 -and (Test-Path $keptFile))
+    Check 'another session waits for it, and is told it was left with the game' (Throws { Enter-GameRig -Game $gameName -Owner 'other' -WaitSeconds 0 } 'the rig is in use: keeper \(left with its running game')
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    Check 'the next run takes it back while the run that left it is still alive' ($back.Token -eq $state.Holder.Token -and (Get-GameRig -Game $gameName).Holder.ProcessId -eq $PID -and -not $keeperProcess.HasExited)
+    Check 'Stop-KeptGame from the process that took it back is refused' (Throws { Stop-KeptGame -Game $gameName -KeptIn $keptFile } 'holds the rig for .* itself')
+    $second = (& powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module '$modulePath'; try { Enter-GameRig -Game $gameName -Owner 'second' -KeptIn '$keptFile' -WaitSeconds 0 | Out-Null; 'taken' } catch { `"`$_`" }" | Out-String)
+    Check 'a second take-back while one holds it waits like any other' ($second -match 'the rig is in use: keeper') $second
+    Check 'and the kept file is still there for it' (Test-Path $keptFile)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'and leaves it with the game again' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq 0 -and (Test-Path $keptFile))
+    if ($board) {
+        Check 'a rig left with its running game stays on the hivemind board' (@(Get-BoardHold "rig-$($gameName.ToLowerInvariant())").Count -eq 1)
+    }
+    # The game that was left ends, and someone starts one of the same name by hand.
+    Stop-StandIn
+    $hand = Start-StandIn
+    Check 'a kept lock whose game has ended is not live, whatever of that name runs now' (-not (Get-GameRig -Game $gameName).Live)
+    Check 'the next run does not take a game of the same name started by hand' (Throws { Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0 } 'someone started it by hand')
+    Set-Content $keptFile ('{"Key":"x","Token":"' + $state.Holder.Token + '","Owner":"keeper"}') -Encoding ASCII
+    Stop-KeptGame -Game $gameName -KeptIn $keptFile
+    Check 'and Stop-KeptGame leaves that game running' (-not $hand.HasExited -and -not (Test-Path $keptFile))
+    Stop-StandIn
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    [void](Start-StandIn)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'work that wants the whole card is refused at once while a game left running holds a rig' (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' } 'in use by a game left running')
+    Check 'and leaves no ticket for others to wait behind' ($null -eq (Get-GameRig))
+    Check 'and so is a pool session wanting the whole card, when the game left running is a copy of that pool' `
+        (Throws { Enter-GameRig -Pool $gameName, 'poolz' -WholeGpu -Owner 'pictures' } 'in use by a game left running')
+    $heldAhead = Enter-GameRig -Game 'leftahead' -Owner 'holder' -WaitSeconds 0
+    $log = Join-Path $root 'leftcard.log'
+    $aheadTaker = Start-Taker @{ Game = 'leftahead'; Owner = 'ahead'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'leftahead' 'ahead' }
+    Check 'but behind a session that asked first it waits for the game left running, holding nobody off yet' `
+        (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0 } '^the graphics card is in use by a game left running: .*, and 1 asked before this session$')
+    Exit-GameRig -Rig $heldAhead
+    Wait-All @($aheadTaker)
+    # A process takes the kept lock back and dies with the game up.
+    $died = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+        "Import-Module '$modulePath'; Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn '$keptFile' -WaitSeconds 0 | Out-Null; Start-Sleep 600")
+    $started.Add($died)
+    Wait-Until { (Get-GameRig -Game $gameName).Holder.ProcessId -eq $died.Id }
+    $died.Kill(); $died.WaitForExit()
+    $kept = @(Get-Process -Name $gameName)
+    # One of the same name is started by hand while the lock is nobody's live process.
+    $hand = Start-StandIn
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -StopKept -WaitSeconds 0
+    Check 'a kept lock whose taker died with the game up is taken back by the next run' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq $PID)
+    Check '-StopKept stops the game the lock was left with, and not one started by hand' (@($kept | Where-Object { -not $_.HasExited }).Count -eq 0 -and -not $hand.HasExited)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'and a lock is not left with a game its holder did not start' ($null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile) -and -not $hand.HasExited)
+    Stop-StandIn
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    [void](Start-StandIn)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Stop-KeptGame -Game $gameName -KeptIn $keptFile
+    Check 'Stop-KeptGame stops that game, releases the lock and removes the file' (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile))
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'a rig given up with no game running is released, and nothing is kept' ($null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile))
+    Set-Content $keptFile '{"Key":"x","Token":"not the one","Owner":"keeper"}' -Encoding ASCII
+    [void](Start-StandIn)
+    Check 'a kept file whose lock has gone does not take a game someone else has up' (Throws { Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0 } 'someone started it by hand')
+    Check 'and the file is removed' (-not (Test-Path $keptFile))
+    Set-Content $keptFile '{"Key":"x","Token":"not the one","Owner":"keeper"}' -Encoding ASCII
+    Stop-KeptGame -Game $gameName -KeptIn $keptFile
+    Check 'Stop-KeptGame leaves a game it has no lock on alone' ([bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and -not (Test-Path $keptFile))
+    Stop-StandIn
+    $keeperProcess.Kill()
+
+    # --- a dead owner's lock ------------------------------------------------
+    $log = Join-Path $root 'dead.log'
+    Wait-All @(Start-Taker @{ Game = $absent; Owner = 'gone'; Log = $log; Abandon = $true })
+    $state = Get-GameRig -Game $absent
+    Check 'a lock whose taker has gone, with no game running, is not live' ($state.Holder.Owner -eq 'gone' -and -not $state.Live)
+    $warnings = @()
+    $mine = Enter-GameRig -Game $absent -Owner 'next' -WaitSeconds 0 -WarningVariable warnings -WarningAction SilentlyContinue
+    Check 'it is taken over, and the taker is told whose it was' ($mine.TakenOverFrom.Owner -eq 'gone' -and "$warnings" -match 'still held by gone') "$warnings"
+    Check 'the rig is then the new owner''s' ((Get-GameRig -Game $absent).Holder.Owner -eq 'next')
+    Exit-GameRig -Rig $mine
+
+    # --- a dead owner's id handed on to a process whose start cannot be read ---
+    $lsass = Get-Process lsass
+    $lsassStart = (Get-CimInstance Win32_Process -Filter "ProcessId=$($lsass.Id)").CreationDate.ToFileTimeUtc().ToString()
+    $alive = { param($Id, $Start) & (Get-Module IsolatedGameTest) { param($Id, $Start) Test-GameRigProcessAlive -Id $Id -Start $Start } $Id $Start }
+    Check 'a process this one may not open is alive under its own start' ((& $alive $lsass.Id $lsassStart) -eq $true)
+    Check 'and not under a dead owner''s start' ((& $alive $lsass.Id '1') -eq $false)
+    $key = $absent.ToLowerInvariant()
+    New-Item -ItemType Directory -Force (Join-Path $env:CAMERAUNLOCK_RIG_ROOT "$key\lock"), (Join-Path $env:CAMERAUNLOCK_RIG_ROOT '_queue') | Out-Null
+    ConvertTo-Json ([pscustomobject]@{ Key = $key; Owner = 'reused'; ProcessId = $lsass.Id; ProcessStart = '1'; Since = (Get-Date).ToString('s'); Processes = @() }) |
+        Set-Content (Join-Path $env:CAMERAUNLOCK_RIG_ROOT "$key\lock\owner.json") -Encoding UTF8
+    $ticket = Join-Path $env:CAMERAUNLOCK_RIG_ROOT '_queue\00000000000000000001-1.json'
+    ConvertTo-Json ([pscustomobject]@{ Ticks = '1'; Key = $key; Keys = @($key); Owner = 'reused'; ProcessId = $lsass.Id; ProcessStart = '1'; WholeGpu = $false }) |
+        Set-Content $ticket -Encoding UTF8
+    $mine = Enter-GameRig -Game $absent -Owner 'next' -WaitSeconds 0 -WarningAction SilentlyContinue
+    Check 'such a lock and ticket are taken over, not thrown on' ($mine.TakenOverFrom.Owner -eq 'reused' -and -not (Test-Path $ticket))
+    Exit-GameRig -Rig $mine
+
+    # --- a live owner's lock ------------------------------------------------
+    $log = Join-Path $root 'live.log'
+    $tokenFile = Join-Path $root 'live.token'
+    $holder = Start-Taker @{ Game = $absent; Owner = 'holder'; Log = $log; Release = "$log.release"; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    $token = (Get-Content $tokenFile -Raw).Trim()
+    Check 'a live owner''s lock is never taken' (Throws { Enter-GameRig -Game $absent -Owner 'thief' -WaitSeconds 0 } 'the rig is in use: holder')
+    $forged = [pscustomobject]@{ Key = $absent.ToLowerInvariant(); Owner = 'thief'; Token = 'not-it'; Path = (Join-Path $env:CAMERAUNLOCK_RIG_ROOT "$($absent.ToLowerInvariant())\lock") }
+    Check 'nor released by a session that does not hold it' (Throws { Exit-GameRig -Rig $forged } 'not by the session releasing it')
+    $forged.Token = $token
+    Check 'nor released from another process, token or no token' (Throws { Exit-GameRig -Rig $forged } "taken by pid $($holder.Id), not by this process")
+    Check 'nor taken back by token while its taker is running' (Throws { Enter-GameRig -Game $absent -Owner 'thief' -Token $token } 'still running')
+    Check 'and it is still the holder''s after all of that' ((Get-GameRig -Game $absent).Holder.Owner -eq 'holder')
+    Set-Content "$log.release" ''
+    Wait-All @($holder)
+
+    # --- the game holds the rig for a taker that has gone -------------------
+    $log = Join-Path $root 'game.log'
+    $tokenFile = Join-Path $root 'game.token'
+    Start-StandIn | Out-Null
+    Check 'a game running with no lock on it is someone''s, and is waited for' (Throws { Enter-GameRig -Game $gameName -Owner 'next' -WaitSeconds 0 } 'is running and no session holds its rig')
+    Stop-StandIn
+    # The taker's own process ends, and the game it would have started goes on running.
+    $holder = Start-Taker @{ Game = $gameName; Owner = 'starter'; Log = $log; Abandon = $true; TokenFile = $tokenFile; Release = "$log.release" }
+    Wait-Until { Test-Path $tokenFile }
+    Start-StandIn | Out-Null
+    Wait-Until { [bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) }
+    Set-Content "$log.release" ''
+    Wait-All @($holder)
+    Check 'a lock whose taker has gone is live while its game runs' ((Get-GameRig -Game $gameName).Live)
+    Check 'and is not taken over' (Throws { Enter-GameRig -Game $gameName -Owner 'next' -WaitSeconds 0 } 'the rig is in use: starter')
+    $mine = Enter-GameRig -Game $gameName -Owner 'starter' -Token ((Get-Content $tokenFile -Raw).Trim())
+    Check 'the session''s next process takes it back by token' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq $PID)
+    Stop-StandIn
+    Exit-GameRig -Rig $mine
+    Check 'and releases it' ($null -eq (Get-GameRig -Game $gameName))
+
+    # --- a session that ended without restoring -----------------------------
+    $log = Join-Path $root 'unrestored.log'
+    $kept = Join-Path $root 'unrestored.ini'
+    $stateFolder = Join-Path $root 'unrestored-state'
+    Set-Content $kept 'as the player had it' -Encoding ASCII
+    Wait-All @(Start-Taker @{ Game = $absent; Owner = 'crashed'; Log = $log; Abandon = $true; StateFolder = $stateFolder; SaveFile = $kept })
+    Set-Content $kept 'as the test left it' -Encoding ASCII
+    Check 'a dead owner''s lock is not taken over while what it saved is not back' `
+        (Throws { Enter-GameRig -Game $absent -Owner 'next' -WaitSeconds 0 } 'ended without putting the game''s files back.*Restore-GameTestState -Folder')
+    Check 'and the rig says where that state is' ((Get-GameRig -Game $absent).Unrestored -eq $stateFolder)
+    Restore-GameTestState -Folder $stateFolder
+    $mine = Enter-GameRig -Game $absent -Owner 'next' -WaitSeconds 0 -WarningAction SilentlyContinue
+    Check 'once it is restored the rig is taken over' ($mine.TakenOverFrom.Owner -eq 'crashed' -and (Get-Content $kept -Raw).Trim() -eq 'as the player had it')
+    Exit-GameRig -Rig $mine
+
+    # --- the whole graphics card --------------------------------------------
+    $game = Enter-GameRig -Game 'cardgame' -Owner 'player' -WaitSeconds 0
+    Check 'work that needs the whole card waits for a held rig' (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0 } 'the graphics card is in use: cardgame is held by player')
+    $other = Enter-GameRig -Game 'othergame' -Owner 'second' -WaitSeconds 0
+    Check 'two different games are held at once' ((Get-GameRig -Game 'othergame').Live -and (Get-GameRig -Game 'cardgame').Live)
+    Exit-GameRig -Rig $other
+    Exit-GameRig -Rig $game
+    $card = Enter-GameRig -WholeGpu -Owner 'pictures' -What 'a batch of eight' -WaitSeconds 0
+    Check 'with every rig free it takes the card, with no game named' ((Get-GameRig).Holder.WholeGpu -and (Get-GameRig).Holder.What -eq 'a batch of eight')
+    Check 'and no game''s rig is given out while it holds' (Throws { Enter-GameRig -Game 'cardgame' -Owner 'player' -WaitSeconds 0 } 'the graphics card is in use: gpu is held by pictures \(.*a batch of eight, the whole graphics card\)')
+    $log = Join-Path $root 'card.log'
+    Wait-All @(Start-Taker @{ Owner = 'more'; Log = $log; WaitSeconds = 0; WholeGpu = $true })
+    Check 'nor a second run that needs the card' ((Get-Content "$log.more" -Raw) -match 'the rig is in use: pictures')
+    Exit-GameRig -Rig $card
+    Check 'a name that is not a process name is refused' (Throws { Enter-GameRig -Game '..\elsewhere' -Owner 'x' -WaitSeconds 0 } 'cannot name a rig')
+
+    # --- a pool of private copies ------------------------------------------
+    # Two sessions ask for a pool of two at the same moment, neither willing to wait: both get a copy, each its own.
+    $log = Join-Path $root 'pool.log'
+    $gate = Join-Path $root 'pool.gate'
+    $takers = 'p1', 'p2' | ForEach-Object { Start-Taker @{ Pool = 'poola,poolb'; Owner = $_; Log = $log; Release = "$log.release.$_"; Gate = $gate; WaitSeconds = 0 } }
+    Wait-Until { @(Get-ChildItem $root -Filter 'pool.gate.p*').Count -eq 2 }
+    Set-Content $gate ''
+    Wait-Until { @(Get-ChildItem $root -Filter 'pool.log.p?.game').Count + @(Get-ChildItem $root -Filter 'pool.log.p?').Count -eq 2 }
+    $games = @('p1', 'p2' | ForEach-Object { if (Test-Path "$log.$_.game") { (Get-Content "$log.$_.game" -Raw).Trim() } })
+    Check 'two sessions asking for a pool of two at once both get a copy' ($games.Count -eq 2 -and @(Get-ChildItem $root -Filter 'pool.log.p?').Count -eq 0) `
+        "$($games -join ', ') / $((Get-ChildItem $root -Filter 'pool.log.p?' | ForEach-Object { Get-Content $_.FullName -Raw }) -join ' | ')"
+    Check 'and each a different one' ((($games | Sort-Object) -join ',') -eq 'poola,poolb') ($games -join ',')
+    $state = Get-GameRig -Game 'poola'
+    Check 'each copy is a lock of its own, seen by its own name' ($state.Live -and @('p1', 'p2') -contains $state.Holder.Owner -and (Get-GameRig -Game 'poolb').Live)
+    # A third asks while both are held: it is refused at once, or waits and gets the copy let go first.
+    # Both stay held until the test lets them go, one at a time.
+    Check 'a third, unwilling to wait, is told every copy is in use and by whom' `
+        (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'p3' -WaitSeconds 0 } '^every game of the pool poola, poolb is in use: poola by p\d \(.*\); poolb by p\d \(')
+    $third = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'p3'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poola' 'p3' }
+    Check 'a waiter for a pool is seen waiting on every copy of it' (Test-Waiting 'poolb' 'p3')
+    Set-Content "$log.release.p1" ''
+    Wait-All @($third)
+    $lines = @(Get-Content $log)
+    Check 'it gets the copy let go first, once it is let go' `
+        ($lines -contains 'out p1' -and [array]::IndexOf($lines, 'in p3') -gt [array]::IndexOf($lines, 'out p1') -and $lines -notcontains 'out p2' -and (Get-Content "$log.p3.game" -Raw).Trim() -eq (Get-Content "$log.p1.game" -Raw).Trim()) `
+        "$($lines -join ', '), p3 got $((Get-Content "$log.p3.game" -Raw).Trim())"
+    Set-Content "$log.release.p2" ''
+    Wait-All $takers
+    Check 'a released pool leaves nothing behind' ($null -eq (Get-GameRig -Game 'poola') -and $null -eq (Get-GameRig -Game 'poolb'))
+
+    # Queue order holds across pools and single games. Both copies are held here, a pool waiter asks
+    # first and then a waiter for one copy: the pool waiter takes the first copy let go.
+    $log = Join-Path $root 'mixed.log'
+    $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
+    $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
+    Check 'a rig taken by -Game says which game it is' ($heldA.Game -eq 'poola' -and $heldA.Key -eq 'poola')
+    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; Release = "$log.release" }
+    Wait-Until { Test-Waiting 'poola' 'pooled' }
+    $single = Start-Taker @{ Game = 'poola'; Owner = 'single'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poola' 'single' }
+    Exit-GameRig -Rig $heldA
+    Wait-Until { Test-Path "$log.pooled.game" }
+    Check 'a pool waiter that asked first takes the first copy let go, ahead of a waiter for that copy' `
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Test-Waiting 'poola' 'single'))
+    Exit-GameRig -Rig $heldB
+    Set-Content "$log.release" ''
+    Wait-All @($pooled, $single)
+    Check 'and the waiter for that copy is served once it is let go, not given the other' ((@(Get-Content $log | Where-Object { $_ -like 'in *' }) -join ',') -eq 'in pooled,in single') ((Get-Content $log) -join ', ')
+
+    # The other way round: a waiter for one copy asked first. A copy it cannot take is no loss to it,
+    # so the pool waiter behind takes that one and the waiter for one copy still gets its own.
+    $log = Join-Path $root 'mixed2.log'
+    $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
+    $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
+    $single = Start-Taker @{ Game = 'poolb'; Owner = 'single'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poolb' 'single' }
+    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poolb' 'pooled' }
+    Exit-GameRig -Rig $heldA
+    Wait-Until { Test-Path "$log.pooled.game" }
+    Check 'a pool waiter takes a copy the waiter ahead of it cannot have' `
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Test-Waiting 'poolb' 'single'))
+    Exit-GameRig -Rig $heldB
+    Wait-All @($pooled, $single)
+    Check 'and the waiter ahead of it still gets its own copy when it is let go' `
+        (@(Get-Content $log | Where-Object { $_ -eq 'in single' }).Count -eq 1) ((Get-Content $log) -join ', ')
+
+    # A waiter for part of a pool ahead does not hold up one for the whole pool when only the rest is
+    # free, and still comes before it for the part it asked for.
+    $log = Join-Path $root 'subpool.log'
+    $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
+    $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
+    $heldC = Enter-GameRig -Game 'poolc' -Owner 'holder' -WaitSeconds 0
+    $part = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'part'; Log = $log; Release = "$log.release.part" }
+    Wait-Until { Test-Waiting 'poola' 'part' }
+    $whole = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'whole'; Log = $log; Release = "$log.release.whole" }
+    Wait-Until { Test-Waiting 'poolc' 'whole' }
+    Exit-GameRig -Rig $heldC
+    Wait-Until { Test-Path "$log.whole.game" }
+    Check 'a waiter for the whole pool takes the copy a waiter for part of it ahead cannot have' `
+        ((Get-Content "$log.whole.game" -Raw).Trim() -eq 'poolc' -and (Test-Waiting 'poola' 'part'))
+    # Both keep their copies from here on, so the only copy that comes free is the one let go below.
+    $late = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'late'; Log = $log; HoldMs = 200 }
+    Wait-Until { Test-Waiting 'poola' 'late' }
+    Exit-GameRig -Rig $heldA
+    Wait-Until { Test-Path "$log.part.game" }
+    Check 'and a copy of the part comes free to the waiter for the part, who asked first' `
+        ((Get-Content "$log.part.game" -Raw).Trim() -eq 'poola' -and -not (Test-Path "$log.late.game"))
+    Exit-GameRig -Rig $heldB
+    Set-Content "$log.release.part" ''
+    Wait-All @($part)
+    Set-Content "$log.release.whole" ''
+    Wait-All @($whole, $late)
+
+    # The whole card still waits for every copy, and holds them off.
+    $copy = Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0
+    Check 'work that needs the whole card waits for a copy that is held' (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0 } "the graphics card is in use: $($copy.Key) is held by player")
+    Exit-GameRig -Rig $copy
+    $card = Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0
+    Check 'and no copy is given out while it holds' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0 } 'the graphics card is in use: gpu is held by pictures')
+    Exit-GameRig -Rig $card
+
+    # A whole-card waiter holds off new rigs only once nobody who asked before it still waits.
+    $log = Join-Path $root 'cardqueue.log'
+    $long = Enter-GameRig -Game 'poola' -Owner 'long' -WaitSeconds 0
+    $ahead = Start-Taker @{ Game = 'poola'; Owner = 'ahead'; Log = $log; Release = "$log.release" }
+    Wait-Until { Test-Waiting 'poola' 'ahead' }
+    $carder = Start-Taker @{ Owner = 'card'; Log = $log; HoldMs = 200; WholeGpu = $true }
+    Wait-Until { Test-Waiting '' 'card' }
+    $beside = try { Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0 } catch { "$_" }
+    Check 'while a session ahead of a whole-card waiter still waits, one that asked after it takes a free copy' `
+        ($beside -isnot [string] -and (Get-GameRig -Game 'poolb').Holder.Owner -eq 'later') "$beside"
+    if ($beside -isnot [string]) { Exit-GameRig -Rig $beside }
+    Exit-GameRig -Rig $long
+    Wait-Until { (Get-Content $log -ErrorAction SilentlyContinue) -contains 'in ahead' }
+    Check 'once the waiter is first, no rig is given out though that copy is free' `
+        (Throws { Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0 } '^waiting behind card \(pid \d+\), who asked first, for the whole graphics card$')
+    Set-Content "$log.release" ''
+    Wait-All @($ahead, $carder)
+    Check 'and the waiter has the card as soon as the rig held ahead of it comes back' `
+        ((@(Get-Content $log) -join ',') -eq 'in ahead,out ahead,in card,out card' -and -not (Test-Path "$log.card")) (@(Get-Content $log) -join ',')
+
+    # A pool session that needs the whole card takes a copy, once every copy and every other rig is free.
+    $log = Join-Path $root 'poolcard.log'
+    $tokenFile = Join-Path $root 'poolcard.token'
+    $copy = Start-Taker @{ Game = 'poola'; Owner = 'player'; Log = $log; Release = "$log.release.player"; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    Check 'a pool session wanting the whole card does not take a free copy beside a held one' `
+        (Throws { Enter-GameRig -Pool 'poola', 'poolb' -WholeGpu -Owner 'pictures' -WaitSeconds 0 } '^the graphics card is in use: poola is held by player')
+    $carder = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pictures'; Log = $log; Release = "$log.release.pictures"; WholeGpu = $true }
+    Wait-Until { Test-Waiting 'poolb' 'pictures' }
+    Start-Sleep -Milliseconds 1500
+    Check 'and waits while that copy is held' (-not (Test-Path "$log.pictures.game") -and $null -eq (Get-GameRig -Game 'poolb').Holder)
+    Set-Content "$log.release.player" ''
+    Wait-All @($copy)
+    Wait-Until { Test-Path "$log.pictures.game" }
+    $taken = (Get-Content "$log.pictures.game" -Raw).Trim()
+    Check 'once every copy is free it takes one, holding the whole card' ((Get-GameRig -Game $taken).Holder.WholeGpu -and (Get-GameRig -Game $taken).Holder.Owner -eq 'pictures') $taken
+    $other = @('poola', 'poolb' | Where-Object { $_ -ne $taken })[0]
+    Check 'while it holds, a session asking for the same pool waits though another copy is free' `
+        (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0 } "^the graphics card is in use: $taken is held by pictures \(.*the whole graphics card\)")
+    Check 'and so does one asking for that other copy by name' (Throws { Enter-GameRig -Game $other -Owner 'player' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Check 'and one asking for a game outside the pool' (Throws { Enter-GameRig -Game 'cardgame' -Owner 'player' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Check 'and one wanting the whole card itself' (Throws { Enter-GameRig -WholeGpu -Owner 'more' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Set-Content "$log.release.pictures" ''
+    Wait-All @($carder)
+    Check 'and once it lets go the pool is free' ($null -eq (Get-GameRig -Game 'poola') -and $null -eq (Get-GameRig -Game 'poolb'))
+
+    # A pool of one is -Game.
+    $one = Enter-GameRig -Pool 'solo' -Owner 'alone' -WaitSeconds 0
+    Check 'a pool of one takes that game''s rig' ($one.Game -eq 'solo' -and $one.Key -eq 'solo' -and (Get-GameRig -Game 'solo').Holder.Owner -eq 'alone')
+    $log = Join-Path $root 'solo.log'
+    Wait-All @(Start-Taker @{ Pool = 'solo'; Owner = 'other'; Log = $log; WaitSeconds = 0 })
+    Check 'and refuses another as -Game does' ((Get-Content "$log.other" -Raw) -match '^the rig is in use: alone \(pid \d+, since ') (Get-Content "$log.other" -Raw)
+    Exit-GameRig -Rig $one
+    Check 'a pool with a token is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'x' -Token 'abc' } '-Token takes back one game')
+    Check 'a pool with a game is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Game 'poola' -Owner 'x' } '-Pool and -Game are one or the other')
+    Check 'a pool that names a game twice is refused' (Throws { Enter-GameRig -Pool 'poola', 'POOLA.exe' -Owner 'x' -WaitSeconds 0 } 'names one game twice')
+    Check 'a pool with a kept file is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'x' -KeptIn (Join-Path $root 'k.json') } '-KeptIn keeps one game')
+
+    # --- the machine's limit -----------------------------------------------
+    Set-GameRigLimit -Count 2
+    try {
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    $b = Enter-GameRig -Game 'limb' -Owner 'hb' -WaitSeconds 0
+    Check 'past the machine''s limit a rig of another game is not given out' `
+        (Throws { Enter-GameRig -Game 'limc' -Owner 'x' -WaitSeconds 0 } '^this machine runs 2 rigs at once and 2 are held: lima by ha; limb by hb')
+    $log = Join-Path $root 'limit.log'
+    $c = Start-Taker @{ Game = 'limc'; Owner = 'tc'; Log = $log; Release = "$log.release" }
+    Wait-Until { @(Get-GameRig -Game 'limc').Count -eq 1 }
+    $d = Start-Taker @{ Pool = 'limd,lime'; Owner = 'td'; Log = $log; HoldMs = 200 }
+    Wait-Until { @(Get-GameRig -Game 'limd').Count -eq 1 }
+    Exit-GameRig -Rig $a
+    Wait-Until { (Test-Path $log) -and @(Get-Content $log) -contains 'in tc' }
+    Start-Sleep -Milliseconds 1500
+    Check 'a freed place goes to whoever asked first, for any game' (@(Get-Content $log) -notcontains 'in td') (@(Get-Content $log) -join ', ')
+    Exit-GameRig -Rig $b
+    Wait-All @($d)
+    Set-Content "$log.release" ''
+    Wait-All @($c)
+    Check 'and the next to whoever asked next' ((@(Get-Content $log) -join ',') -eq 'in tc,in td,out td,out tc') (@(Get-Content $log) -join ', ')
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    $log = Join-Path $root 'limit2.log'
+    $x = Start-Taker @{ Game = 'lima'; Owner = 'tx'; Log = $log; HoldMs = 200 }
+    Wait-Until { @((Get-GameRig -Game 'lima').Waiting).Count -eq 1 }
+    $e = Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0
+    Check 'one ahead whose games are all held does not keep the room from another game' ($e.Game -eq 'lime')
+    Exit-GameRig -Rig $e
+    Exit-GameRig -Rig $a
+    Wait-All @($x)
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    $log = Join-Path $root 'limit4.log'
+    $x = Start-Taker @{ Game = 'lima'; Owner = 'tx'; Log = $log; HoldMs = 200 }
+    Wait-Until { @((Get-GameRig -Game 'lima').Waiting).Count -eq 1 }
+    $w = Start-Taker @{ Owner = 'tw'; Log = $log; HoldMs = 200; WholeGpu = $true }
+    Wait-Until { Test-Waiting '' 'tw' }
+    $e = try { Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0 } catch { "$_" }
+    Check 'nor does a whole-card waiter that is not yet first' ($e -isnot [string] -and $e.Game -eq 'lime') "$e"
+    if ($e -isnot [string]) { Exit-GameRig -Rig $e }
+    Exit-GameRig -Rig $a
+    Wait-All @($x, $w)
+    Check 'and it has the card once the room is free' ((@(Get-Content $log) -join ',') -eq 'in tx,out tx,in tw,out tw') (@(Get-Content $log) -join ',')
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    Check 'a rig taken back by token is not asked for again under a full limit' `
+        ((Enter-GameRig -Game 'lima' -Owner 'ha' -Token $a.Token).Token -eq $a.Token)
+    $hand = Start-StandIn
+    $log = Join-Path $root 'limit3.log'
+    $y = Start-Taker @{ Game = $gameName; Owner = 'ty'; Log = $log; HoldMs = 200 }
+    Wait-Until { $r = Get-GameRig -Game $gameName; $r -and @($r.Waiting).Count -eq 1 }
+    $e = Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0
+    Check 'nor does one ahead whose game someone started by hand' ($e.Game -eq 'lime')
+    Exit-GameRig -Rig $e
+    Stop-StandIn
+    Wait-All @($y)
+    Exit-GameRig -Rig $a
+    $limitFile = Join-Path $env:CAMERAUNLOCK_RIG_ROOT 'max-rigs.txt'
+    Set-Content $limitFile 'four'
+    Check 'a limit that is not a number is refused' (Throws { Enter-GameRig -Game 'lima' -Owner 'x' -WaitSeconds 0 } "holds 'four'")
+    Set-Content $limitFile ''
+    Check 'and so is an empty one' (Throws { Enter-GameRig -Game 'lima' -Owner 'x' -WaitSeconds 0 } "holds ''")
+    } finally { Set-GameRigLimit -Count 0 }
+    Check 'and -Count 0 takes the limit away' (-not (Test-Path (Join-Path $env:CAMERAUNLOCK_RIG_ROOT 'max-rigs.txt')))
+
+    # --- a whole session ----------------------------------------------------
+    $mod = Join-Path $root 'mod'
+    $saves = Join-Path $root 'saves'
+    New-Item -ItemType Directory -Force $mod, (Join-Path $saves 'world') | Out-Null
+    $ini = Join-Path $mod 'CameraUnlock.ini'
+    $made = Join-Path $mod 'made-by-the-test.txt'
+    $gameLog = Join-Path $mod 'game.log'
+    $iniText = "[Network]`r`nUdpPort=4242`r`n[General]`r`nEnableOnStartup=true`r`n"
+    [IO.File]::WriteAllText($ini, $iniText)
+    Set-Content (Join-Path $saves 'player.bin') 'the player' -Encoding ASCII
+    Set-Content (Join-Path $saves 'world\chunk-1.bin') 'a chunk' -Encoding ASCII
+    $csv = Join-Path $root 'samples.csv'
+    $seen = @{}
+    $session = @{
+        ProcessName = $gameName; Launch = $gameExe; ModFolder = $mod; Owner = 'session test'; SettleSeconds = 0
+        Files = @($made); Folders = @($saves); StateFolder = (Join-Path $root 'state'); IniPath = $ini; Port = 5999
+    }
+    $thrown = ''
+    try {
+        Invoke-IsolatedGameSession @session -Prepare { $seen.PreparedWithRig = (Get-GameRig -Game $gameName).Holder.Owner } `
+            -Launched { param($s) $seen.LaunchedWith = "$($s.ProcessId) $([bool](Get-Process -Id $s.ProcessId -ErrorAction SilentlyContinue))" } `
+            -Enter { param($s) $seen.EnteredWith = "$((Get-GameRig -Game $gameName).Holder.Token -eq $s.RigToken) $(Test-Path (Join-Path $root 'state'))" } `
+            -Leave { param($s) $seen.LeftWith = "$((Get-GameRig -Game $gameName).Holder.Token -eq $s.RigToken) $(Test-Path (Join-Path $root 'state')) $([IO.File]::ReadAllText($ini) -eq $iniText)" } `
+            -Collect { param($s) $seen.CollectedIni = [IO.File]::ReadAllText($ini); $seen.CollectedAfterStop = -not (Get-Process -Id $s.ProcessId -ErrorAction SilentlyContinue) } `
+            -Run {
+                param($s)
+                $seen.Pid = $s.ProcessId
+                $seen.Running = [bool](Get-Process -Id $s.ProcessId -ErrorAction SilentlyContinue)
+                $seen.IniInRun = [IO.File]::ReadAllText($ini)
+                $seen.Sampler = Start-GameProcessSampler -ProcessId $s.ProcessId -Path $csv -IntervalSeconds 1
+                # What a game does to its files while it runs.
+                Remove-Item (Join-Path $saves 'player.bin')
+                Set-Content (Join-Path $saves 'world\chunk-1.bin') 'a chunk the game rewrote' -Encoding ASCII
+                Set-Content (Join-Path $saves 'world\chunk-2.bin') 'a chunk the game added' -Encoding ASCII
+                Set-Content $made 'x' -Encoding ASCII
+                Set-Content $gameLog "booting`r`nreached the save" -Encoding ASCII
+                $seen.Line = Wait-GameLogLine -Path $gameLog -Match 'reached the (\w+)' -Session $s -TimeoutSeconds 5
+                Start-Sleep -Seconds 4
+                throw 'the test block failed'
+            }
+    } catch { $thrown = "$_" }
+    Check 'the block''s own error is the one that comes out' ($thrown -eq 'the test block failed') $thrown
+    Check 'the block ran with the game up and the rig held' ($seen.Running -and $seen.PreparedWithRig -eq 'session test')
+    Check 'the test port was in the mod''s config during the run, and nothing else in it changed' ($seen.IniInRun -eq $iniText.Replace('4242', '5999')) $seen.IniInRun
+    Check 'the log wait returned the line and where it was' ($seen.Line.Line -eq 'reached the save' -and $seen.Line.LineNumber -eq 2)
+    Check 'the collect block ran after the game stopped and before the files went back' ($seen.CollectedAfterStop -and $seen.CollectedIni -eq $seen.IniInRun)
+    Check 'after a throw the game is stopped' (-not (Get-Process -Id $seen.Pid -ErrorAction SilentlyContinue))
+    Check 'the config is back byte for byte' ([IO.File]::ReadAllText($ini) -eq $iniText)
+    Check 'a file the test made is gone' (-not (Test-Path $made))
+    $tree = (Get-ChildItem $saves -Recurse -File | ForEach-Object { "$($_.FullName.Substring($saves.Length + 1))=$((Get-Content $_.FullName -Raw).Trim())" }) -join ';'
+    Check 'the folder is as it was: the deleted file back, the changed one as before, the added one gone' ($tree -eq 'player.bin=the player;world\chunk-1.bin=a chunk') $tree
+    Check 'the saved state and the command file are gone' (-not (Test-Path $session.StateFolder) -and -not (Test-Path (Join-Path $mod 'CameraUnlockInput.txt')))
+    Check 'the rig is free' ($null -eq (Get-GameRig -Game $gameName))
+    Check 'the launched block was handed the session with the game''s process in it' ($seen.LaunchedWith -eq "$($seen.Pid) True") $seen.LaunchedWith
+    Check 'the enter block ran with the rig held and nothing saved yet' ($seen.EnteredWith -eq 'True False') $seen.EnteredWith
+    Check 'the leave block ran with the files back and the rig still held' ($seen.LeftWith -eq 'True False True') $seen.LeftWith
+
+    # The sampler was left running by the block: it ends with the process it watched.
+    $samplerProcess = Get-Process -Id $seen.Sampler.SamplerId -ErrorAction SilentlyContinue
+    Check 'a sampler ends by itself once its process has gone' ((-not $samplerProcess) -or $samplerProcess.WaitForExit(20000))
+    $rows = @(Get-Content $csv)
+    $cells = @($rows | Select-Object -Skip 1 | ForEach-Object { , $_.Split(',') })
+    Check 'it wrote a header and a row a second' ($rows[0] -eq 'time,elapsedSeconds,privateMB,workingSetMB,dedicatedVideoMB,cpuSeconds' -and $cells.Count -ge 2) "$($rows.Count) lines"
+    Check 'every row is whole, with the memory and processor time as numbers' `
+        (@($cells | Where-Object { $_.Count -ne 6 -or $_[2] -notmatch '^\d+\.\d$' -or $_[3] -notmatch '^\d+\.\d$' -or $_[4] -notmatch '^(\d+\.\d)?$' -or $_[5] -notmatch '^\d+\.\d\d$' }).Count -eq 0) ($rows -join ' / ')
+    Check 'stopping a sampler that has already ended returns its file' ((Stop-GameProcessSampler -Sampler $seen.Sampler) -eq $csv)
+
+    # Stopped by hand, between two rows.
+    $watched = Start-StandIn
+    $sampler = Start-GameProcessSampler -ProcessId $watched.Id -Path $csv -IntervalSeconds 1
+    Start-Sleep -Seconds 3
+    Stop-GameProcessSampler -Sampler $sampler | Out-Null
+    $rows = @(Get-Content $csv)
+    Check 'a sampler stopped by hand leaves whole rows and no stop file' ($rows.Count -ge 2 -and $rows[-1].Split(',').Count -eq 6 -and -not (Test-Path "$csv.stop") -and -not (Get-Process -Id $sampler.SamplerId -ErrorAction SilentlyContinue)) ($rows -join ' / ')
+    Stop-StandIn
+    Check 'a process that is not there cannot be sampled' (Throws { Start-GameProcessSampler -ProcessId $watched.Id -Path $csv } 'no process')
+
+    # The block's result comes back, and a clean run restores too.
+    $result = Invoke-IsolatedGameSession @session -Run { param($s) Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII; "pid $($s.ProcessId)" }
+    Check 'the block''s result is returned' ("$result" -match '^pid \d+$') "$result"
+    Check 'and a run that did not throw is put back as well' ((Get-Content (Join-Path $saves 'player.bin') -Raw).Trim() -eq 'the player' -and $null -eq (Get-GameRig -Game $gameName))
+
+    # The game does not start: nothing to launch, and a launch that never shows the process.
+    [IO.File]::WriteAllText($ini, $iniText)
+    $noGame = @{} + $session
+    $noGame.Launch = Join-Path $root 'not-there.exe'
+    Check 'a launch that fails throws' (Throws { Invoke-IsolatedGameSession @noGame -Prepare { Set-Content (Join-Path $saves 'player.bin') 'prepared' -Encoding ASCII } -Run { throw 'never run' } } 'not-there|cannot find')
+    Check 'with the config, the folder and the made file put back' `
+        ([IO.File]::ReadAllText($ini) -eq $iniText -and (Get-Content (Join-Path $saves 'player.bin') -Raw).Trim() -eq 'the player' -and -not (Test-Path (Join-Path $root 'state')))
+    Check 'the command file gone and the rig free' (-not (Test-Path (Join-Path $mod 'CameraUnlockInput.txt')) -and $null -eq (Get-GameRig -Game $gameName))
+    $noGame = @{} + $session
+    $noGame.ProcessName = 'CuRigNeverShows'
+    $noGame.StartTimeoutSeconds = 2
+    Check 'a game whose process never shows throws' (Throws { Invoke-IsolatedGameSession @noGame -Run { throw 'never run' } } 'did not start within 2 seconds')
+    Stop-StandIn
+    Check 'and that is put back too' ([IO.File]::ReadAllText($ini) -eq $iniText -and -not (Test-Path (Join-Path $root 'state')) -and $null -eq (Get-GameRig -Game 'CuRigNeverShows'))
+
+    # A prepare step that throws, before any launch.
+    Check 'a prepare step that throws stops the session before the launch' `
+        (Throws { Invoke-IsolatedGameSession @session -Prepare { Set-Content $made 'x'; throw 'the build failed' } -Run { throw 'never run' } } 'the build failed')
+    Check 'with what it had changed put back and the rig free' (-not (Test-Path $made) -and -not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and $null -eq (Get-GameRig -Game $gameName))
+
+    # An enter step that throws: nothing has been saved, and its other half still runs.
+    $seen.Left = 0
+    Check 'an enter step that throws stops the session before anything is saved' `
+        (Throws { Invoke-IsolatedGameSession @session -Enter { throw 'the other lock never came' } -Leave { $seen.Left++ } -Prepare { Set-Content $made 'x' } -Run { throw 'never run' } } 'the other lock never came')
+    Check 'with the leave step run once, nothing changed and the rig free' ($seen.Left -eq 1 -and -not (Test-Path $made) -and -not (Test-Path (Join-Path $root 'state')) -and $null -eq (Get-GameRig -Game $gameName))
+
+    Check 'files to keep with nowhere to keep them are refused before anything is taken' `
+        (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -Files $made } 'need -StateFolder')
+    Check 'a port to write with no port is refused' `
+        (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -IniPath $ini -StateFolder (Join-Path $root 'state') } 'need -Port')
+
+    # --- a session on private copies ----------------------------------------
+    # Two copies of the stand-in under names of their own, each with its own mod folder and config.
+    $slotNames = @("$($gameName)A", "$($gameName)B")
+    $slots = @(foreach ($i in 0, 1) {
+        $exe = Join-Path $root "$($slotNames[$i]).exe"
+        Copy-Item $gameExe $exe
+        $folder = Join-Path $root "mod-$i"
+        New-Item -ItemType Directory -Force $folder | Out-Null
+        [IO.File]::WriteAllText((Join-Path $folder 'CameraUnlock.ini'), $iniText)
+        @{ ProcessName = $slotNames[$i]; Launch = $exe; ModFolder = $folder; IniPath = (Join-Path $folder 'CameraUnlock.ini'); Port = 5990 + $i
+           StateFolder = (Join-Path $root "state-$i"); Arguments = @("-cachedir=slot$i"); Number = $i + 1 }
+    })
+    $log = Join-Path $root 'slots.log'
+    $tokenFile = Join-Path $root 'slots.token'
+    $holder = Start-Taker @{ Game = $slotNames[0]; Owner = 'first copy'; Log = $log; Release = "$log.release"; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    $seen = @{}
+    $result = Invoke-IsolatedGameSession -Slots $slots -Owner 'slot test' -SettleSeconds 0 -Prepare { param($s) $seen.Prepared = $s.Slot.ProcessName } -Run {
+        param($s)
+        $seen.ProcessName = $s.ProcessName
+        $seen.Number = $s.Slot.Number
+        $seen.Running = (Get-Process -Id $s.ProcessId).ProcessName
+        $seen.CommandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($s.ProcessId)").CommandLine
+        $seen.Ini = [IO.File]::ReadAllText($slots[1].IniPath)
+        $seen.Holder = (Get-GameRig -Game $slotNames[1]).Holder
+        $s.Slot.Port
+    }
+    Check 'a session on private copies takes the one that is free, and runs it' ($seen.ProcessName -eq $slotNames[1] -and $seen.Running -eq $slotNames[1]) "$($seen.ProcessName) $($seen.Running)"
+    Check 'the prepare block is handed the session, with the slot it took' ($seen.Prepared -eq $slotNames[1]) "$($seen.Prepared)"
+    Check 'and the slot is carried whole, keys of the caller''s own included' ($seen.Number -eq 2) "$($seen.Number)"
+    Check 'that slot''s port is in that slot''s config' ($seen.Ini -eq $iniText.Replace('4242', '5991')) $seen.Ini
+    Check 'that slot''s arguments are on the command line' ($seen.CommandLine -match ' -cachedir=slot1\s*$') $seen.CommandLine
+    Check 'the lock it took is the session''s, naming that slot''s state' ($seen.Holder.Owner -eq 'slot test' -and $seen.Holder.StateFolder -eq $slots[1].StateFolder) ($seen.Holder | ConvertTo-Json -Compress)
+    Check 'the block''s result is returned' ($result -eq 5991) "$result"
+    Check 'afterwards that slot''s config is back, its copy free and the other still held' `
+        ([IO.File]::ReadAllText($slots[1].IniPath) -eq $iniText -and -not (Test-Path $slots[1].StateFolder) -and $null -eq (Get-GameRig -Game $slotNames[1]) -and (Get-GameRig -Game $slotNames[0]).Holder.Owner -eq 'first copy')
+    $holder.Kill()
+    Check 'slots with a game named as well are refused' (Throws { Start-IsolatedGameSession -Slots $slots -ProcessName $gameName -Owner 'x' } 'leave -ProcessName out')
+    Check 'a session with neither a game nor slots is refused' (Throws { Start-IsolatedGameSession -Owner 'x' } 'needs -ProcessName, -Launch and -ModFolder, or -Slots')
+    Check 'a slot with no launch of its own or the session''s is refused' (Throws { Start-IsolatedGameSession -Slots @(@{ ProcessName = 'a'; ModFolder = $mod }) -Owner 'x' } 'every slot needs a ProcessName, a Launch and a ModFolder')
+    Check 'Stop-GameProcess is exported' ([bool](Get-Command Stop-GameProcess -Module IsolatedGameTest -ErrorAction SilentlyContinue))
+
+    # --- a session over several processes -----------------------------------
+    # Started in one process, which ends; read back and stopped in this one.
+    $sessionFile = Join-Path $root 'session.json'
+    $starter = Join-Path $root 'starter.ps1'
+    Set-Content $starter -Encoding ASCII -Value @'
+param([string]$Module, [string]$Game, [string]$Exe, [string]$Mod, [string]$Saves, [string]$State, [string]$SessionFile, [int]$Settle = 0)
+$ErrorActionPreference = 'Stop'
+Import-Module $Module
+Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner 'split test' -SettleSeconds $Settle -Folders $Saves -StateFolder $State -SessionFile $SessionFile | Out-Null
+'@
+    $process = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$starter`"",
+        '-Module', "`"$modulePath`"", '-Game', $gameName, '-Exe', "`"$gameExe`"", '-Mod', "`"$mod`"", '-Saves', "`"$saves`"", '-State', "`"$(Join-Path $root 'state')`"", '-SessionFile', "`"$sessionFile`"")
+    Wait-All @($process)
+    $split = Get-IsolatedGameSession -SessionFile $sessionFile
+    $state = Get-GameRig -Game $gameName
+    Check 'a session started in a process that has ended is read back, its game running' ([bool](Get-Process -Id $split.ProcessId -ErrorAction SilentlyContinue) -and $split.Owner -eq 'split test')
+    Check 'and still holds the rig, through the game' ($state.Live -and $state.Holder.Owner -eq 'split test' -and $state.Holder.ProcessId -eq $process.Id)
+    Check 'the rig names the file the session is kept in' ($state.Holder.SessionFile -eq $sessionFile) "$($state.Holder.SessionFile)"
+    Check 'a session that waits behind it is told its own process has gone' (Throws { Enter-GameRig -Game $gameName -Owner 'next' -WaitSeconds 0 } 'the rig is in use: split test \(.*\), whose own process has gone while the game runs on')
+    Check 'a second start over it is refused' (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -SessionFile $sessionFile } 'never stopped')
+    Set-Content (Join-Path $saves 'world\chunk-9.bin') 'added while it ran' -Encoding ASCII
+    $seen.SplitLeft = ''
+    Stop-IsolatedGameSession -SessionFile $sessionFile -Leave { param($s) $seen.SplitLeft = "$($s.RigToken -eq (Get-GameRig -Game $gameName).Holder.Token) $(Test-Path (Join-Path $saves 'world\chunk-9.bin'))" }
+    Check 'its leave block runs in the process that stops it, files back and rig held' ($seen.SplitLeft -eq 'True False') $seen.SplitLeft
+    Check 'stopping it from another process stops the game, restores and releases' `
+        (-not (Get-Process -Id $split.ProcessId -ErrorAction SilentlyContinue) -and -not (Test-Path (Join-Path $saves 'world\chunk-9.bin')) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $sessionFile))
+    Check 'a session that is not there says so' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'no session at')
+
+    # The starting process is killed while the game settles: the session is in its file already, and another process ends it.
+    $killed = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$starter`"",
+        '-Module', "`"$modulePath`"", '-Game', $gameName, '-Exe', "`"$gameExe`"", '-Mod', "`"$mod`"", '-Saves', "`"$saves`"", '-State', "`"$(Join-Path $root 'state')`"", '-SessionFile', "`"$sessionFile`"", '-Settle', '60')
+    $started.Add($killed)
+    Wait-Until { Test-Path $sessionFile }
+    Check 'the starter is still settling when the session is in its file' (-not $killed.HasExited)
+    Check 'stopping a session its starter still has is refused' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'still in the hands of pid')
+    Check 'and leaves its file, its game and its rig' ((Test-Path $sessionFile) -and [bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and (Get-GameRig -Game $gameName).Holder.ProcessId -eq $killed.Id)
+    $killed.Kill(); $killed.WaitForExit()
+    $orphan = Get-IsolatedGameSession -SessionFile $sessionFile
+    $game = Get-Process -Name $gameName
+    Check 'a session killed while the game settled left the game''s process id in its file' ($orphan.ProcessId -eq $game.Id) "$($orphan.ProcessId)"
+    Set-Content (Join-Path $saves 'world\chunk-9.bin') 'added while it ran' -Encoding ASCII
+    Stop-IsolatedGameSession -SessionFile (Get-GameRig -Game $gameName).Holder.SessionFile
+    Check 'and another process stops that game, restores and releases' `
+        (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and -not (Test-Path (Join-Path $saves 'world\chunk-9.bin')) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $sessionFile))
+
+    # A session whose lock has gone: with nothing saved, a game that went leaves the lock to be taken over.
+    $lost = Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'lost' -SettleSeconds 0 -SessionFile $sessionFile
+    Stop-StandIn
+    Exit-GameRig -Rig (Enter-GameRig -Game $gameName -Owner 'lost' -Token $lost.RigToken)
+    $taken = Enter-GameRig -Game $gameName -Owner 'another session' -WaitSeconds 0
+    Check 'stopping a session that has lost the rig throws and touches nothing of the game''s' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'no longer holds the rig')
+    Check 'the rig is still the other session''s, and the lost session''s file is gone' ((Get-GameRig -Game $gameName).Holder.Owner -eq 'another session' -and -not (Test-Path $sessionFile))
+    Exit-GameRig -Rig $taken
+
+    # The sequence a session has reached is what its next process needs. A stand-in for the mod's
+    # answer: the done file already says script 1 was played.
+    $commandFile = Join-Path $mod 'CameraUnlockInput.txt'
+    Set-Content "$commandFile.done" '1' -Encoding ASCII
+    $kept = [pscustomobject]@{ ProcessId = $PID; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0; SessionFile = $sessionFile }
+    Invoke-GameInput -Session $kept -Commands 'wait 1' | Out-Null
+    Check 'a session with a file of its own is written there after each script' ((Get-IsolatedGameSession -SessionFile $sessionFile).Sequence -eq 1)
+    Remove-Item "$commandFile.done"
+    Check 'a script the mod never answers throws' (Throws { Invoke-GameInput -Session $kept -Commands 'wait 1' -TimeoutSeconds 1 } 'was not played')
+    Check 'and the number it used is in the file, so the next process does not ask with it again' ((Get-IsolatedGameSession -SessionFile $sessionFile).Sequence -eq 2)
+    Set-Content "$commandFile.done" '1' -Encoding ASCII
+    Remove-Item $sessionFile
+    $stopped = [pscustomobject]@{ ProcessId = 0; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0 }
+    Check 'a session whose game was stopped says so at once' (Throws { Invoke-GameInput -Session $stopped -Commands 'wait 1' } 'no game running')
+    # The session object every mod's script builds by hand today has no SessionFile.
+    $plain = [pscustomobject]@{ ProcessId = $PID; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0; Sender = 0 }
+    $played = Invoke-GameInput -Session $plain -Commands 'wait 1'
+    Check 'a session without one plays as before and writes nothing' ($played.Sequence -eq 1 -and $plain.Sequence -eq 1 -and -not (Test-Path $sessionFile))
+
+    # --- a host DLL that will not delete ------------------------------------
+    # A real DLL, and a process that is not the game and has the mod folder's copy loaded, or open
+    # with nothing shared but reading: what a game still being torn down, or anything else on
+    # the machine, does to that copy.
+    $hostBuilt = Join-Path $root 'host-built.dll'
+    $hostOld = Join-Path $root 'host-old.dll'
+    Add-Type -TypeDefinition 'public static class StandInHost { }' -OutputAssembly $hostBuilt -OutputType Library
+    Add-Type -TypeDefinition 'public static class StandInOldHost { public static int Older; }' -OutputAssembly $hostOld -OutputType Library
+    $holderName = 'CuRigHolder' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    $holderExe = Join-Path $root "$holderName.exe"
+    Add-Type -OutputAssembly $holderExe -OutputType WindowsApplication -TypeDefinition @'
+using System; using System.IO; using System.Runtime.InteropServices;
+public static class StandInHolder {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+    public static void Main(string[] a) {
+        FileStream open = null;
+        // DONT_RESOLVE_DLL_REFERENCES: mapped as a loaded DLL is, with none of its code run.
+        if (a[1] == "load") { if (LoadLibraryExW(a[0], IntPtr.Zero, 1) == IntPtr.Zero) Environment.Exit(7); }
+        else open = new FileStream(a[0], FileMode.Open, FileAccess.Read, FileShare.Read);
+        File.WriteAllText(a[2], "held");
+        System.Threading.Thread.Sleep(600000);
+        GC.KeepAlive(open);
+    }
+}
+'@
+    function Start-Holder {
+        param([string]$Path, [string]$How)
+        $ready = Join-Path $root ('held-' + [Guid]::NewGuid().ToString('N'))
+        $process = Start-Process $holderExe -PassThru -ArgumentList "`"$Path`"", $How, "`"$ready`""
+        $started.Add($process)
+        Wait-Until { (Test-Path $ready) -or $process.HasExited }
+        if ($process.HasExited) { throw "the holder could not $How $Path" }
+        $process
+    }
+    function Stop-Holder { param($Process) $Process.Kill(); $Process.WaitForExit() }
+    # What a call wrote to the warning stream, and what it returned or threw.
+    function Invoke-Warned {
+        param([scriptblock]$Block)
+        $thrown = ''
+        $all = @(try { & $Block 3>&1 } catch { $thrown = "$_" })
+        [pscustomobject]@{
+            Thrown   = $thrown
+            Warnings = (@($all | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }) -join ' | ')
+            Result   = @($all | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+        }
+    }
+    function Get-Asides { Get-ChildItem $mod -Filter 'CameraUnlockIsolatedInput.dll.left-*' }
+    function Test-PutBack { (Get-Content (Join-Path $saves 'player.bin') -Raw).Trim() -eq 'the player' -and [IO.File]::ReadAllText($ini) -eq $iniText -and -not (Test-Path $session.StateFolder) }
+    $hostCopy = Join-Path $mod 'CameraUnlockIsolatedInput.dll'
+    $managed = @{} + $session
+    $managed.ModHost = 'managed'
+    $managed.HostDll = $hostBuilt
+    [IO.File]::WriteAllText($ini, $iniText)
+
+    # Still loaded in a process when the session ends: the game is stopped, so the session ends as it should.
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
+        param($s)
+        $seen.Pid = $s.ProcessId
+        $seen.Loaded = Start-Holder -Path $hostCopy -How load
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+        "pid $($s.ProcessId)"
+    } }
+    Check 'a host DLL still loaded in a process when the session ends does not fail the session' ($ran.Thrown -eq '' -and "$($ran.Result)" -eq "pid $($seen.Pid)") "$($ran.Thrown) $($ran.Result)"
+    Check 'the game is stopped, the game''s files are back and the rig is free' `
+        (-not (Get-Process -Id $seen.Pid -ErrorAction SilentlyContinue) -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName))
+    Check 'the warning says the session ended, that the DLL was moved aside and where, and which process has it' `
+        ($ran.Warnings -match 'session ended as it should' -and $ran.Warnings -match 'moved aside to \S+CameraUnlockIsolatedInput\.dll\.left-\w+' -and $ran.Warnings -match "$holderName \(pid $($seen.Loaded.Id)\)") $ran.Warnings
+    Check 'the name the mod loads is free and the copy is aside' (-not (Test-Path $hostCopy) -and @(Get-Asides).Count -eq 1)
+    Stop-Holder $seen.Loaded
+
+    # An earlier run's copy, still loaded in a process, is in the folder when the next run starts.
+    Copy-Item $hostOld $hostCopy -Force
+    $old = Start-Holder -Path $hostCopy -How load
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
+        $seen.Fresh = (Get-FileSha256 $hostCopy) -eq (Get-FileSha256 $hostBuilt)
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+    } }
+    Check 'a start with an earlier run''s host DLL still loaded in the folder works, on a fresh copy' ($ran.Thrown -eq '' -and $seen.Fresh) $ran.Thrown
+    Check 'and says the earlier one was moved aside, and which process has it' `
+        ($ran.Warnings -match 'from an earlier run was still in use' -and $ran.Warnings -match 'moved aside to \S+\.left-\w+' -and $ran.Warnings -match "$holderName \(pid $($old.Id)\)") $ran.Warnings
+    Check 'that session''s own copy is deleted when it ends, with the files back and the rig free' `
+        (-not (Test-Path $hostCopy) -and @(Get-Asides).Count -eq 1 -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName))
+    Stop-Holder $old
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run { } }
+    Check 'the copies moved aside are deleted by the next session once they are free, with nothing said' ($ran.Thrown -eq '' -and $ran.Warnings -eq '' -and @(Get-Asides).Count -eq 0) "$($ran.Thrown) $($ran.Warnings)"
+
+    # Open in a process that shares nothing but reading: it can be neither deleted nor moved.
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
+        $seen.Opened = Start-Holder -Path $hostCopy -How open
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+    } }
+    Check 'a host DLL that can be neither deleted nor moved does not fail the session either' ($ran.Thrown -eq '' -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName)) $ran.Thrown
+    Check 'and the warning says where it still is and which process has it' `
+        ($ran.Warnings -match 'could not be moved aside either and is still at \S+CameraUnlockIsolatedInput\.dll:' -and $ran.Warnings -match "$holderName \(pid $($seen.Opened.Id)\)") $ran.Warnings
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run { throw 'never run' } }
+    Check 'a start it is still in the way of throws, saying what it is and which process has it' `
+        ($ran.Thrown -match 'from an earlier run is at \S+CameraUnlockIsolatedInput\.dll and for 10 seconds could be neither deleted .* nor moved aside' -and $ran.Thrown -match "$holderName \(pid $($seen.Opened.Id)\)") $ran.Thrown
+    Check 'with no game started, nothing changed and the rig free' (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName))
+    Stop-Holder $seen.Opened
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run { $seen.Fresh = Test-Path $hostCopy } }
+    Check 'once it is let go the next session replaces it and removes its own' ($ran.Thrown -eq '' -and $ran.Warnings -eq '' -and $seen.Fresh -and -not (Test-Path $hostCopy)) "$($ran.Thrown) $($ran.Warnings)"
+
+    # Stop-IsolatedGame by itself, as a mod's own script calls it, with no rig and nothing saved.
+    $direct = Start-IsolatedGame -ProcessName $gameName -Launch $gameExe -ModFolder $mod -SettleSeconds 0 -ModHost managed -HostDll $hostBuilt
+    $loaded = Start-Holder -Path $direct.HostDll -How load
+    $ran = Invoke-Warned { Stop-IsolatedGame -Session $direct }
+    Check 'Stop-IsolatedGame warns of a host DLL it had to leave and does not throw' `
+        ($ran.Thrown -eq '' -and $ran.Warnings -match '^The game is stopped, and the isolated-input host DLL' -and $ran.Warnings -match "$holderName \(pid $($loaded.Id)\)") "$($ran.Thrown) $($ran.Warnings)"
+    Check 'with the game gone, the command file removed and the name the mod loads free' `
+        (-not (Get-Process -Id $direct.ProcessId -ErrorAction SilentlyContinue) -and -not (Test-Path $direct.CommandFile) -and -not (Test-Path $hostCopy))
+    Stop-Holder $loaded
+    $direct = Start-IsolatedGame -ProcessName $gameName -Launch $gameExe -ModFolder $mod -SettleSeconds 0 -ModHost managed -HostDll $hostBuilt
+    $ran = Invoke-Warned { Stop-IsolatedGame -Session $direct }
+    Check 'a stop with nothing in its way says nothing and leaves no DLL' ($ran.Thrown -eq '' -and $ran.Warnings -eq '' -and @($ran.Result).Count -eq 0 -and -not (Test-Path $hostCopy) -and @(Get-Asides).Count -eq 0) "$($ran.Thrown) $($ran.Warnings)"
+
+    # --- a game that will not stop ------------------------------------------
+    # A stand-in that refuses everyone the right to end it, and goes when its release file appears.
+    # An elevated PowerShell with the debug privilege switched on would end it all the same.
+    $stubbornName = 'CuRigStubborn' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    $stubbornExe = Join-Path $root "$stubbornName.exe"
+    Add-Type -OutputAssembly $stubbornExe -OutputType WindowsApplication -TypeDefinition @'
+using System; using System.IO; using System.Runtime.InteropServices;
+public static class StandInStubborn {
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr descriptor, IntPtr size);
+    [DllImport("advapi32.dll")] static extern bool SetKernelObjectSecurity(IntPtr handle, uint information, IntPtr descriptor);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    public static void Main() {
+        string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        IntPtr descriptor;
+        // Everyone is refused PROCESS_TERMINATE and allowed the rest. 4 is DACL_SECURITY_INFORMATION.
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(D;;0x0001;;;WD)(A;;0x1fffff;;;WD)", 1, out descriptor, IntPtr.Zero)
+            || !SetKernelObjectSecurity(GetCurrentProcess(), 4, descriptor)) Environment.Exit(7);
+        File.WriteAllText(exe + ".ready", "");
+        for (int i = 0; i < 1200 && !File.Exists(exe + ".release"); i++) System.Threading.Thread.Sleep(100);
+    }
+}
+'@
+    $stubborn = @{} + $session
+    $stubborn.ProcessName = $stubbornName
+    $stubborn.Launch = $stubbornExe
+    $stubborn.SessionFile = Join-Path $root 'stubborn.json'
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @stubborn -Run {
+        param($s)
+        $seen.Stubborn = $s.ProcessId
+        Wait-Until { Test-Path "$stubbornExe.ready" }
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+    } }
+    Check 'a game that will not stop throws, saying that and why' `
+        ($ran.Thrown -match "^the game \(pid $($seen.Stubborn)\) has not stopped, so nothing was put back under it and the rig is still held: .*Access is denied") $ran.Thrown
+    Check 'it is still running, and nothing was put back under it' `
+        ([bool](Get-Process -Id $seen.Stubborn -ErrorAction SilentlyContinue) -and (Get-Content (Join-Path $saves 'player.bin') -Raw).Trim() -eq 'changed' -and [IO.File]::ReadAllText($ini) -ne $iniText)
+    $state = Get-GameRig -Game $stubbornName
+    Check 'the rig is still held, and names what was saved and the session to stop' `
+        ($state.Live -and $state.Holder.Owner -eq 'session test' -and $state.Unrestored -eq $session.StateFolder -and $state.Holder.SessionFile -eq $stubborn.SessionFile -and (Test-Path $stubborn.SessionFile))
+    Set-Content "$stubbornExe.release" ''
+    Wait-Until { -not (Get-Process -Id $seen.Stubborn -ErrorAction SilentlyContinue) }
+    Stop-IsolatedGameSession -SessionFile $stubborn.SessionFile
+    Check 'once it has gone, stopping the session puts the files back and frees the rig' ((Test-PutBack) -and $null -eq (Get-GameRig -Game $stubbornName) -and -not (Test-Path $stubborn.SessionFile))
+
+    # A lock folder whose owner.json another process has open, as a scanner opens a file just written.
+    $moveFrom = Join-Path $root 'move-from'
+    $moveTo = Join-Path $root 'move-to'
+    New-Item -ItemType Directory $moveFrom | Out-Null
+    Set-Content (Join-Path $moveFrom 'owner.json') '{}' -Encoding ASCII
+    $holdFor = { param([int]$Ms)
+        $held = Join-Path $root "held-$Ms"
+        $command = "`$f = [IO.File]::Open('$moveFrom\owner.json', 'Open', 'Read', 'ReadWrite,Delete'); Set-Content '$held' ''; Start-Sleep -Milliseconds $Ms; `$f.Dispose()"
+        $process = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList '-NoProfile', '-Command', $command
+        $started.Add($process)
+        Wait-Until { Test-Path $held }
+        $process
+    }
+    $holder = & $holdFor 800
+    & (Get-Module IsolatedGameTest) { param($From, $To) Move-GameRigFolder -From $From -To $To } $moveFrom $moveTo
+    Check 'a lock folder with a file held open for a moment is renamed once it is let go' ((Test-Path (Join-Path $moveTo 'owner.json')) -and -not (Test-Path $moveFrom))
+    Wait-All @($holder)
+    [IO.Directory]::Move($moveTo, $moveFrom)
+    $holder = & $holdFor 30000
+    Check 'one held for longer than the patience throws, naming the file and what has it' `
+        (Throws { & (Get-Module IsolatedGameTest) { param($From, $To) Move-GameRigFolder -From $From -To $To -PatienceSeconds 1 } $moveFrom $moveTo } `
+            "^the rig folder .*move-from could not be renamed .* for 1 s \(.*denied.*\)\. owner\.json: it is open or loaded in powershell \(pid $($holder.Id)\)") `
+        'see the message above'
+    Check 'and leaves the folder where it was' ((Test-Path (Join-Path $moveFrom 'owner.json')) -and -not (Test-Path $moveTo))
+    $holder.Kill()
+
+    # --- the hivemind board -------------------------------------------------
+    if ($board) {
+        $mine = Enter-GameRig -Game 'board' -Owner 'boarder' -What 'a check' -WaitSeconds 0
+        $held = @(Get-BoardHold 'rig-board')
+        Check 'a rig an agent takes is on the hivemind board, and never in the feeds' ($held.Count -eq 1 -and $held[0].quiet -and $held[0].why -eq 'boarder: a check') ($held | ConvertTo-Json -Compress)
+        $mine = Enter-GameRig -Game 'board' -Owner 'boarder' -Token $mine.Token
+        $held = @(Get-BoardHold 'rig-board')
+        Check 'taken back by token, it keeps what it was taken for' ($held.Count -eq 1 -and $held[0].why -eq 'boarder: a check') ($held | ConvertTo-Json -Compress)
+        Exit-GameRig -Rig $mine
+        Check 'and is off it once released' (@(Get-BoardHold 'rig-board').Count -eq 0)
+        $lost = (& powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module '$modulePath'; `$r = Enter-GameRig -Game 'board' -Owner 'lost' -WaitSeconds 0; @(`$env:HIVEMIND_HOME | ForEach-Object { (hivemind state | Out-String | ConvertFrom-Json).reservations | Where-Object { `$_.resource -eq 'rig-board' } }).Count" | Out-String).Trim()
+        Check 'a run that ends without releasing had the rig on the board' ($lost -eq '1') $lost
+        Check 'and it leaves the board with the process that held it' (@(Get-BoardHold 'rig-board').Count -eq 0)
+    } else {
+        Write-Host 'SKIP  the hivemind board: not under an agent harness, or hivemind is not installed'
+    }
+} finally {
+    # By the process objects, which stay tied to what was started: an id can be handed on once its process ends.
+    foreach ($process in $started) { if (-not $process.HasExited) { $process.Kill() } }
+    Stop-StandIn
+    if (Get-Variable stubbornExe -ErrorAction SilentlyContinue) { Set-Content "$stubbornExe.release" '' }
+    $env:CAMERAUNLOCK_RIG_ROOT = $null
+    $env:HIVEMIND_HOME = $null
+    Start-Sleep -Milliseconds 500
+    Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+if ($script:Failures -gt 0) {
+    Write-Host "$($script:Failures) check(s) failed" -ForegroundColor Red
+    exit 1
+}
+Write-Host 'GameRig: all checks passed' -ForegroundColor Green

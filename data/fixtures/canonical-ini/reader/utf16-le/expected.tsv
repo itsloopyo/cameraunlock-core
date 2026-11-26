@@ -1,0 +1,4 @@
+# UTF-16 LE with its mark is unreadable; nothing is interpreted.
+status	Utf16
+format	0
+stamp	false

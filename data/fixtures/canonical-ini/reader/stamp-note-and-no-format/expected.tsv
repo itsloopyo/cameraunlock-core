@@ -1,0 +1,6 @@
+# Two diagnostics on one line come in kind order.
+status	Readable
+format	1
+stamp	true
+diagnostic	TextAfterSectionHeader	1
+diagnostic	ConfigFormatMissing	1

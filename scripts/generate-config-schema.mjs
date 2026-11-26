@@ -1,0 +1,1466 @@
+#!/usr/bin/env node
+// Emits the C# and C++ alias tables, the C++ defaults table, the C# and C++ canonical concept
+// tables (what a config table binds a concept with) and the C++ test expectation for the
+// concept ranges from data/config-schema.json, the C++ test expectation for
+// data/pipeline-conformance.json's preference_modes, and the C# and C++ key-name tables from
+// data/keys.json.
+//
+//   node scripts/generate-config-schema.mjs            write the generated files
+//   node scripts/generate-config-schema.mjs --check    fail if any is stale
+//
+// The two languages resolve config keys through tables generated from ONE file, so a
+// key added to one half cannot go missing from the other.
+//
+// preference_modes is the other way round: the runtime encode/decode is hand-written in
+// both languages and only the TEST expectation is generated. C++ cannot read the JSON, so
+// its test compares against this header, while the C# test reads the file directly. A
+// generated runtime table would agree with the file by construction and prove nothing.
+
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { CORE_ROOT } from './lib/repos.mjs';
+import { formatPlayerList, parsePlayerList } from './lib/player-list.mjs';
+
+const repoRoot = CORE_ROOT;
+const schemaPath = join(repoRoot, 'data', 'config-schema.json');
+const csharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Config', 'ConfigKeySchema.g.cs');
+const cppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'config', 'config_key_schema.g.h');
+const conformancePath = join(repoRoot, 'data', 'pipeline-conformance.json');
+const preferenceModesTestPath = join(repoRoot, 'cpp', 'tests', 'preference_modes.g.h');
+const conceptRangesTestPath = join(repoRoot, 'cpp', 'tests', 'concept_ranges.g.h');
+const keysPath = join(repoRoot, 'data', 'keys.json');
+const keyNamesCppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'input', 'key_names.g.h');
+const keyNamesCsharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Input', 'KeyNames.g.cs');
+const conceptsCppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'config', 'config_concepts.g.h');
+const conceptsCsharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Config', 'ConfigConcepts.g.cs');
+
+const normalize = (key) => key.toLowerCase().replace(/[_-]/g, '');
+
+// A string literal C++ and C# both accept verbatim. Only used for prose
+// lifted out of the schema, where a stray quote would otherwise emit a
+// generated file that does not compile.
+const quoteLiteral = (text) =>
+    `"${text.replace(/[\\"]/g, '\\$&')}"`;
+
+// Every id becomes a C# `const` name and, prefixed with 'k', a C++ `constexpr` name.
+const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// Every key and alias is emitted verbatim into a C# and a C++ string literal. Nothing is
+// escaped on the way, so the accepted alphabet is the one that needs no escaping.
+const spellingPattern = /^[A-Za-z0-9_-]+$/;
+// String defaults are emitted into a C++ string literal the same way, so the same rule.
+const stringDefaultPattern = /^[A-Za-z0-9_-]*$/;
+const pascalCasePattern = /^[A-Z][A-Za-z0-9]*$/;
+
+const nonCanonicalKeyFields = new Set(['id', 'sections', 'spellings', 'doc', 'canonical_reason']);
+
+const conceptFields = new Set([
+    'id', 'section', 'key', 'type', 'default', 'aliases', 'doc',
+    'canonical', 'canonical_reason', 'file_comment', 'range', 'codec', 'canonical_default', 'global',
+]);
+
+const valueTypes = {
+    // The lower bound is INT_MIN + 1: the literal -2147483648 is unary minus applied to
+    // 2147483648, which does not fit in an int, so it narrows inside the C++ aggregate
+    // initialiser and fails to compile.
+    int: (v) => Number.isInteger(v) && v >= -2147483647 && v <= 2147483647,
+    float: (v) => typeof v === 'number' && Number.isFinite(v),
+    bool: (v) => typeof v === 'boolean',
+    string: (v) => typeof v === 'string' && stringDefaultPattern.test(v),
+    color: (v) => Array.isArray(v) && v.length === 4 &&
+        v.every((c) => typeof c === 'number' && Number.isFinite(c) && c >= 0 && c <= 1),
+};
+
+// The value family of a canonical concept, by schema type and, for a string, its codec. It fixes
+// the codec a table binds the concept with. A canonical string concept names its codec (checked
+// below).
+const canonicalFamilies = { bool: 'Bool', int: 'Integer', float: 'Floating', string: 'Hotkey' };
+const stringCodecFamilies = { hotkey: 'Hotkey', player_list: 'PlayerList' };
+const familyOf = (c) => (c.type === 'string' ? stringCodecFamilies[c.codec] : canonicalFamilies[c.type]);
+
+
+class SchemaError extends Error {}
+
+function schemaError(where, problem) {
+    throw new SchemaError(`data/config-schema.json ${where}: ${problem}`);
+}
+
+function checkSpelling(where, label, spelling) {
+    if (typeof spelling !== 'string') {
+        schemaError(where, `${label} is ${JSON.stringify(spelling)}, expected a string`);
+    }
+    if (!spellingPattern.test(spelling)) {
+        schemaError(where, `${label} '${spelling}' contains a character outside [A-Za-z0-9_-]. ` +
+            'Keys and aliases are emitted verbatim into C# and C++ string literals and are not escaped');
+    }
+    if (normalize(spelling) === '') {
+        schemaError(where, `${label} '${spelling}' normalizes to the empty string`);
+    }
+}
+
+// Player text: canonical_reason and the file_comment lines. It goes into C# and C++ string
+// literals unescaped, so it is printable ASCII without '"' and '\', the two characters either
+// language would need escaped.
+function checkPlayerText(where, label, text) {
+    if (typeof text !== 'string' || text.length === 0) {
+        schemaError(where, `${label} is ${JSON.stringify(text)}, expected a non-empty string`);
+    }
+    for (const c of text) {
+        const code = c.charCodeAt(0);
+        if (code < 0x20 || code > 0x7E || c === '"' || c === '\\') {
+            schemaError(where, `${label} holds ${JSON.stringify(c)}. Player text is printable ASCII without '"' ` +
+                "and '\\', because it is emitted unescaped into C# and C++ string literals");
+        }
+    }
+    if (text !== text.trim()) schemaError(where, `${label} ${JSON.stringify(text)} starts or ends with a space`);
+}
+
+// A canonical_default must read in both dialects and be spelled the way the codecs write it,
+// because it is written into canonical files as it stands: Ctrl, Shift and Alt in that order,
+// the key's table name, ', ' between items.
+function checkCanonicalBindings(where, text, keyTable) {
+    if (text === '') return;
+    const byName = new Map(keyTable.keys.map((k) => [k.name, k]));
+    const seen = new Set();
+    for (const item of text.split(', ')) {
+        const tokens = item.split('+');
+        const key = tokens.pop();
+        let previous = -1;
+        for (const token of tokens) {
+            const index = modifierNames.indexOf(token);
+            if (index <= previous) {
+                schemaError(where, `canonical_default item '${item}' is not written as the codecs write it: ` +
+                    `expected ${modifierNames.join(', ')} at most once each and in that order, then one key`);
+            }
+            previous = index;
+        }
+        const entry = byName.get(key);
+        if (entry === undefined) {
+            schemaError(where, `canonical_default item '${item}': '${key}' is not a key name as data/keys.json spells it`);
+        }
+        if (entry.vk === 0) schemaError(where, `canonical_default names '${key}', which has no Windows key code`);
+        if (entry.unity === 0) schemaError(where, `canonical_default names '${key}', which has no Unity KeyCode`);
+        if (keyTable.modifiers.some((m) => entry.unity === m.left || entry.unity === m.right)) {
+            schemaError(where, `canonical_default names '${key}', a Ctrl, Shift or Alt key, which a binding names only before its key`);
+        }
+        if (seen.has(item)) schemaError(where, `canonical_default lists '${item}' twice`);
+        seen.add(item);
+    }
+}
+
+function checkRange(where, concept) {
+    const { range } = concept;
+    if (concept.type !== 'int' && concept.type !== 'float') {
+        schemaError(where, `has a range, but ranges are for int and float concepts and this one is '${concept.type}'`);
+    }
+    if (range === null || typeof range !== 'object' || Array.isArray(range)) {
+        schemaError(where, `range is ${JSON.stringify(range)}, expected {"min": ..., "max": ...}`);
+    }
+    for (const field of Object.keys(range)) {
+        if (field !== 'min' && field !== 'max') schemaError(where, `range has unknown field '${field}'`);
+    }
+    if (!('min' in range) && !('max' in range)) schemaError(where, 'range names neither min nor max');
+    for (const field of ['min', 'max']) {
+        if (field in range && !valueTypes[concept.type](range[field])) {
+            schemaError(where, `range ${field} ${JSON.stringify(range[field])} is not a valid '${concept.type}'`);
+        }
+    }
+    if ('min' in range && 'max' in range && range.min > range.max) {
+        schemaError(where, `range min ${range.min} is above max ${range.max}`);
+    }
+    if (('min' in range && concept.default < range.min) || ('max' in range && concept.default > range.max)) {
+        schemaError(where, `default ${concept.default} is outside its own range ${JSON.stringify(range)}`);
+    }
+}
+
+function checkCanonicalFields(where, concept, keyTable) {
+    if (typeof concept.canonical !== 'boolean') {
+        schemaError(where, `canonical is ${JSON.stringify(concept.canonical)}, expected true or false`);
+    }
+    if (concept.canonical && !(concept.type in canonicalFamilies)) {
+        schemaError(where, `is canonical and its type is '${concept.type}', but the canonical format has no codec ` +
+            `for it: canonical concepts are ${Object.keys(canonicalFamilies).join(', ')}`);
+    }
+
+    if (!concept.canonical) {
+        if (!('canonical_reason' in concept)) {
+            schemaError(where, 'is not canonical and has no canonical_reason, the line a player is shown for its key');
+        }
+        checkPlayerText(where, 'canonical_reason', concept.canonical_reason);
+        for (const field of ['file_comment', 'range', 'codec', 'canonical_default', 'global']) {
+            if (field in concept) {
+                schemaError(where, `is not canonical, so it has no ${field}: no canonical file writes its key`);
+            }
+        }
+        return;
+    }
+
+    if ('canonical_reason' in concept) schemaError(where, 'is canonical, so it has no canonical_reason');
+    if (!pascalCasePattern.test(concept.key)) {
+        schemaError(where, `key '${concept.key}' is canonical, so it is PascalCase ASCII letters and digits`);
+    }
+
+    const comment = concept.file_comment;
+    if (!Array.isArray(comment) || comment.length < 1 || comment.length > 2) {
+        schemaError(where, `file_comment is ${JSON.stringify(comment)}, expected one or two lines of player text`);
+    }
+    comment.forEach((line, i) => checkPlayerText(where, `file_comment[${i}]`, line));
+
+    if ('range' in concept) checkRange(where, concept);
+
+    if (concept.type === 'string') {
+        if (!(concept.codec in stringCodecFamilies)) {
+            schemaError(where, `codec is ${JSON.stringify(concept.codec)}: a canonical string concept needs one, ` +
+                `one of ${Object.keys(stringCodecFamilies).join(', ')}`);
+        }
+        if (concept.codec === 'player_list') {
+            const read = parsePlayerList(concept.default);
+            if (read.error || formatPlayerList(read.players) !== concept.default) {
+                schemaError(where, `default ${JSON.stringify(concept.default)} is not a player list as the codec writes ` +
+                    "it: numbers from 1 to 8 joined by ', ', or empty");
+            }
+        }
+    } else if ('codec' in concept) {
+        schemaError(where, `has a codec, but only string concepts take one and this one is '${concept.type}'`);
+    }
+
+    if ('canonical_default' in concept) {
+        if (concept.codec === 'hotkey') {
+            if (typeof concept.canonical_default !== 'string') {
+                schemaError(where, `canonical_default is ${JSON.stringify(concept.canonical_default)}, expected a string`);
+            }
+            checkCanonicalBindings(where, concept.canonical_default, keyTable);
+        } else if (concept.type === 'bool') {
+            // A bool's canonical_default exists only where a canonical file starts other than the
+            // flat readers' shipped default, so it always differs from `default`.
+            if (typeof concept.canonical_default !== 'boolean' || concept.canonical_default === concept.default) {
+                schemaError(where, `canonical_default is ${JSON.stringify(concept.canonical_default)}, expected ` +
+                    `${!concept.default}, the value a canonical file starts with where it differs from the default`);
+            }
+        } else {
+            schemaError(where, 'has a canonical_default, which only hotkey and bool concepts take');
+        }
+    }
+
+    if (typeof concept.global !== 'boolean') {
+        schemaError(where, `global is ${JSON.stringify(concept.global)}, expected true or false: every canonical ` +
+            'concept says whether Defaults.ini carries it, so a new one cannot arrive undecided');
+    }
+}
+
+function validateSchema(schema, keyTable) {
+    if (!Array.isArray(schema.sections)) schemaError('sections', 'missing, expected an array');
+    // The renderer writes section names and canonical keys into files as they stand, and a
+    // canonical file's names are PascalCase. [CameraUnlock] is core's stamp.
+    schema.sections.forEach((section, i) => {
+        if (typeof section !== 'string' || !pascalCasePattern.test(section)) {
+            schemaError(`sections[${i}]`, `${JSON.stringify(section)} is not PascalCase ASCII letters and digits`);
+        }
+        if (section.toLowerCase() === 'cameraunlock') schemaError(`sections[${i}]`, 'CameraUnlock is the format stamp');
+        if (schema.sections.findIndex((s) => typeof s === 'string' && s.toLowerCase() === section.toLowerCase()) !== i) {
+            schemaError(`sections[${i}]`, `'${section}' is listed twice`);
+        }
+    });
+    if (!Array.isArray(schema.concepts)) schemaError('concepts', 'missing, expected an array');
+    if (!Array.isArray(schema.retired)) schemaError('retired', 'missing, expected an array');
+
+    // Both parsers test IsRetired / IsRetiredConfigKey and log the `advice`
+    // carried below, so a retired concept needs no branch in either language
+    // and any number of them behave the same.
+    schema.retired.forEach((concept, i) => {
+        if (typeof concept?.advice !== 'string' || concept.advice.trim() === '') {
+            schemaError(`retired[${i}]`, 'missing `advice`, the sentence a player is shown when the key is found');
+        }
+    });
+
+    const ids = new Map();
+
+    const claimId = (where, id) => {
+        if (typeof id !== 'string') schemaError(where, `id is ${JSON.stringify(id)}, expected a string`);
+        if (!identifierPattern.test(id)) {
+            schemaError(where, `id '${id}' is not a valid identifier. It becomes a C# 'const' name ` +
+                "and a C++ 'constexpr' name, so it must match [A-Za-z_][A-Za-z0-9_]*");
+        }
+        if (ids.has(id)) {
+            schemaError(where, `id '${id}' is already used by ${ids.get(id)}. Two concepts sharing an id ` +
+                'emit the same constant twice (C# CS0102)');
+        }
+        ids.set(id, where);
+    };
+
+    const checkAliases = (where, aliases, minimum) => {
+        if (!Array.isArray(aliases)) {
+            schemaError(where, `aliases is ${JSON.stringify(aliases)}, expected an array of strings`);
+        }
+        if (aliases.length < minimum) {
+            schemaError(where, `aliases has ${aliases.length} entries, expected at least ${minimum}`);
+        }
+        aliases.forEach((alias, i) => checkSpelling(where, `aliases[${i}]`, alias));
+    };
+
+    schema.concepts.forEach((concept, i) => {
+        const where = `concepts[${i}]${typeof concept?.id === 'string' ? ` ('${concept.id}')` : ''}`;
+        if (concept === null || typeof concept !== 'object') schemaError(where, 'is not an object');
+        claimId(where, concept.id);
+        for (const field of Object.keys(concept)) {
+            if (!conceptFields.has(field)) schemaError(where, `unknown field '${field}'`);
+        }
+        if (!schema.sections.includes(concept.section)) {
+            schemaError(where, `names section '${concept.section}', which is not in sections[]`);
+        }
+        checkSpelling(where, 'key', concept.key);
+        checkAliases(where, concept.aliases, 0);
+
+        // type and default are the only published record of what a key accepts and what it
+        // does when absent, and AGENTS.md makes a changed default a breaking change. They
+        // are checked here so a malformed one is caught at build time; agreement with the
+        // C# field initialisers is pinned by ConfigSchemaDefaultsTests, and with the C++
+        // ones by config_schema_tests.cpp against kConfigConceptDefaults.
+        const check = valueTypes[concept.type];
+        if (check === undefined) {
+            schemaError(where, `type '${concept.type}' is not one of ${Object.keys(valueTypes).join(', ')}`);
+        }
+        if (!('default' in concept)) schemaError(where, `has no default (type '${concept.type}')`);
+        // A binding list needs no escaping either, and is accepted only as the concept's own
+        // canonical_default, which checkCanonicalFields validates. It belongs only on a key no
+        // flat reader reads, since those parse a single key name; the generator cannot tell
+        // which keys those are, and the flat readers' single-key defaults are pinned in
+        // HeadTrackingConfigTableTests and head_tracking_config_table_tests.cpp.
+        // A player list's default is checked by its codec in checkCanonicalFields: digits, commas
+        // and spaces, all safe in a C++ string literal.
+        const listDefault = (concept.codec === 'hotkey' && concept.default === concept.canonical_default) ||
+            concept.codec === 'player_list';
+        if (!listDefault && !check(concept.default)) {
+            const alphabet = concept.type === 'string'
+                ? '. String defaults are emitted verbatim into a C++ string literal, so they are limited to [A-Za-z0-9_-], or on a hotkey concept to its canonical_default'
+                : '';
+            schemaError(where, `default ${JSON.stringify(concept.default)} is not a valid '${concept.type}'${alphabet}`);
+        }
+        checkCanonicalFields(where, concept, keyTable);
+    });
+
+    schema.retired.forEach((concept, i) => {
+        const where = `retired[${i}]${typeof concept?.id === 'string' ? ` ('${concept.id}')` : ''}`;
+        if (concept === null || typeof concept !== 'object') schemaError(where, 'is not an object');
+        claimId(where, concept.id);
+        checkAliases(where, concept.aliases, 1);
+    });
+
+    if (!Array.isArray(schema.non_canonical_keys)) schemaError('non_canonical_keys', 'missing, expected an array');
+    schema.non_canonical_keys.forEach((group, i) => {
+        const where = `non_canonical_keys[${i}]${typeof group?.id === 'string' ? ` ('${group.id}')` : ''}`;
+        if (group === null || typeof group !== 'object') schemaError(where, 'is not an object');
+        claimId(where, group.id);
+        for (const field of Object.keys(group)) {
+            if (!nonCanonicalKeyFields.has(field)) schemaError(where, `unknown field '${field}'`);
+        }
+        if (!Array.isArray(group.spellings) || group.spellings.length === 0) {
+            schemaError(where, `spellings is ${JSON.stringify(group.spellings)}, expected a non-empty array of strings`);
+        }
+        group.spellings.forEach((spelling, j) => checkSpelling(where, `spellings[${j}]`, spelling));
+        checkPlayerText(where, 'canonical_reason', group.canonical_reason);
+        if (!Array.isArray(group.sections)) {
+            schemaError(where, `sections is ${JSON.stringify(group.sections)}, expected an array of section names`);
+        }
+        group.sections.forEach((section, j) => {
+            if (typeof section !== 'string' || !pascalCasePattern.test(section)) {
+                schemaError(where, `sections[${j}] ${JSON.stringify(section)} is not PascalCase ASCII letters and digits`);
+            }
+            if (section.toLowerCase() === 'cameraunlock') schemaError(where, 'CameraUnlock is the format stamp');
+            const inSchema = schema.sections.find((s) => s.toLowerCase() === section.toLowerCase());
+            if (inSchema !== undefined && inSchema !== section) {
+                schemaError(where, `sections[${j}] '${section}' is the schema section spelled '${inSchema}'`);
+            }
+            if (schema.concepts.some((c) => c.canonical && c.section === inSchema)) {
+                schemaError(where, `sections[${j}] '${section}' holds canonical concepts, so not every key in it is this group's`);
+            }
+        });
+    });
+}
+
+// The sections non_canonical_keys lists, each with its group. A section is listed once, compared
+// ASCII case-insensitively, since a reader matches section names that way.
+function nonCanonicalSectionEntries(schema) {
+    const seen = new Map();
+    const out = [];
+    schema.non_canonical_keys.forEach((group, i) => {
+        for (const section of group.sections) {
+            const lower = section.toLowerCase();
+            if (seen.has(lower)) {
+                schemaError(`non_canonical_keys[${i}] ('${group.id}')`,
+                    `section '${section}' is already listed by '${seen.get(lower)}'`);
+            }
+            seen.set(lower, group.id);
+            out.push({ id: group.id, section, reason: group.canonical_reason });
+        }
+    });
+    return out;
+}
+
+// The normalised spellings of non_canonical_keys. None may be a concept's key or alias or a
+// retired spelling: section-less matching would read the key as that concept, and the flat
+// readers would apply it.
+function nonCanonicalKeyEntries(schema, entries) {
+    const owner = new Map(entries.map((e) => [e.normalized, e.canonical]));
+    const seen = new Map();
+    const out = [];
+    schema.non_canonical_keys.forEach((group, i) => {
+        const where = `non_canonical_keys[${i}] ('${group.id}')`;
+        for (const spelling of group.spellings) {
+            const normalized = normalize(spelling);
+            if (owner.has(normalized)) {
+                schemaError(where, `'${spelling}' normalizes to '${normalized}', which the alias table resolves to ` +
+                    `'${owner.get(normalized)}'`);
+            }
+            if (seen.has(normalized)) {
+                schemaError(where, `'${spelling}' normalizes to '${normalized}', already listed by '${seen.get(normalized)}'`);
+            }
+            seen.set(normalized, group.id);
+            out.push({ id: group.id, normalized, reason: group.canonical_reason });
+        }
+    });
+    return out;
+}
+
+function buildEntries(schema) {
+    const entries = [];
+    const owner = new Map();
+
+    function claim(alias, canonical, retired, where) {
+        const normalized = normalize(alias);
+        if (owner.has(normalized)) {
+            schemaError(where,
+                `alias '${alias}' normalizes to '${normalized}', already claimed by '${owner.get(normalized)}'`);
+        }
+        owner.set(normalized, canonical);
+        entries.push({ normalized, canonical, retired });
+    }
+
+    schema.concepts.forEach((concept, i) => {
+        const canonical = normalize(concept.key);
+        for (const alias of [concept.key, ...concept.aliases]) {
+            claim(alias, canonical, false, `concepts[${i}] ('${concept.id}')`);
+        }
+    });
+    schema.retired.forEach((concept, i) => {
+        const canonical = normalize(concept.aliases[0]);
+        for (const alias of concept.aliases) {
+            claim(alias, canonical, true, `retired[${i}] ('${concept.id}')`);
+        }
+    });
+
+    entries.sort((a, b) => (a.normalized < b.normalized ? -1 : a.normalized > b.normalized ? 1 : 0));
+    return entries;
+}
+
+const banner = (comment, source = 'data/config-schema.json', edit = 'the schema') => [
+    `${comment} Generated by scripts/generate-config-schema.mjs from ${source}.`,
+    `${comment} Do not edit. Edit ${edit} and re-run the generator; \`pixi run check-config-schema\``,
+    `${comment} fails the build when this file is stale.`,
+].join('\n');
+
+function renderCSharp(schema, entries) {
+    const rows = entries
+        .map((e) => `            { "${e.normalized}", "${e.canonical}" },`)
+        .join('\n');
+    const canonicalConsts = schema.concepts
+        .map((c) => `            public const string ${c.id} = "${normalize(c.key)}";`)
+        .join('\n');
+    const retiredConsts = schema.retired
+        .map((c) => `            public const string ${c.id} = "${normalize(c.aliases[0])}";`)
+        .join('\n');
+    const retiredAdviceRows = schema.retired
+        .map((c) => `            { "${normalize(c.aliases[0])}", ${quoteLiteral(c.advice)} },`)
+        .join('\n');
+
+    return `${banner('//')}
+
+using System.Collections.Generic;
+using System.Text;
+
+namespace CameraUnlock.Core.Config
+{
+    /// <summary>
+    /// The canonical config-key vocabulary, shared with the C++ half of the library.
+    /// Matching is section-less and case-insensitive: <see cref="Normalize"/> lowercases a
+    /// key and strips '_' and '-', so Network.UDPPort, udp_port and Udp-Port all resolve to
+    /// the same canonical name.
+    /// </summary>
+    public static class ConfigKeySchema
+    {
+        /// <summary>Canonical names, as returned by <see cref="Resolve"/>.</summary>
+        public static class Keys
+        {
+${canonicalConsts}
+
+${retiredConsts}
+        }
+
+        private static readonly Dictionary<string, string> Aliases = new Dictionary<string, string>
+        {
+${rows}
+        };
+
+        /// <summary>
+        /// Retired canonical names, each mapped to the sentence a player is shown when
+        /// the key is found in their config. Keyed rather than a set so a parser needs
+        /// no branch per retired concept.
+        /// </summary>
+        private static readonly Dictionary<string, string> Retired = new Dictionary<string, string>
+        {
+${retiredAdviceRows}
+        };
+
+        /// <summary>
+        /// Strips '_' and '-' and folds ASCII A-Z to lower case. Applied to both sides of a
+        /// lookup.
+        /// <para>
+        /// Deliberately not <c>ToLowerInvariant</c>: full Unicode case folding maps
+        /// U+212A KELVIN SIGN onto 'k', so a key spelled with one bound here and was
+        /// ignored by the C++ table, which folds A-Z and nothing else. Every spelling in
+        /// the schema is ASCII, so nothing accepted by the table needs the wider fold.
+        /// </para>
+        /// </summary>
+        public static string Normalize(string key)
+        {
+            if (key == null) return null;
+            var normalized = new StringBuilder(key.Length);
+            for (int i = 0; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (c == '_' || c == '-') continue;
+                if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                normalized.Append(c);
+            }
+            return normalized.ToString();
+        }
+
+        /// <summary>
+        /// Resolves any accepted spelling to its canonical normalized name, or null when the
+        /// key belongs to no concept in the schema.
+        /// </summary>
+        public static string Resolve(string key)
+        {
+            string normalized = Normalize(key);
+            if (normalized == null) return null;
+            string canonical;
+            return Aliases.TryGetValue(normalized, out canonical) ? canonical : null;
+        }
+
+        /// <summary>
+        /// True when the canonical name names a retired concept: it parses, and is ignored.
+        /// </summary>
+        public static bool IsRetired(string canonicalKey)
+        {
+            return RetiredAdvice(canonicalKey) != null;
+        }
+
+        /// <summary>
+        /// What to tell a player who still has this key, or null when the name names
+        /// no retired concept.
+        /// </summary>
+        public static string RetiredAdvice(string canonicalKey)
+        {
+            if (canonicalKey == null) return null;
+            string advice;
+            return Retired.TryGetValue(canonicalKey, out advice) ? advice : null;
+        }
+    }
+}
+`;
+}
+
+const cppFloat = (v) => `${Number.isInteger(v) ? v.toFixed(1) : String(v)}f`;
+
+const cppValueTypes = { int: 'kInt', float: 'kFloat', bool: 'kBool', string: 'kString', color: 'kColor' };
+
+function renderCppDefault(concept) {
+    const cells = { int: '0', float: '0.0f', bool: 'false', string: 'nullptr', color: '{0.0f, 0.0f, 0.0f, 0.0f}' };
+    const v = concept.default;
+    switch (concept.type) {
+        case 'int': cells.int = String(v); break;
+        case 'float': cells.float = cppFloat(v); break;
+        case 'bool': cells.bool = String(v); break;
+        case 'string': cells.string = `"${v}"`; break;
+        case 'color': cells.color = `{${v.map(cppFloat).join(', ')}}`; break;
+    }
+    return `    { "${concept.id}", config_keys::k${concept.id}, ConfigValueType::${cppValueTypes[concept.type]}, ` +
+        `${cells.int}, ${cells.float}, ${cells.bool}, ${cells.string}, ${cells.color} },`;
+}
+
+function renderCpp(schema, entries) {
+    const rows = entries
+        .map((e) => `    { "${e.normalized}", "${e.canonical}", ${e.retired ? 'true' : 'false'} },`)
+        .join('\n');
+    const defaultRows = schema.concepts.map(renderCppDefault).join('\n');
+    const canonicalConsts = schema.concepts
+        .map((c) => `inline constexpr const char* k${c.id} = "${normalize(c.key)}";`)
+        .join('\n');
+    const retiredConsts = schema.retired
+        .map((c) => `inline constexpr const char* k${c.id} = "${normalize(c.aliases[0])}";`)
+        .join('\n');
+    const retiredAdviceRows = schema.retired
+        .map((c) => `    { "${normalize(c.aliases[0])}", ${quoteLiteral(c.advice)} },`)
+        .join('\n');
+
+    return `${banner('//')}
+
+#pragma once
+
+#include <cstddef>
+#include <string>
+
+namespace cameraunlock {
+namespace config_keys {
+
+${canonicalConsts}
+
+${retiredConsts}
+
+}  // namespace config_keys
+
+/// One accepted spelling of a config key. \`normalized\` is the lookup form (lowercased,
+/// '_' and '-' stripped); \`canonical\` is the name every spelling of the concept resolves
+/// to, matching ConfigKeySchema.Keys on the C# side.
+struct ConfigKeyAlias {
+    const char* normalized;
+    const char* canonical;
+    bool retired;
+};
+
+inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
+${rows}
+};
+
+inline constexpr size_t kConfigKeyAliasCount = sizeof(kConfigKeyAliases) / sizeof(kConfigKeyAliases[0]);
+
+enum class ConfigValueType { kInt, kFloat, kBool, kString, kColor };
+
+/// The default data/config-schema.json declares for one concept: what a key means when a
+/// file leaves it out. Only the member \`type\` names carries the default; the rest are
+/// zero, and \`string_value\` is nullptr unless \`type\` is kString.
+struct ConfigConceptDefault {
+    const char* id;
+    const char* canonical;
+    ConfigValueType type;
+    int int_value;
+    float float_value;
+    bool bool_value;
+    const char* string_value;
+    float color_value[4];
+};
+
+inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
+${defaultRows}
+};
+
+inline constexpr size_t kConfigConceptDefaultCount =
+    sizeof(kConfigConceptDefaults) / sizeof(kConfigConceptDefaults[0]);
+
+/// Lowercases a key and strips '_' and '-'. Applied to both sides of a lookup.
+inline std::string NormalizeConfigKey(const std::string& key) {
+    std::string out;
+    out.reserve(key.size());
+    for (char c : key) {
+        if (c == '_' || c == '-') continue;
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        out.push_back(c);
+    }
+    return out;
+}
+
+/// Resolves any accepted spelling to its canonical normalized name, or nullptr when the
+/// key belongs to no concept in the schema. The returned pointer is static storage.
+inline const char* ResolveConfigKey(const std::string& key) {
+    const std::string normalized = NormalizeConfigKey(key);
+    for (size_t i = 0; i < kConfigKeyAliasCount; ++i) {
+        if (normalized == kConfigKeyAliases[i].normalized) return kConfigKeyAliases[i].canonical;
+    }
+    return nullptr;
+}
+
+/// A retired concept and the sentence a player is shown when the key is found in
+/// their config. Looked up by canonical name so a parser needs no branch per
+/// retired concept.
+struct RetiredConfigKeyAdviceEntry {
+    const char* canonical;
+    const char* advice;
+};
+
+inline constexpr RetiredConfigKeyAdviceEntry kRetiredConfigKeyAdvice[] = {
+${retiredAdviceRows}
+};
+
+inline constexpr std::size_t kRetiredConfigKeyAdviceCount =
+    sizeof(kRetiredConfigKeyAdvice) / sizeof(kRetiredConfigKeyAdvice[0]);
+
+/// What to tell a player who still has this key, or nullptr when the name names no
+/// retired concept. The returned pointer is static storage.
+inline const char* RetiredConfigKeyAdvice(const char* canonical_key) {
+    if (canonical_key == nullptr) return nullptr;
+    for (std::size_t i = 0; i < kRetiredConfigKeyAdviceCount; ++i) {
+        if (std::string(canonical_key) == kRetiredConfigKeyAdvice[i].canonical) {
+            return kRetiredConfigKeyAdvice[i].advice;
+        }
+    }
+    return nullptr;
+}
+
+/// True when the canonical name names a retired concept: it parses, and is ignored.
+inline bool IsRetiredConfigKey(const char* canonical_key) {
+    if (canonical_key == nullptr) return false;
+    for (size_t i = 0; i < kConfigKeyAliasCount; ++i) {
+        if (kConfigKeyAliases[i].retired && std::string(canonical_key) == kConfigKeyAliases[i].canonical) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace cameraunlock
+`;
+}
+
+const intMinText = { cpp: '-2147483647 - 1', csharp: 'int.MinValue' };
+const intMaxText = { cpp: '2147483647', csharp: 'int.MaxValue' };
+
+// A bound the schema leaves open is the limit of the concept's type: int for an int concept,
+// the largest finite float either side for a float one.
+function rangeBound(concept, field, language) {
+    const range = concept.range ?? {};
+    if (concept.type === 'int') {
+        if (field in range) return String(range[field]);
+        return field === 'min' ? intMinText[language] : intMaxText[language];
+    }
+    if (field in range) {
+        return language === 'cpp' ? cppFloat(range[field]) : `${range[field]}f`;
+    }
+    if (language === 'cpp') {
+        return field === 'min' ? '-std::numeric_limits<float>::max()' : 'std::numeric_limits<float>::max()';
+    }
+    return field === 'min' ? 'float.MinValue' : 'float.MaxValue';
+}
+
+const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical);
+
+// The schema's default as text the concept's canonical codec reads: the concept's
+// canonical_default where it has one, and the JSON value as it stands for the rest. A config
+// table's fresh render compares a row's own default with it.
+const defaultText = (c) => String(c.canonical_default ?? c.default);
+const isGlobal = (c) => c.global;
+const canonicalDefaultText = (c) => (c.canonical_default === undefined ? undefined : String(c.canonical_default));
+
+function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
+    const concepts = canonicalConcepts(schema);
+    const cString = (text) => (text === undefined ? 'nullptr' : `"${text}"`);
+    const enumerators = concepts.map((c) => `    ${c.id},`).join('\n');
+    const traits = concepts.map((c) => {
+        const family = familyOf(c);
+        const lines = [
+            'template <>',
+            `struct ConceptTraits<Concept::${c.id}> {`,
+            `    static constexpr const char* kSection = "${c.section}";`,
+            `    static constexpr const char* kKey = "${c.key}";`,
+            `    static constexpr ValueFamily kFamily = ValueFamily::k${family};`,
+        ];
+        if (c.type === 'int') {
+            lines.push(`    static constexpr long long kMin = ${rangeBound(c, 'min', 'cpp')};`);
+            lines.push(`    static constexpr long long kMax = ${rangeBound(c, 'max', 'cpp')};`);
+        } else if (c.type === 'float') {
+            lines.push(`    static constexpr float kMin = ${rangeBound(c, 'min', 'cpp')};`);
+            lines.push(`    static constexpr float kMax = ${rangeBound(c, 'max', 'cpp')};`);
+        }
+        lines.push(`    static constexpr const char* kFileComment[] = {${c.file_comment.map(cString).join(', ')}};`);
+        lines.push(`    static constexpr const char* kCanonicalDefault = ${cString(canonicalDefaultText(c))};`);
+        lines.push(`    static constexpr const char* kDefaultText = ${cString(defaultText(c))};`);
+        lines.push(`    static constexpr bool kGlobal = ${isGlobal(c)};`);
+        lines.push('};');
+        return lines.join('\n');
+    }).join('\n\n');
+    const infos = concepts.map((c) => {
+        const comment = [c.file_comment[0], c.file_comment[1]].map(cString).join(', ');
+        return `    {Concept::${c.id}, "${c.id}", "${c.section}", "${c.key}", ValueFamily::k${familyOf(c)}, ` +
+            `{${comment}}, ${c.file_comment.length}, ${cString(canonicalDefaultText(c))}, ${cString(defaultText(c))}, ` +
+            `${isGlobal(c)}},`;
+    }).join('\n');
+    const sections = schema.sections.map((s) => `    "${s}",`).join('\n');
+    const others = schema.concepts.filter((c) => !c.canonical)
+        .map((c) => `    {"${c.id}", "${c.section}", "${c.key}", "${normalize(c.key)}", "${c.canonical_reason}"},`)
+        .join('\n');
+    const otherKeys = nonCanonicalKeys.map((k) => `    {"${k.id}", "${k.normalized}", "${k.reason}"},`).join('\n');
+    const otherSections = nonCanonicalSections.map((k) => `    {"${k.id}", "${k.section}", "${k.reason}"},`).join('\n');
+
+    return `${banner('//')}
+
+#pragma once
+
+#include <cstddef>
+#include <limits>
+
+namespace cameraunlock::config::schema {
+
+/// The concepts a canonical config file writes: every concept data/config-schema.json marks
+/// canonical, in its concepts order, which is the order a section's concept rows are written in.
+enum class Concept {
+${enumerators}
+};
+
+/// What a concept's field holds, which fixes its codec: kBool is BoolCodec over bool, kInteger
+/// IntCodec over an integral type that holds the concept's range, kFloating FloatCodec or
+/// DoubleCodec, kHotkey HotkeyCodec over std::string, and kPlayerList PlayerListCodec over
+/// std::string.
+enum class ValueFamily { kBool, kInteger, kFloating, kHotkey, kPlayerList };
+
+/// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
+/// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
+/// open is the limit of the schema type. kCanonicalDefault is the value a canonical file starts
+/// with where it differs from the flat readers' default (a hotkey concept's binding list,
+/// CollisionEnabled's true), else nullptr. kDefaultText is the schema's default as text the
+/// concept's codec reads: the canonical_default where there is one, else the schema's value as it
+/// is written there. kGlobal is false for a concept that holds engine data (the engine's own
+/// units, a channel number): every game keeps its own default, Defaults.ini never carries it and
+/// PerGame() refuses it.
+template <Concept Id>
+struct ConceptTraits;
+
+${traits}
+
+/// One canonical concept, for code that walks them all. kConcepts[static_cast<std::size_t>(id)]
+/// describes id. \`file_comment\` holds \`file_comment_lines\` lines; the rest are nullptr.
+/// \`default_text\` is ConceptTraits<id>::kDefaultText, and \`global\` ConceptTraits<id>::kGlobal.
+struct ConceptInfo {
+    Concept id;
+    const char* name;
+    const char* section;
+    const char* key;
+    ValueFamily family;
+    const char* file_comment[2];
+    std::size_t file_comment_lines;
+    const char* canonical_default;
+    const char* default_text;
+    bool global;
+};
+
+inline constexpr ConceptInfo kConcepts[] = {
+${infos}
+};
+
+inline constexpr std::size_t kConceptCount = sizeof(kConcepts) / sizeof(kConcepts[0]);
+
+/// The schema's sections, in the order a canonical file writes them.
+inline constexpr const char* kSections[] = {
+${sections}
+};
+
+inline constexpr std::size_t kSectionCount = sizeof(kSections) / sizeof(kSections[0]);
+
+/// A concept the canonical format does not write. \`normalized\` is what ResolveConfigKey returns
+/// for its key and every alias; \`reason\` is the line a player is shown for such a key.
+struct NonCanonicalConcept {
+    const char* name;
+    const char* section;
+    const char* key;
+    const char* normalized;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalConcept kNonCanonicalConcepts[] = {
+${others}
+};
+
+inline constexpr std::size_t kNonCanonicalConceptCount =
+    sizeof(kNonCanonicalConcepts) / sizeof(kNonCanonicalConcepts[0]);
+
+/// A spelling of a setting the canonical format does not write that is no concept (the schema's
+/// non_canonical_keys). ResolveConfigKey does not know it, so the flat readers never read it.
+/// \`normalized\` is the spelling under NormalizeConfigKey; \`reason\` is the line a player is shown
+/// for such a key.
+struct NonCanonicalKey {
+    const char* name;
+    const char* normalized;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
+${otherKeys}
+};
+
+inline constexpr std::size_t kNonCanonicalKeyCount = sizeof(kNonCanonicalKeys) / sizeof(kNonCanonicalKeys[0]);
+
+/// A section that holds only settings the canonical format does not write (a group's
+/// \`sections\` in the schema's non_canonical_keys), so every key in it is the group's. Matched
+/// ASCII case-insensitively; \`reason\` is the line a player is shown for a key in it.
+struct NonCanonicalSection {
+    const char* name;
+    const char* section;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalSection kNonCanonicalSections[] = {
+${otherSections}
+};
+
+inline constexpr std::size_t kNonCanonicalSectionCount =
+    sizeof(kNonCanonicalSections) / sizeof(kNonCanonicalSections[0]);
+
+}  // namespace cameraunlock::config::schema
+`;
+}
+
+function renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) {
+    const concepts = canonicalConcepts(schema);
+    const csString = (text) => (text === undefined ? 'null' : `"${text}"`);
+    const types = { bool: 'bool', int: 'int', float: 'float', string: 'string' };
+    const codec = (c) => {
+        switch (c.type) {
+            case 'bool': return 'new BoolCodec()';
+            case 'int': return `new IntCodec(${rangeBound(c, 'min', 'csharp')}, ${rangeBound(c, 'max', 'csharp')})`;
+            case 'float': return `new FloatCodec(${rangeBound(c, 'min', 'csharp')}, ${rangeBound(c, 'max', 'csharp')})`;
+            default: return c.codec === 'player_list' ? 'new PlayerListCodec()' : 'new HotkeyCodec()';
+        }
+    };
+    const fields = concepts.map((c) => {
+        const type = types[c.type];
+        const comment = c.file_comment.map(csString).join(', ');
+        return [
+            `        /// <summary>[${c.section}] ${c.key}.</summary>`,
+            `        public static readonly ConceptDescriptor<${type}> ${c.id} = new ConceptDescriptor<${type}>(`,
+            `            "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${familyOf(c)},`,
+            `            ${codec(c)}, new[] { ${comment} }, ${csString(canonicalDefaultText(c))}, ${csString(defaultText(c))},`,
+            `            ${isGlobal(c)});`,
+        ].join('\n');
+    }).join('\n\n');
+    const all = concepts.map((c) => `            ${c.id},`).join('\n');
+    const sections = schema.sections.map((s) => `            "${s}",`).join('\n');
+    const reasons = schema.concepts.filter((c) => !c.canonical)
+        .map((c) => `            { "${normalize(c.key)}", "${c.canonical_reason}" },`)
+        .join('\n');
+    const keyReasons = nonCanonicalKeys.map((k) => `            { "${k.normalized}", "${k.reason}" },`).join('\n');
+    const sectionReasons = nonCanonicalSections
+        .map((k) => `            new KeyValuePair<string, string>("${k.section}", "${k.reason}"),`).join('\n');
+
+    return `${banner('//')}
+
+using System.Collections.Generic;
+
+namespace CameraUnlock.Core.Config
+{
+    /// <summary>
+    /// The concepts a canonical config file writes: every concept data/config-schema.json marks
+    /// canonical, shared with the C++ half of the library as cameraunlock::config::schema. A
+    /// config table binds each through its descriptor, whose type fixes the field's type and
+    /// whose codec carries the schema's range.
+    /// </summary>
+    public static class ConfigConcepts
+    {
+${fields}
+
+        /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
+        internal static readonly ConceptDescriptor[] All =
+        {
+${all}
+        };
+
+        /// <summary>The schema's sections, in the order a canonical file writes them.</summary>
+        internal static readonly string[] Sections =
+        {
+${sections}
+        };
+
+        /// <summary>
+        /// The line a player is shown for a key of a concept the canonical format does not write,
+        /// by the name <see cref="ConfigKeySchema.Resolve"/> returns for its key and every alias.
+        /// </summary>
+        internal static readonly Dictionary<string, string> NonCanonicalReasons = new Dictionary<string, string>
+        {
+${reasons}
+        };
+
+        /// <summary>
+        /// The line a player is shown for a spelling of a setting the canonical format does not
+        /// write that is no concept (the schema's non_canonical_keys), by the spelling under
+        /// <see cref="ConfigKeySchema.Normalize"/>. <see cref="ConfigKeySchema.Resolve"/> does not
+        /// know these spellings, so the flat readers never read them.
+        /// </summary>
+        internal static readonly Dictionary<string, string> NonCanonicalKeyReasons = new Dictionary<string, string>
+        {
+${keyReasons}
+        };
+
+        /// <summary>
+        /// Each section that holds only settings the canonical format does not write (a group's
+        /// sections in the schema's non_canonical_keys), with the line a player is shown for any
+        /// key in it. Matched ASCII case-insensitively.
+        /// </summary>
+        internal static readonly KeyValuePair<string, string>[] NonCanonicalSectionReasons =
+        {
+${sectionReasons}
+        };
+    }
+}
+`;
+}
+
+function preferenceModesError(where, problem) {
+    throw new SchemaError(`data/pipeline-conformance.json preference_modes.${where}: ${problem}`);
+}
+
+const modeNamePattern = /^[a-z][a-z0-9_]*$/;
+const cppTrackingModePattern = /^TrackingMode::[A-Za-z][A-Za-z0-9]*$/;
+
+// Checks the block is well formed. Whether the runtime agrees with it is left to the tests,
+// which name the mode that disagrees and both values.
+function validateTrackingModes(conformance, schema) {
+    const block = conformance.preference_modes?.tracking_mode;
+    if (block === null || typeof block !== 'object') preferenceModesError('tracking_mode', 'missing, expected an object');
+
+    const { channels, modes } = block;
+    if (!Array.isArray(channels) || channels.length === 0) {
+        preferenceModesError('tracking_mode.channels', 'expected a non-empty array of config-schema concept ids');
+    }
+    channels.forEach((channel, i) => {
+        const concept = schema.concepts.find((c) => c.id === channel);
+        if (concept === undefined) {
+            preferenceModesError(`tracking_mode.channels[${i}]`, `'${channel}' is not a concept id in data/config-schema.json`);
+        }
+        if (concept.type !== 'bool') {
+            preferenceModesError(`tracking_mode.channels[${i}]`, `'${channel}' is a '${concept.type}' concept, expected 'bool'`);
+        }
+    });
+
+    if (!Array.isArray(modes) || modes.length === 0) {
+        preferenceModesError('tracking_mode.modes', 'expected a non-empty array');
+    }
+    const seen = { name: new Set(), cpp: new Set(), pair: new Set() };
+    modes.forEach((mode, i) => {
+        const where = `tracking_mode.modes[${i}]`;
+        if (typeof mode?.name !== 'string' || !modeNamePattern.test(mode.name)) {
+            preferenceModesError(where, `name ${JSON.stringify(mode?.name)} does not match ${modeNamePattern}`);
+        }
+        if (typeof mode.cpp !== 'string' || !cppTrackingModePattern.test(mode.cpp)) {
+            preferenceModesError(where, `cpp ${JSON.stringify(mode.cpp)} does not match ${cppTrackingModePattern}. ` +
+                'It is emitted verbatim into the C++ test expectation');
+        }
+        for (const channel of channels) {
+            if (typeof mode[channel] !== 'boolean') {
+                preferenceModesError(where, `${channel} is ${JSON.stringify(mode[channel])}, expected true or false`);
+            }
+        }
+        const pair = channels.map((c) => mode[c]).join('/');
+        for (const [kind, value] of [['name', mode.name], ['cpp', mode.cpp], ['pair', pair]]) {
+            if (seen[kind].has(value)) preferenceModesError(where, `${kind} '${value}' is declared twice`);
+            seen[kind].add(value);
+        }
+    });
+    return block;
+}
+
+const snakeCase = (id) => id.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+
+function renderPreferenceModesTest(block) {
+    const fields = block.channels.map((c) => `    bool ${snakeCase(c)};`).join('\n');
+    const rows = block.modes
+        .map((m) => `    { "${m.name}", cameraunlock::${m.cpp}, ${block.channels.map((c) => String(m[c])).join(', ')} },`)
+        .join('\n');
+
+    return `${banner('//', 'data/pipeline-conformance.json', 'preference_modes')}
+//
+// The EXPECTATION tracking_mode_tests.cpp holds cameraunlock/tracking/tracking_mode.h to.
+// Nothing outside cpp/tests includes it: the runtime mapping is hand-written, so an edit
+// to either side alone fails the test.
+
+#pragma once
+
+#include <cameraunlock/tracking/tracking_mode.h>
+
+#include <cstddef>
+
+namespace preference_modes {
+
+struct TrackingModeExpectation {
+    const char* name;
+    cameraunlock::TrackingMode mode;
+${fields}
+};
+
+// preference_modes.tracking_mode.modes in file order, which is the cycle order.
+inline constexpr TrackingModeExpectation kTrackingModes[] = {
+${rows}
+};
+
+inline constexpr size_t kTrackingModeCount = sizeof(kTrackingModes) / sizeof(kTrackingModes[0]);
+
+}  // namespace preference_modes
+`;
+}
+
+function renderConceptRangesTest(schema) {
+    const bound = (range, field) => (field in range ? `true, ${range[field]}` : 'false, 0');
+    const rows = schema.concepts
+        .filter((c) => 'range' in c)
+        .map((c) => `    { "${c.id}", ${bound(c.range, 'min')}, ${bound(c.range, 'max')} },`)
+        .join('\n');
+
+    return `${banner('//', 'data/config-schema.json', 'the schema')}
+//
+// The ranges data/config-schema.json declares, which config_schema_tests.cpp holds to the
+// constants the flat readers guard with. Nothing outside cpp/tests includes it.
+
+#pragma once
+
+#include <cstddef>
+
+namespace concept_ranges {
+
+struct ConceptRange {
+    const char* id;
+    bool has_min;
+    double min;
+    bool has_max;
+    double max;
+};
+
+inline constexpr ConceptRange kConceptRanges[] = {
+${rows}
+};
+
+inline constexpr size_t kConceptRangeCount = sizeof(kConceptRanges) / sizeof(kConceptRanges[0]);
+
+}  // namespace concept_ranges
+`;
+}
+
+function keysError(where, problem) {
+    throw new SchemaError(`data/keys.json ${where}: ${problem}`);
+}
+
+// A key name is written into config files and emitted verbatim into C# and C++ string
+// literals, so it is ASCII letters and digits only.
+const keyNamePattern = /^[A-Za-z0-9]+$/;
+const vkPattern = /^0x[0-9A-F]{2}$/;
+// The binding codecs hard-code these three, in this order, as the modifier flags 1, 2 and 4
+// and as the order a binding writes them.
+const modifierNames = ['Ctrl', 'Shift', 'Alt'];
+
+function parseVk(where, text) {
+    if (typeof text !== 'string' || !vkPattern.test(text)) {
+        keysError(where, `vk ${JSON.stringify(text)} is not 0x and two upper-case hex digits`);
+    }
+    const vk = Number.parseInt(text.slice(2), 16);
+    if (vk < 0x01 || vk > 0xFE) keysError(where, `vk ${text} is outside 0x01-0xFE`);
+    return vk;
+}
+
+// Returns what the generated files carry: every key with its codes (0 for none), the
+// aliases by key index, and the modifiers with their Unity codes resolved.
+function validateKeys(doc) {
+    if (doc.schema_version !== 1) keysError('schema_version', `is ${JSON.stringify(doc.schema_version)}, expected 1`);
+    for (const field of ['about', 'unity_sources']) {
+        if (!Array.isArray(doc[field]) || doc[field].length === 0 || !doc[field].every((l) => typeof l === 'string')) {
+            keysError(field, 'expected a non-empty array of strings');
+        }
+    }
+    if (!Array.isArray(doc.keys) || doc.keys.length === 0) keysError('keys', 'expected a non-empty array');
+    if (!Array.isArray(doc.modifiers)) keysError('modifiers', 'expected an array');
+
+    // Every spelling a value can use, compared ASCII case-insensitively as the codecs read
+    // them. The modifier tokens are claimed first, so no key can take one.
+    const spellings = new Map();
+    const claim = (where, spelling) => {
+        if (typeof spelling !== 'string' || !keyNamePattern.test(spelling)) {
+            keysError(where, `${JSON.stringify(spelling)} is not ASCII letters and digits`);
+        }
+        const folded = spelling.toLowerCase();
+        if (folded === 'default') {
+            keysError(where, `'${spelling}' is the word a canonical config file writes for a setting's default, ` +
+                'so no key name, alias or modifier may be spelled that way in any letter case');
+        }
+        if (spellings.has(folded)) keysError(where, `'${spelling}' is already spelled by ${spellings.get(folded)}`);
+        spellings.set(folded, where);
+    };
+    modifierNames.forEach((name) => claim(`modifier ${name}`, name));
+
+    const byVk = new Map();
+    const byUnity = new Map();
+    const keys = [];
+    const aliases = [];
+    doc.keys.forEach((key, i) => {
+        const where = `keys[${i}]${typeof key?.name === 'string' ? ` ('${key.name}')` : ''}`;
+        if (key === null || typeof key !== 'object') keysError(where, 'is not an object');
+        for (const field of Object.keys(key)) {
+            if (!['name', 'vk', 'unity', 'aliases'].includes(field)) keysError(where, `unknown field '${field}'`);
+        }
+        claim(where, key.name);
+        const vk = key.vk === undefined ? 0 : parseVk(where, key.vk);
+        let unity = 0;
+        if (key.unity !== undefined) {
+            if (!Number.isInteger(key.unity) || key.unity < 1 || key.unity > 0x7FFFFFFF) {
+                keysError(where, `unity ${JSON.stringify(key.unity)} is not a positive int`);
+            }
+            unity = key.unity;
+        }
+        if (vk === 0 && unity === 0) keysError(where, 'has neither a vk nor a unity value');
+        if (vk !== 0) {
+            if (byVk.has(vk)) keysError(where, `vk ${key.vk} is already the code of '${byVk.get(vk)}'`);
+            byVk.set(vk, key.name);
+        }
+        if (unity !== 0) {
+            if (byUnity.has(unity)) keysError(where, `unity ${unity} is already the value of '${byUnity.get(unity)}'`);
+            byUnity.set(unity, key.name);
+        }
+        if (key.aliases !== undefined) {
+            if (!Array.isArray(key.aliases) || key.aliases.length === 0) keysError(where, 'aliases must be a non-empty array');
+            if (unity === 0) keysError(where, 'has aliases but no unity value; an alias is a second Unity name for one value');
+            key.aliases.forEach((alias, j) => {
+                claim(`${where} aliases[${j}]`, alias);
+                aliases.push({ alias, key: i });
+            });
+        }
+        keys.push({ name: key.name, vk, unity });
+    });
+
+    const unbound = doc.unity_unbound;
+    if (unbound === null || typeof unbound !== 'object' || unbound.unity !== 0) {
+        keysError('unity_unbound', 'expected {"name": ..., "unity": 0}, the KeyCode Unity uses for no key');
+    }
+    claim('unity_unbound', unbound.name);
+
+    if (doc.modifiers.length !== modifierNames.length) {
+        keysError('modifiers', `has ${doc.modifiers.length} entries, expected ${modifierNames.join(', ')}`);
+    }
+    const byName = new Map(keys.map((k) => [k.name, k]));
+    const modifiers = doc.modifiers.map((modifier, i) => {
+        const where = `modifiers[${i}]`;
+        if (modifier?.name !== modifierNames[i]) {
+            keysError(where, `is ${JSON.stringify(modifier?.name)}, expected '${modifierNames[i]}': ` +
+                'the codecs write the modifiers in the order Ctrl, Shift, Alt');
+        }
+        const vk = parseVk(where, modifier.vk);
+        if (byVk.has(vk)) {
+            keysError(where, `vk ${modifier.vk} is also the code of key '${byVk.get(vk)}'. A modifier's own code has ` +
+                'no key name: no binding names it as its key, and FormatVirtualKey spells it in hex');
+        }
+        if (!Array.isArray(modifier.unity) || modifier.unity.length !== 2) {
+            keysError(where, 'unity must name the left and the right key, in that order');
+        }
+        const [left, right] = modifier.unity.map((name) => {
+            const key = byName.get(name);
+            if (key === undefined || key.unity === 0) keysError(where, `unity names '${name}', which is not a key with a unity value`);
+            return key.unity;
+        });
+        return { name: modifier.name, vk, left, right };
+    });
+
+    return { keys, aliases, modifiers };
+}
+
+const hexVk = (vk) => (vk === 0 ? '0' : `0x${vk.toString(16).toUpperCase().padStart(2, '0')}`);
+
+function renderKeyNamesCpp(table) {
+    const keys = table.keys.map((k) => `    {"${k.name}", ${hexVk(k.vk)}, ${k.unity}},`).join('\n');
+    const aliases = table.aliases.map((a) => `    {"${a.alias}", ${a.key}},`).join('\n');
+    const modifiers = table.modifiers.map((m) => `    {"${m.name}", ${hexVk(m.vk)}, ${m.left}, ${m.right}},`).join('\n');
+
+    return `${banner('//', 'data/keys.json', 'the key table')}
+
+#pragma once
+
+#include <cstddef>
+
+namespace cameraunlock::input {
+
+/// One key: the name a hotkey value writes it as, its Windows virtual-key code and its
+/// UnityEngine.KeyCode value, each 0 where the key has none.
+struct KeyNameEntry {
+    const char* name;
+    int vk;
+    int unity;
+};
+
+inline constexpr KeyNameEntry kKeyNames[] = {
+${keys}
+};
+
+inline constexpr std::size_t kKeyNameCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
+
+/// A second name Unity declares for a key's value. It reads as kKeyNames[key] and is
+/// written as that key's name.
+struct KeyNameAlias {
+    const char* alias;
+    std::size_t key;
+};
+
+inline constexpr KeyNameAlias kKeyNameAliases[] = {
+${aliases}
+};
+
+inline constexpr std::size_t kKeyNameAliasCount = sizeof(kKeyNameAliases) / sizeof(kKeyNameAliases[0]);
+
+/// The modifier tokens, in the order a binding writes them. \`vk\` is the code
+/// GetAsyncKeyState reports for either side; \`unity_left\` and \`unity_right\` are the two
+/// KeyCode values Unity reports.
+struct KeyModifierEntry {
+    const char* name;
+    int vk;
+    int unity_left;
+    int unity_right;
+};
+
+inline constexpr KeyModifierEntry kKeyModifiers[] = {
+${modifiers}
+};
+
+inline constexpr std::size_t kKeyModifierCount = sizeof(kKeyModifiers) / sizeof(kKeyModifiers[0]);
+
+}  // namespace cameraunlock::input
+`;
+}
+
+function renderKeyNamesCsharp(table) {
+    const keys = table.keys.map((k) => `            new Key("${k.name}", ${hexVk(k.vk)}, ${k.unity}),`).join('\n');
+    const aliases = table.aliases.map((a) => `            new Alias("${a.alias}", ${a.key}),`).join('\n');
+    const modifiers = table.modifiers.map((m) => `            new Modifier("${m.name}", ${hexVk(m.vk)}, ${m.left}, ${m.right}),`).join('\n');
+
+    return `${banner('//', 'data/keys.json', 'the key table')}
+
+namespace CameraUnlock.Core.Input
+{
+    /// <summary>The key names hotkey values are written with, shared with the C++ half of the library.</summary>
+    internal static class KeyNames
+    {
+        /// <summary>
+        /// One key: the name a hotkey value writes it as, its Windows virtual-key code and its
+        /// UnityEngine.KeyCode value, each 0 where the key has none.
+        /// </summary>
+        internal struct Key
+        {
+            internal readonly string Name;
+            internal readonly int VirtualKey;
+            internal readonly int UnityKeyCode;
+
+            internal Key(string name, int virtualKey, int unityKeyCode)
+            {
+                Name = name;
+                VirtualKey = virtualKey;
+                UnityKeyCode = unityKeyCode;
+            }
+        }
+
+        /// <summary>
+        /// A second name Unity declares for a key's value. It reads as Keys[KeyIndex] and is
+        /// written as that key's name.
+        /// </summary>
+        internal struct Alias
+        {
+            internal readonly string Name;
+            internal readonly int KeyIndex;
+
+            internal Alias(string name, int keyIndex)
+            {
+                Name = name;
+                KeyIndex = keyIndex;
+            }
+        }
+
+        /// <summary>
+        /// A modifier token. VirtualKey is the code GetAsyncKeyState reports for either side;
+        /// UnityLeft and UnityRight are the two KeyCode values Unity reports.
+        /// </summary>
+        internal struct Modifier
+        {
+            internal readonly string Name;
+            internal readonly int VirtualKey;
+            internal readonly int UnityLeft;
+            internal readonly int UnityRight;
+
+            internal Modifier(string name, int virtualKey, int unityLeft, int unityRight)
+            {
+                Name = name;
+                VirtualKey = virtualKey;
+                UnityLeft = unityLeft;
+                UnityRight = unityRight;
+            }
+        }
+
+        internal static readonly Key[] Keys =
+        {
+${keys}
+        };
+
+        internal static readonly Alias[] Aliases =
+        {
+${aliases}
+        };
+
+        /// <summary>In the order a binding writes them: Ctrl, Shift, Alt.</summary>
+        internal static readonly Modifier[] Modifiers =
+        {
+${modifiers}
+        };
+    }
+}
+`;
+}
+
+function main() {
+    const keyTable = validateKeys(JSON.parse(readFileSync(keysPath, 'utf8')));
+    const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+    validateSchema(schema, keyTable);
+    const entries = buildEntries(schema);
+    const nonCanonicalKeys = nonCanonicalKeyEntries(schema, entries);
+    const nonCanonicalSections = nonCanonicalSectionEntries(schema);
+    const trackingModes = validateTrackingModes(JSON.parse(readFileSync(conformancePath, 'utf8')), schema);
+
+    const outputs = [
+        { path: csharpPath, text: renderCSharp(schema, entries) },
+        { path: cppPath, text: renderCpp(schema, entries) },
+        { path: preferenceModesTestPath, text: renderPreferenceModesTest(trackingModes) },
+        { path: conceptRangesTestPath, text: renderConceptRangesTest(schema) },
+        { path: keyNamesCppPath, text: renderKeyNamesCpp(keyTable) },
+        { path: keyNamesCsharpPath, text: renderKeyNamesCsharp(keyTable) },
+        { path: conceptsCppPath, text: renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) },
+        { path: conceptsCsharpPath, text: renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) },
+    ];
+
+    const check = process.argv.includes('--check');
+    let stale = 0;
+
+    for (const { path, text } of outputs) {
+        let current = null;
+        try {
+            current = readFileSync(path, 'utf8');
+        } catch (err) {
+            if (err.code !== 'ENOENT') throw err;
+        }
+        if (current === text) continue;
+        if (check) {
+            console.error(`STALE: ${path}`);
+            stale++;
+        } else {
+            // Written only when it differs: build-wasm rebuilds from the newest time under cpp/.
+            writeFileSync(path, text);
+            console.log(`wrote ${path}`);
+        }
+    }
+
+    if (check) {
+        if (stale > 0) {
+            console.error(`\n${stale} generated file(s) do not match data/config-schema.json, ` +
+                'data/pipeline-conformance.json and data/keys.json.');
+            console.error('Run: node scripts/generate-config-schema.mjs');
+            process.exit(1);
+        }
+        console.log(`config schema is in sync (${entries.length} aliases over ${schema.concepts.length} concepts, ` +
+            `${trackingModes.modes.length} tracking modes, ${keyTable.keys.length} key names)`);
+    }
+}
+
+try {
+    main();
+} catch (err) {
+    // A malformed schema is user input to a build-time tool: the message is the whole
+    // diagnostic and a stack trace over it is noise. Anything else is a bug in here and
+    // keeps its stack.
+    if (!(err instanceof SchemaError)) throw err;
+    console.error(err.message);
+    process.exit(1);
+}

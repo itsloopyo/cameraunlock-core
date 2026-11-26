@@ -1,0 +1,9 @@
+# [Sec with no ] ends [General] and names nothing, so the keys below it are reported, not read.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	Hotkeys	D	4	7	-
+diagnostic	UnclosedSectionHeader	3
+diagnostic	KeyOutsideSection	4
+diagnostic	KeyOutsideSection	5

@@ -1,0 +1,870 @@
+#!/usr/bin/env node
+//
+// Validate that a built release ZIP is a coherent package for the delivery
+// mode its launcher-manifest.json declares. There are three, and each is
+// checked on its own terms:
+//
+//   manifest     The launcher's deploy engine reads the package directly, so
+//                every path it will read (loader.archives[].source,
+//                files[].source) must exist inside the ZIP. This mirrors the
+//                engine's hard requirement ("manifest lists file X but it is
+//                not in the package") so a broken manifest is caught at build
+//                time, before a user ever downloads it.
+//
+//                And the converse, which is the half that used to be silent: a
+//                payload file that is IN the ZIP but on neither list is never
+//                deployed. Add a DLL to packaging staging, forget the manifest
+//                row, and the package installs an incomplete mod while passing
+//                every gate, because everything declared is still present. See
+//                undeclaredPayload() for what does not count as payload.
+//
+//                A Cecil-patched mod also names a patch tool in patches[].tool,
+//                which the engine runs in place from the package, with its own
+//                folder as the working directory, and never deploys. The tool
+//                has to be in the ZIP, and it and the files beside it in its
+//                folder (Mono.Cecil.dll) are payload the manifest declares.
+//
+//   install_cmd  The launcher shells out to install.cmd instead. Some mods
+//                cannot be expressed as a manifest at all - rv-there-yet
+//                deploys to a Steam and an Xbox/Game Pass install in the same
+//                run, and control-ultimate-edition provisions its loader by
+//                copying one raw DLL under a new name, neither of which the
+//                engine's extract-an-archive model covers. What must hold is
+//                that the scripts are in the ZIP and everything they call is
+//                too: a thin wrapper whose shared body was never staged still
+//                leaves a ZIP that looks complete, and fails on the user's
+//                machine with "install-body-bepinex.cmd not found".
+//
+//   external     A third-party mod manager owns the loader. OWML packages
+//                can opt into Lopari payload deployment with owml_mod_id;
+//                their declared sources must exist, as in manifest mode.
+//
+// In manifest mode a declared source that is absent is fatal - the engine
+// deploys from that list. In the other two the lists are descriptive, ingested
+// for display and audit, so a missing source is reported as a warning rather
+// than failing a package that installs correctly.
+//
+// cameraunlock-core is vendored (git submodule) into every mod repo, so this
+// is the single home for the check that every mod's release pipeline can run.
+// The launcher (lopari) owns the manifest SCHEMA; this validator is the
+// mod-side gate for it, the same split as the install.cmd contract.
+//
+// launcher-manifest.json is the ONLY manifest. An earlier parallel format,
+// mod.json (manifestVersion: 1, camelCase runtimeRequirements, loader.type, no
+// delivery_mode), was never read by lopari or lopari.app - lopari's own
+// audit-loaders.py classes a repo carrying only mod.json as LEGACY - and has
+// been removed fleet-wide. If you are adding manifest support to a mod, this
+// file's schema is the one; do not reintroduce the other. The install/uninstall
+// .cmd scripts are a separate, non-manifest delivery path and stay.
+//
+// A manifest is only warranted where lopari actually deploys the mod, i.e. it
+// is in the catalog. It has to name the real shipped paths, so an invented one
+// for a pre-release repo fails on a user's machine rather than at build time.
+//
+//   node scripts/validate-manifest.mjs                 # this repo's own zip
+//   node scripts/validate-manifest.mjs <repo-or-zip> [...]
+//
+// With no args it validates the host repo's newest release/*-installer.zip
+// (run it right after packaging), and, in a repo converted to the canonical
+// config format, checks the Nexus ZIP of the same build for the config (see
+// checkNexusConfig). A bare repo token (e.g. dying-light-2, or
+// dying-light-2-headtracking) resolves to a sibling repo's newest
+// release/*-installer.zip, for validating across a full checkout. A repo that
+// publishes no installer at all - external delivery hands a manager-consumable
+// ZIP straight to the user - falls back to its newest non-Nexus release ZIP.
+//
+// A manifest carrying a config block, the descriptor a launcher reads to find
+// the mod's canonical config and the rows the game keeps for itself, has the block
+// held to every rule in check-config-descriptor.mjs, against the repo the ZIP
+// was built from: the host repo, the sibling a token names, or the repo whose
+// release/ folder holds a ZIP named by path. The package of a converted repo
+// fails a seed or files[] row that writes its config or legacy file, with a
+// block or without one. A package whose version is below the block's
+// canonical_since is a pre-release of it and gets a warning; in a GitHub
+// Actions build for a v<x.y.z> tag, a canonical_since above x.y.z fails
+// (check-config-descriptor.mjs releaseProblems).
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+
+import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
+import { configWriteProblems, descriptorProblems, preReleaseWarning, releaseProblems, releaseVersionFromEnv } from "./check-config-descriptor.mjs";
+import { REPOS_ROOT } from "./lib/repos.mjs";
+
+// tar reads a member operand as a pattern, so `x[1].dll` named the bytes of `x1.dll`
+// and `*` joined several entries. Each zip is unpacked once and its entries read as
+// files; tar refuses a `..` or absolute entry on the way out.
+const extracted = new Map();
+process.on("exit", () => {
+  for (const dir of extracted.values()) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// core lives at <root>/cameraunlock-core. One level up is the repo
+// that vendors core (a mod repo -> self-validate target), or the repos root
+// when core is a standalone sibling checkout (-> sibling repo tokens resolve).
+const ROOT = REPOS_ROOT;
+
+// The schema_version manifest_versioned starts at, and the keys of its jvm_site_config block.
+const VERSIONED_SCHEMA = 3;
+// The schema_version files[].release_asset starts at.
+const RELEASE_ASSET_SCHEMA = 4;
+const JVM_SITE_KEYS = new Set(["config", "site", "agent_jars", "legacy_jars", "main_class"]);
+
+// Sentinel for the no-args case: validate this repo's own built zip.
+const SELF = Symbol("self");
+
+const tokens = process.argv.slice(2);
+const jobs = tokens.length ? tokens : [SELF];
+
+let failures = 0;
+for (const token of jobs) {
+  // "." resolves to the host repo, so it takes the host-only checks as well.
+  const isSelf = token === SELF || (!token.endsWith(".zip") && path.join(ROOT, token) === ROOT);
+  const { zip, repo } = isSelf ? { zip: newestInstaller(path.join(ROOT, "release")), repo: ROOT } : resolveZip(token);
+  const label = isSelf ? path.basename(ROOT) : token;
+  if (!zip) {
+    console.error(`FAIL ${label}: no installer zip found`);
+    failures += 1;
+    continue;
+  }
+  try {
+    validate(label, zip, repo);
+  } catch (e) {
+    console.error(`FAIL ${label}: ${e.message}`);
+    failures += 1;
+  }
+  if (isSelf) {
+    try {
+      checkNexusConfig(label, zip);
+    } catch (e) {
+      console.error(`FAIL ${label}: ${e.message}`);
+      failures += 1;
+    }
+  }
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} package(s) failed validation.`);
+  process.exit(1);
+}
+console.log("\nall packages valid.");
+
+function validate(label, zip, repo) {
+  // PowerShell 5.1's Compress-Archive writes backslash separators, and the
+  // launcher deploys on Windows where casing does not decide a match, so both
+  // are normalised away before comparing. Casing differences are still worth
+  // reporting: they break any consumer that reads the zip case-sensitively.
+  const entries = listZip(zip).map((e) => e.replace(/\\/g, "/"));
+  const entryByLower = new Map(entries.map((e) => [e.toLowerCase(), e]));
+  if (entryByLower.size !== entries.length) {
+    throw new Error("ZIP contains duplicate paths after normalizing case and separators");
+  }
+  if (!entries.includes("launcher-manifest.json")) throw new Error("no launcher-manifest.json in zip");
+  const manifestRaw = readEntry(zip, "launcher-manifest.json");
+  const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
+
+  assertVersionMatchesZipName(man, zip);
+  const descriptor = checkDescriptor(man, repo);
+  checkConfigWrites(man, repo);
+
+  const mode = man.delivery_mode;
+  assertVersionedWellFormed(man);
+  // Lopari installs an absent mode through install.cmd, so it needs the same
+  // stated reason as an explicit one. Same rule as ReleaseWorkflow.psm1's
+  // Assert-LauncherManifestDelivery, which checks the committed manifest.
+  if (mode === undefined || mode === "install_cmd") {
+    if (typeof man.install_cmd_reason !== "string" || !man.install_cmd_reason.trim()) {
+      const shown = mode === undefined ? 'absent (the launcher reads that as "install_cmd")' : '"install_cmd"';
+      throw new Error(
+        `delivery_mode is ${shown} with no install_cmd_reason. Move the package to "manifest" delivery, or set install_cmd_reason to exactly what the deploy engine cannot express`,
+      );
+    }
+    return validateInstallCmd(label, zip, man, entries, entryByLower);
+  }
+  if (mode === "external") return validateExternal(label, zip, man, entryByLower);
+  if (mode !== "manifest" && mode !== "manifest_variants" && mode !== "manifest_versioned") {
+    throw new Error(
+      `delivery_mode is "${mode}", expected one of "manifest", "manifest_variants", "manifest_versioned", "install_cmd", "external"`,
+    );
+  }
+
+  assertVariantsWellFormed(man);
+  if ((man.variants ?? []).length > 0 && mode === "manifest") {
+    throw new Error('variants require delivery_mode "manifest_variants" so older launchers use install.cmd');
+  }
+  if (mode === "manifest_variants" && !(man.variants ?? []).length) {
+    throw new Error('manifest_variants requires at least one variant');
+  }
+  // A launcher too old for these deploys the package through its scripts, so they must work.
+  if (mode === "manifest_variants" || mode === "manifest_versioned") {
+    validateInstallCmd(label, zip, man, entries, entryByLower);
+  }
+
+  // Every payload in the package, across all variants. Only one variant is
+  // deployed into any given install, but all of them ship in the ZIP and all of
+  // them must resolve: a missing source is a failed install for whoever owns
+  // that build of the game, and the packager cannot know which that is.
+  const sources = [];
+  const releaseAssets = [];
+  for (const payload of payloads(man)) {
+    // A fetched loader archive carries no in-zip source - its bytes are
+    // downloaded + hash-verified at install time - so only check bundled ones.
+    for (const a of payload.loader?.archives ?? []) if (a.source) sources.push(a.source);
+    // Guarded like the archives line above. An entry missing `source` otherwise pushed
+    // undefined, which threw a bare TypeError from the replace() below - reported as the
+    // failure reason with neither the file nor the entry named - and counted toward the
+    // length check, defeating it.
+    for (const f of payload.files ?? []) {
+      if (f.release_asset !== undefined) {
+        if (f.source !== undefined) throw new Error(`manifest files[] entry has both "source" and "release_asset": ${JSON.stringify(f)}`);
+        releaseAssets.push(f);
+        continue;
+      }
+      if (!f.source) throw new Error(`manifest files[] entry has no "source": ${JSON.stringify(f)}`);
+      sources.push(f.source);
+    }
+  }
+  const bundledAssets = checkReleaseAssets(man, releaseAssets, zip, entries);
+
+  // A manifest that declares nothing passed the "everything declared is present"
+  // check vacuously and printed OK. That is the worst outcome for a gate whose whole
+  // job is catching a package that would deploy nothing - the manifest is round-tripped
+  // through ConvertFrom-Json/ConvertTo-Json during stamping, so a depth overflow or a
+  // renamed key silently empties it and CI publishes happily.
+  if (sources.length === 0) {
+    throw new Error("manifest declares no bundled sources - nothing would be deployed");
+  }
+
+  const { missing, miscased } = resolveSources(sources, entryByLower);
+  if (missing.length > 0) {
+    throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
+  }
+
+  const tools = patchTools(man);
+  const toolsFound = resolveSources(tools, entryByLower);
+  if (toolsFound.missing.length > 0) {
+    throw new Error(
+      `patches[].tool missing from zip, so the launcher stops the install at "patch tool ... is not in the package": ${toolsFound.missing.join(", ")}`,
+    );
+  }
+
+  // The converse, which is the half that used to be silent. Everything the
+  // engine deploys comes off loader.archives[] and files[]; a payload file that
+  // is in the ZIP but on neither list is simply never written to the game. That
+  // ships an installer which succeeds and leaves the mod incomplete, and the
+  // forward check above passes it, because everything declared is still there.
+  const undeclared = undeclaredPayload(entries, [...sources, ...bundledAssets], tools, man);
+  if (undeclared.fatal.length > 0) {
+    throw new Error(
+      `zip carries binaries no manifest row deploys, so a launcher install would leave them out and the mod would not run: ${undeclared.fatal.join(", ")}. Add a files[] row for each, or drop it from packaging staging.`,
+    );
+  }
+
+  const seeds = payloads(man).reduce((n, p) => n + (p.loader?.seed ?? []).length, 0);
+  const rt = (man.runtime_requirements ?? []).length;
+  const variants = (man.variants ?? []).length
+    ? `, ${man.variants.length} variant(s) (${man.variants.map((v) => v.id).join(", ")})`
+    : "";
+  const patches = tools.length ? `, ${tools.length} patch(es)` : "";
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${releaseAssets.length} release asset(s), ${seeds} seed(s), ${rt} runtime req(s)${patches}${variants}${descriptor}`,
+  );
+  const preRelease = preReleaseWarning(man);
+  if (preRelease !== null) console.log(`WARN ${label}: ${preRelease}`);
+  warnMiscased(label, [...miscased, ...toolsFound.miscased]);
+  warnUndeployed(label, undeclared.cosmetic);
+}
+
+// The config descriptor, held to every rule in check-config-descriptor.mjs: its shape, and
+// against the repo the ZIP was built from, data/config-format.json's entry and the committed
+// config. A manifest without one (and whose variants carry none) has nothing to check here.
+function checkDescriptor(man, repo) {
+  const variants = Array.isArray(man.variants) ? man.variants : [];
+  if (!("config" in man) && !variants.some((v) => v && typeof v === "object" && "config" in v)) return "";
+  if (repo === null) {
+    throw new Error("the manifest has a config descriptor, which is checked against the repo the ZIP was built from; name the repo, or a ZIP in its release/ folder");
+  }
+  const problems = descriptorProblems(man, { root: repo, checkVersion: true });
+  const release = releaseVersionFromEnv();
+  if (release !== null) problems.push(...releaseProblems(man, release));
+  if (problems.length > 0) throw new Error(`config descriptor: ${problems.join("; ")}`);
+  return ", config descriptor";
+}
+
+// A converted repo's package seeds and ships no config, whether or not the manifest has a config
+// block (configWriteProblems). Whether the repo is converted is read from the repo the ZIP was
+// built from, so a ZIP named by a path outside any release/ folder is not checked.
+function checkConfigWrites(man, repo) {
+  if (repo === null) return;
+  const problems = configWriteProblems(man, repoState(repo));
+  if (problems.length > 0) throw new Error(problems.join("; "));
+}
+
+// install_cmd: the scripts ARE the delivery mechanism, so the gate is that
+// they and everything they reach for are in the package.
+function validateInstallCmd(label, zip, man, entries, entryByLower) {
+  const scripts = [man.install_script ?? "install.cmd", man.uninstall_script ?? "uninstall.cmd"];
+  const problems = [];
+  let checked = 0;
+  const visited = new Set();
+
+  for (const script of scripts) {
+    const declared = script.replace(/\\/g, "/");
+    if (visited.has(declared.toLowerCase())) continue;
+    visited.add(declared.toLowerCase());
+    const entry = entryByLower.get(declared.toLowerCase());
+    if (entry === undefined) {
+      problems.push(`${declared} is not in the zip`);
+      continue;
+    }
+    const body = readEntry(zip, entry);
+    checked += 1;
+    for (const dep of scriptDependencies(body)) {
+      if (!entryByLower.has(dep.toLowerCase())) {
+        problems.push(`${declared} calls ${dep}, which is not in the zip`);
+      } else {
+        scripts.push(dep);
+      }
+    }
+  }
+
+  if (problems.length > 0) throw new Error(problems.join("; "));
+
+  const sources = (man.files ?? []).map((f) => f.source).filter(Boolean);
+  const { missing, miscased } = resolveSources(sources, entryByLower);
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} - install_cmd, ${checked} script(s), ${entries.length} entries`,
+  );
+  warnDescriptive(label, missing);
+  warnMiscased(label, miscased);
+}
+
+// An OWML opt-in deploys the payload through Lopari; other external packages
+// only describe their manager route.
+function validateExternal(label, zip, man, entryByLower) {
+  const ext = man.external;
+  if (!ext) throw new Error('delivery_mode is "external" but there is no "external" block');
+  for (const key of ["manager_name", "manager_url"]) {
+    if (!ext[key]) {
+      throw new Error(`external block has no "${key}" - nothing tells the user where to go`);
+    }
+  }
+  if ((man.loader?.archives ?? []).length > 0) {
+    throw new Error(
+      'delivery_mode is "external" but loader.archives is non-empty - nothing in the package provisions it',
+    );
+  }
+
+  const sources = (man.files ?? []).map((f) => f.source).filter(Boolean);
+  if (sources.length === 0) {
+    throw new Error("manifest declares no files - nothing describes what ships");
+  }
+  const { missing, miscased } = resolveSources(sources, entryByLower);
+  if (ext.owml_mod_id != null) {
+    const targets = ["OuterWildsHeadTracking.dll", "CameraUnlock.Core.dll", "manifest.json", "default-config.json"];
+    if (ext.owml_mod_id !== "itsloopyo.OuterWildsHeadTracking" || man.strategy !== "OWML" || man.mod_info?.game_id !== "outer-wilds") {
+      throw new Error("external.owml_mod_id is only supported for Outer Wilds Head Tracking");
+    }
+    if (man.loader != null || ["variants", "patches", "runtime_requirements", "dependencies"].some((key) => (man[key] ?? []).length)) {
+      throw new Error("OWML packages deploy mod files only; Mod Manager owns the loader");
+    }
+    if (man.files.length !== targets.length || targets.some((target) => man.files.filter((file) => file.target === target && file.anchor === "mod_home").length !== 1)) {
+      throw new Error("OWML package must declare its two DLLs, manifest.json and default-config.json under mod_home; config.json belongs to the player");
+    }
+    if (missing.length || miscased.length) throw new Error("OWML package payload is missing files or has incorrectly cased sources");
+  }
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} - external via ${ext.manager_name}, ${sources.length} file(s)`,
+  );
+  warnDescriptive(label, missing);
+  warnMiscased(label, miscased);
+}
+
+// Lopari's PatchSpec (deploy/manifest.rs): target, tool and marker are required strings, and the
+// engine (deploy/engine.rs apply_patch) resolves tool against the package root through safe_join,
+// which refuses an absolute path and a `..`, then refuses a tool that is not a file. An empty
+// marker never matches the patched output, so the install fails there instead. Only the top-level
+// patches are read: Variant has no such field, and serde drops one a variant carries.
+function patchTools(man) {
+  for (const v of man.variants ?? []) {
+    if ("patches" in v) {
+      throw new Error(`variant "${v.id}" has patches, which the launcher reads only at the top level, so they would never run`);
+    }
+  }
+  if (man.patches === undefined) return [];
+  if (!Array.isArray(man.patches)) throw new Error('manifest "patches" must be an array');
+  return man.patches.map((p) => {
+    for (const key of ["target", "tool", "marker"]) {
+      if (typeof p?.[key] !== "string" || !p[key].trim()) {
+        throw new Error(`patches[] entry has no nonempty string "${key}": ${JSON.stringify(p)}`);
+      }
+    }
+    if (path.win32.isAbsolute(p.tool) || p.tool.includes(":") || p.tool.split(/[\\/]/).includes("..")) {
+      throw new Error(`patches[].tool ${p.tool} must stay relative to the package root`);
+    }
+    return p.tool;
+  });
+}
+
+// The Nexus ZIP of the build just validated: the installer ZIP's name with -nexus.zip for
+// -installer.zip. The newest Nexus ZIP in release/ belongs to an older build wherever the repo has
+// stopped making one, or has not made one this time, and checking that would pass or fail this
+// build on a file it did not produce.
+function nexusFor(installer) {
+  const paired = installer.replace(/(-installer)?\.zip$/i, "-nexus.zip");
+  return fs.existsSync(paired) ? paired : null;
+}
+
+// A Nexus ZIP is extracted by hand over the game folder, or into the folder the
+// mod sits in, so a file in it lands on the player's. Once the repo is
+// converted, a CameraUnlock.ini in it replaces the player's settings with the
+// defaults, and on an update from a legacy build it also stops the one-time
+// import of the legacy file. A legacy file in it replaces the file an older
+// build reads after a rollback and, while CameraUnlock.ini is absent, is what
+// the mod imports. An entry fails when it lands on either (see
+// manualZipConfigEntries). A repo that is not converted yet is not checked;
+// its conversion takes the config out of the Nexus staging.
+function checkNexusConfig(label, installer) {
+  const state = repoState(ROOT);
+  if (!state.converted) return;
+  const zip = nexusFor(installer);
+  if (zip === null) {
+    const stale = newestNexus(path.join(ROOT, "release"));
+    if (stale !== null) {
+      console.log(`WARN ${label}: ${path.basename(stale)} is not the Nexus ZIP of ${path.basename(installer)}, so it is stale and its config is not checked`);
+    }
+    return;
+  }
+  const live = manualZipConfigEntries(state, listZip(zip));
+  if (live.length > 0) {
+    throw new Error(
+      `${path.basename(zip)} carries ${live.join(", ")}, which extracts over the player's CameraUnlock.ini or the legacy file beside it. The mod creates CameraUnlock.ini at first launch and never writes the legacy file. Take the config out of the Nexus staging.`,
+    );
+  }
+  console.log(`OK   ${label}: ${path.basename(zip)} - carries no config`);
+}
+
+// What a .cmd in the package hands off to. Both forms are real: the thin
+// wrappers `call` a shared body staged by Copy-SharedBundle, and
+// rv-there-yet's install.cmd dispatches to a sibling install.ps1 because it
+// deploys to two game installs in one run.
+function scriptDependencies(text) {
+  const deps = new Set();
+  // Comments first. A .cmd that explains why it does NOT use the shared bundle names
+  // the path it is not using, and scanning the raw text read that as a dependency and
+  // failed a package that was correct - minecraft-java-edition, whose install.cmd says
+  // it resolves %APPDATA%\.minecraft directly rather than through find-game.ps1.
+  text = text
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(::|@?rem\b)/i.test(line))
+    .join("\n");
+  for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1|install-all-bepinex\.ps1|restore-kept-configs\.ps1)/gi)) {
+    deps.add(`shared/${m[1]}`);
+  }
+  for (const m of text.matchAll(/%(?:SCRIPT_DIR%|~dp0)([A-Za-z0-9_.-]+\.ps1)/g)) deps.add(m[1]);
+  return deps;
+}
+
+// Which ZIP entries the engine would never deploy from files[], and so are not
+// evidence of a forgotten manifest row. Each of these earns its place:
+//
+//   the manifest itself         read by the engine, not written to the game
+//   docs and licence texts      README/CHANGELOG/LICENSE/notices, and the whole
+//                               licenses/ tree, ship to discharge the licences
+//                               of what is compiled in; none is deployed
+//   install/uninstall scripts   the non-manifest delivery path, plus everything
+//                               they reach for - the shared/ bundle
+//                               (find-game.ps1, games.json, the
+//                               install-body-*.cmd files) and any scripts/ tree
+//                               a repo stages beside them
+//   vendored loader provenance  the LICENSE/README/nupkg that accompany
+//                               vendor/<loader>/. The loader payload itself is
+//                               NOT exempt: it is deployed, via
+//                               loader.archives[] or a files[] row, so an
+//                               undeclared binary or archive under vendor/ is
+//                               the same bug as anywhere else
+//   a seed target               loader.seed writes the file from content_b64,
+//                               so the copy in the ZIP is a reference the
+//                               engine does not need a files[] row for
+//   the profile/ tree           deployed by the launcher's own AsiLoader
+//                               strategy rather than from files[], see below
+//   a patch tool and its folder patches[].tool is run in place from the
+//                               package with its folder as the working
+//                               directory, so the tool and the files beside it
+//                               (Mono.Cecil.dll) are declared by that row. At
+//                               the package root only the tool itself counts,
+//                               or every root file would be exempt
+//
+// Declared inside the function, not at module scope: this file runs its job
+// loop at the top and declares its helpers below, so a top-level `const` here
+// is still in the temporal dead zone when the first package is validated.
+function undeclaredPayload(entries, sources, tools, man) {
+  // profile/ is the launcher's own staging convention rather than a files[] target:
+  // its AsiLoader strategy reads `<profile>/asi/*` out of the package, so a DLL mirrored
+  // there is deployed by the launcher without a manifest row naming it. See
+  // bioshock-remastered-headtracking/scripts/package.ps1, which stages it deliberately.
+  const exemptDirs = /^(shared|scripts|licenses|profile)\//i;
+  const exemptDocs =
+    /^(readme|changelog|licence|license|notice|third[-_]party[-_a-z]*)\.(md|txt)$|^(licence|license|notice)$/i;
+  const installScripts = /^(un)?install[a-z0-9._-]*\.(cmd|ps1|bat|sh)$/i;
+  const vendorProvenance = /^vendor\/[^/]+\/(licence|license|notice|readme)[^/]*$|\.nupkg$/i;
+
+  const declared = new Set([...sources, ...tools].map((s) => s.replace(/\\/g, "/").toLowerCase()));
+  const folderOf = (p) => p.slice(0, Math.max(p.lastIndexOf("/"), 0));
+  const toolFolders = new Set(tools.map((t) => folderOf(t.replace(/\\/g, "/").toLowerCase())).filter(Boolean));
+  // Seed targets name the path in the GAME directory, not in the ZIP, so the
+  // two only ever agree on the leaf.
+  const seeded = new Set(
+    payloads(man)
+      .flatMap((p) => p.loader?.seed ?? [])
+      .map((s) => s?.target)
+      .filter(Boolean)
+      .map((t) => t.split(/[\\/]/).pop().toLowerCase()),
+  );
+
+  // The split is by what an undeclared entry costs. A binary the mod needs in
+  // order to run is inert to the engine, so a manifest install produces a mod
+  // that does not work - fatal. Anything else undeclared is a file the launcher
+  // path silently does without: usually the commented default config that
+  // install.cmd copies and the mod regenerates for itself when absent
+  // (Config::LoadOrCreateDefault and friends), so a launcher user gets the
+  // generated one instead of the documented one. Worth saying, not worth
+  // refusing a package that installs and runs.
+  const payloadExt = /\.(dll|asi|exe|so|dylib|jar|pyd|node|zip|7z|rar|tar|gz)$/i;
+
+  const fatal = [];
+  const cosmetic = [];
+  for (const entry of entries) {
+    if (entry.endsWith("/")) continue;
+    if (declared.has(entry.toLowerCase())) continue;
+    if (toolFolders.has(folderOf(entry.toLowerCase()))) continue;
+    const base = entry.split("/").pop();
+    if (entry.toLowerCase() === "launcher-manifest.json") continue;
+    if (exemptDirs.test(entry)) continue;
+    if (exemptDocs.test(base)) continue;
+    if (installScripts.test(base)) continue;
+    if (vendorProvenance.test(entry)) continue;
+    if (seeded.has(base.toLowerCase())) continue;
+    (payloadExt.test(base) ? fatal : cosmetic).push(entry);
+  }
+  return { fatal, cosmetic };
+}
+
+// The payload(s) a manifest offers: its own loader/files, or one per variant.
+// A variant package ships a different loader and a different plugin for each
+// build of the game it supports - Wobbly Life is Mono on Steam and IL2CPP on
+// Xbox Game Pass, which take BepInEx 5 and BepInEx 6 respectively - and the
+// launcher picks one at install time from a file-presence probe.
+function payloads(man) {
+  const variants = man.variants ?? [];
+  if (variants.length === 0) return [{ loader: man.loader, files: man.files ?? [] }];
+  return variants;
+}
+
+// manifest_versioned is the mode a launcher reads as native deployment only when it knows the
+// manifest's schema_version, and as install.cmd otherwise; every launcher released before it was
+// added reads any unknown mode as install.cmd and ignores schema_version. So a block such a
+// launcher would skip, leaving the mod installed but unable to start, is allowed only there.
+function assertVersionedWellFormed(man) {
+  const versioned = man.delivery_mode === "manifest_versioned";
+  if (versioned && !(Number.isInteger(man.schema_version) && man.schema_version >= VERSIONED_SCHEMA)) {
+    throw new Error(`delivery_mode "manifest_versioned" needs schema_version ${VERSIONED_SCHEMA} or above, and this one is ${JSON.stringify(man.schema_version)}`);
+  }
+  if (!("jvm_site_config" in man)) return;
+  if (!versioned) {
+    throw new Error('jvm_site_config needs delivery_mode "manifest_versioned": a launcher that does not know the block would deploy the jar without the site config that starts it');
+  }
+  const jvm = man.jvm_site_config;
+  if (!jvm || typeof jvm !== "object" || Array.isArray(jvm)) throw new Error("jvm_site_config must be an object");
+  for (const key of Object.keys(jvm)) {
+    if (!JVM_SITE_KEYS.has(key)) throw new Error(`jvm_site_config has an unknown key "${key}"`);
+  }
+  for (const key of ["config", "site"]) {
+    const p = jvm[key];
+    if (typeof p !== "string" || !p.toLowerCase().endsWith(".json")) {
+      throw new Error(`jvm_site_config.${key} must name a .json file, and is ${JSON.stringify(p)}`);
+    }
+    if (path.win32.isAbsolute(p) || p.includes(":") || p.split(/[\\/]/).includes("..")) {
+      throw new Error(`jvm_site_config.${key} must stay inside the game folder: ${p}`);
+    }
+  }
+  if (jvm.config.toLowerCase() === jvm.site.toLowerCase()) {
+    throw new Error("jvm_site_config.site is the stock config itself");
+  }
+  const jarList = (key, required) => {
+    const list = jvm[key];
+    if (list === undefined && !required) return [];
+    if (!Array.isArray(list) || (required && list.length === 0) || !list.every((j) => typeof j === "string" && /^[A-Za-z0-9._ -]+\.jar$/i.test(j))) {
+      throw new Error(`jvm_site_config.${key} must be ${required ? "a nonempty" : "an"} array of jar file names (letters, digits, space, dot, dash, underscore), and is ${JSON.stringify(list)}`);
+    }
+    return list;
+  };
+  const agents = jarList("agent_jars", true);
+  jarList("legacy_jars", false);
+  // The launcher's JVM is handed the class in the form its stock config names its own.
+  if (jvm.main_class !== undefined && (typeof jvm.main_class !== "string" || !/^[A-Za-z_$][\w$]*(\/[A-Za-z_$][\w$]*)*$/.test(jvm.main_class))) {
+    throw new Error(`jvm_site_config.main_class must be a class name in slash form (com/example/Boot), and is ${JSON.stringify(jvm.main_class)}`);
+  }
+  const norm = (p) => String(p ?? "").replace(/\\/g, "/").toLowerCase();
+  // The launcher writes the site config into the game folder, so the jars it names are found there.
+  const targets = new Set((man.files ?? []).filter((f) => (f.anchor ?? "game_root") === "game_root").map((f) => norm(f.target)));
+  const siteDir = path.posix.dirname(norm(jvm.site));
+  for (const jar of agents) {
+    const at = siteDir === "." ? jar.toLowerCase() : `${siteDir}/${jar.toLowerCase()}`;
+    if (!targets.has(at)) throw new Error(`jvm_site_config names ${jar}, which no files[] row deploys beside ${jvm.site}`);
+  }
+  if (targets.has(norm(jvm.site))) {
+    throw new Error(`a files[] row ships ${jvm.site}, which jvm_site_config writes from the stock config`);
+  }
+}
+
+// Structural rules the launcher's resolver depends on. Each is something a
+// packager can get wrong in a way that produces a plausible-looking manifest
+// and a broken install, so it is caught here rather than on a user's machine.
+function assertVariantsWellFormed(man) {
+  const variants = man.variants ?? [];
+  if (!Array.isArray(variants)) throw new Error('manifest "variants" must be an array');
+  if (variants.length === 0) return;
+
+  // Two places to read a payload from is ambiguous, and the engine refuses it.
+  if (man.loader || (man.files ?? []).length > 0) {
+    throw new Error(
+      "manifest declares both variants and top-level loader/files; move them into a variant",
+    );
+  }
+
+  const seen = new Set();
+  for (const v of variants) {
+    if (!v || typeof v.id !== "string" || !v.id.trim()) {
+      throw new Error(`variant has no nonempty string "id": ${JSON.stringify(v)}`);
+    }
+    if (seen.has(v.id)) throw new Error(`two variants share the id "${v.id}"`);
+    seen.add(v.id);
+    if (v.when != null) {
+      const probe = v.when.file_exists;
+      if (Object.keys(v.when).length !== 1 || !probe || typeof probe.path !== "string" || !probe.path.trim()) {
+        throw new Error(`variant "${v.id}" requires a file_exists probe with a nonempty path`);
+      }
+      if (path.win32.isAbsolute(probe.path) || probe.path.includes(":") || probe.path.split(/[\\/]/).includes("..")) {
+        throw new Error(`variant "${v.id}" probe path must stay relative to its anchor`);
+      }
+      if (probe.anchor != null && !["game_root", "exe_dir", "mod_home"].includes(probe.anchor)) {
+        throw new Error(`variant "${v.id}" has an unknown probe anchor: ${probe.anchor}`);
+      }
+    }
+  }
+
+  // Selection stops at the first match, so a variant with no condition ends
+  // the list. Anything after it is unreachable - and the one left unreachable
+  // is exactly the one whose install the author thought they had covered.
+  const catchAll = variants.findIndex((v) => !v.when);
+  if (catchAll !== -1 && catchAll !== variants.length - 1) {
+    const unreachable = variants.slice(catchAll + 1).map((v) => v.id);
+    throw new Error(
+      `variant "${variants[catchAll].id}" has no "when", so it matches every install and nothing after it can ever be selected: ${unreachable.join(", ")}`,
+    );
+  }
+  if (catchAll === -1) {
+    // Not fatal: a package may legitimately support only the builds it probes
+    // for, and the launcher fails loudly on an install that matches none. It
+    // is worth saying out loud, because that failure lands on a user.
+    console.log(
+      `WARN ${man.mod_info?.name ?? "package"}: no variant is unconditional, so an install matching none of ${[...seen].join(", ")} fails to deploy`,
+    );
+  }
+}
+
+// mod_info.version lands in the launcher's install receipt and drives version
+// badging, and the ZIP filename is what a user downloads and what the release
+// is tagged from. Nothing else compares the two, so a packager that stamps one
+// and not the other ships a package the launcher reports under the wrong
+// version. Only asserted when the name actually carries a version: the nightly
+// ZIPs are named `-dev-` on purpose.
+function assertVersionMatchesZipName(man, zip) {
+  const named = /-v(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)-/.exec(path.basename(zip));
+  if (!named) return;
+  const declared = man.mod_info?.version;
+  if (!declared) {
+    throw new Error(
+      `zip is named for version ${named[1]} but the manifest has no mod_info.version, so the launcher receipt would record none`,
+    );
+  }
+  if (declared !== named[1]) {
+    throw new Error(
+      `mod_info.version is ${declared} but the zip is named for ${named[1]}; the launcher records the manifest value, so the receipt and the download would disagree`,
+    );
+  }
+}
+
+// A files[] row with a release_asset names a file published as an asset of the same GitHub release
+// as the package, which the launcher downloads by name and checks against sha256 and size, so a
+// release whose art has not changed is not downloaded again. The -installer.zip still carries a
+// copy of each, found by its hash, because install.cmd and launchers before schema 4 deploy from
+// the zip. The -launcher.zip carries none, and its assets are read from assets/ beside it, where
+// the package step leaves them for the release to upload. Returns the zip entries that are copies.
+function checkReleaseAssets(man, rows, zip, entries) {
+  if (rows.length === 0) return [];
+  if (man.delivery_mode !== "manifest_versioned" || !(Number.isInteger(man.schema_version) && man.schema_version >= RELEASE_ASSET_SCHEMA)) {
+    throw new Error(`files[].release_asset needs delivery_mode "manifest_versioned" and schema_version ${RELEASE_ASSET_SCHEMA} or above, so a launcher that cannot download it installs through install.cmd`);
+  }
+  const launcherZip = path.basename(zip).toLowerCase().endsWith("-launcher.zip");
+  const byHash = new Map();
+  for (const entry of entries) {
+    if (entry.endsWith("/")) continue;
+    byHash.set(sha256(readEntryBytes(zip, entry)), entry);
+  }
+  const bundled = [];
+  for (const row of rows) {
+    const asset = row.release_asset;
+    if (!asset || typeof asset !== "object" || Array.isArray(asset)) throw new Error(`files[].release_asset must be an object: ${JSON.stringify(row)}`);
+    const { name, sha256: hash, size } = asset;
+    if (typeof name !== "string" || !name || /[\\/]/.test(name) || name.includes("..")) {
+      throw new Error(`files[].release_asset.name must be a bare file name, and is ${JSON.stringify(name)}`);
+    }
+    if (typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`release asset ${name}: sha256 must be 64 lower-case hex digits`);
+    if (!Number.isInteger(size) || size <= 0) throw new Error(`release asset ${name}: size must be a positive whole number of bytes`);
+    if (typeof row.target !== "string" || !row.target) throw new Error(`release asset ${name}: the row has no target`);
+    const copy = byHash.get(hash);
+    if (launcherZip) {
+      if (copy !== undefined) throw new Error(`the launcher zip carries ${copy}, a copy of release asset ${name}, which the launcher downloads instead`);
+      const file = path.join(path.dirname(zip), "assets", name);
+      if (!fs.existsSync(file)) throw new Error(`release asset ${name} is not in ${path.dirname(file)}, where the release takes it from`);
+      const bytes = fs.readFileSync(file);
+      if (bytes.length !== size || sha256(bytes) !== hash) {
+        throw new Error(`${file} is ${bytes.length} bytes with sha256 ${sha256(bytes)}, and the manifest says ${size} bytes with ${hash}`);
+      }
+    } else {
+      if (copy === undefined) {
+        throw new Error(`the zip carries no copy of release asset ${name} (sha256 ${hash}), which install.cmd and launchers before schema ${RELEASE_ASSET_SCHEMA} deploy from the zip`);
+      }
+      bundled.push(copy);
+    }
+  }
+  return bundled;
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function resolveSources(sources, entryByLower) {
+  const missing = [];
+  const miscased = [];
+  for (const source of sources) {
+    const declared = source.replace(/\\/g, "/");
+    const entry = entryByLower.get(declared.toLowerCase());
+    if (entry === undefined) missing.push(declared);
+    else if (entry !== declared) miscased.push(`${declared} (zip has "${entry}")`);
+  }
+  return { missing, miscased };
+}
+
+// A non-binary file in the ZIP that no manifest row deploys. install.cmd copies
+// it and the launcher does not, so the two delivery paths leave the game in
+// different states. For a config the mod regenerates that is cosmetic; the fix
+// where it matters is a loader.seed entry, which writes the file once and does
+// not clobber a config the user has since edited.
+function warnUndeployed(label, entries) {
+  if (entries.length === 0) return;
+  console.log(
+    `WARN ${label}: zip carries file(s) no manifest row deploys, so a launcher install does without them where install.cmd copies them: ${entries.join(", ")}`,
+  );
+}
+
+function warnMiscased(label, miscased) {
+  if (miscased.length === 0) return;
+  console.log(
+    `WARN ${label}: manifest source(s) matched the zip only after ignoring case, fix the manifest casing: ${miscased.join(", ")}`,
+  );
+}
+
+// Outside manifest mode the file list does not drive deployment, so a stale
+// entry cannot break an install - but the launcher ingests it to describe the
+// mod, and a path that names nothing describes nothing.
+function warnDescriptive(label, missing) {
+  if (missing.length === 0) return;
+  console.log(
+    `WARN ${label}: manifest describes file(s) the zip does not contain: ${missing.join(", ")}`,
+  );
+}
+
+// The ZIP and the repo it was built from, which the config descriptor is checked against. A ZIP
+// named by path has a repo when it sits in one's release/ folder.
+function resolveZip(token) {
+  if (token.endsWith(".zip")) {
+    if (!fs.existsSync(token)) return { zip: null, repo: null };
+    const zip = path.resolve(token);
+    const dir = path.dirname(zip);
+    return { zip, repo: path.basename(dir).toLowerCase() === "release" ? path.dirname(dir) : null };
+  }
+  // token is a repo dir name or a catalog id; find its release dir under the
+  // repos root (only meaningful from a standalone core checkout).
+  for (const name of [token, `${token}-headtracking`]) {
+    const z = newestInstaller(path.join(ROOT, name, "release"));
+    if (z) return { zip: z, repo: path.join(ROOT, name) };
+  }
+  return { zip: null, repo: null };
+}
+
+// Newest installer ZIP, or - for a mod that publishes none because a third
+// party manager consumes the package directly - the newest release ZIP that is
+// not the Nexus payload-only variant. Still returns null on an empty release
+// directory, so a repo that never packaged is reported rather than skipped.
+function byNewest(a, b) {
+  return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+}
+
+function newestInstaller(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const names = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".zip"));
+  const installers = names.filter((n) => n.endsWith("-installer.zip"));
+  const pool = installers.length ? installers : names.filter((n) => !n.endsWith("-nexus.zip"));
+  return pool.map((n) => path.join(dir, n)).sort(byNewest)[0] ?? null;
+}
+
+function newestNexus(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const zips = fs
+    .readdirSync(dir)
+    .filter((n) => n.endsWith("-nexus.zip"))
+    .map((n) => path.join(dir, n));
+  return zips.sort(byNewest)[0] ?? null;
+}
+
+function systemTar() {
+  if (process.platform === "win32") {
+    const sys = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+    if (fs.existsSync(sys)) return sys;
+  }
+  return "tar";
+}
+
+function listZip(zip) {
+  return execFileSync(systemTar(), ["-tf", zip], { encoding: "utf8" })
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
+function extractedZip(zip) {
+  let dir = extracted.get(zip);
+  if (dir === undefined) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-manifest-"));
+    extracted.set(zip, dir);
+    execFileSync(systemTar(), ["-xf", zip, "-C", dir], { stdio: ["ignore", "ignore", "pipe"] });
+  }
+  return dir;
+}
+
+function readEntryBytes(zip, name) {
+  const dir = extractedZip(zip);
+  const file = path.resolve(dir, name);
+  if (path.relative(dir, file).startsWith("..")) throw new Error(`${name} is outside the zip`);
+  return fs.readFileSync(file);
+}
+
+function readEntry(zip, name) {
+  return readEntryBytes(zip, name).toString("utf8");
+}

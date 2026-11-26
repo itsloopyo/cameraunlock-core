@@ -1,0 +1,8 @@
+# RotationEnabled=yes and PositionEnabled=nope: the mode is invalid and the mod runs both. A
+# change to world_space_yaw writes WorldSpaceYaw alone and leaves both mode lines as they are.
+binds	three-state
+preference	tracking_mode	invalid	both
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true
+change	world_space_yaw	false

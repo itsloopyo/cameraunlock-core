@@ -1,0 +1,3 @@
+# The imported values equal the effective defaults, the pair included, so the migrated file is the
+# fresh file byte for byte.
+field	RotationEnabled	false

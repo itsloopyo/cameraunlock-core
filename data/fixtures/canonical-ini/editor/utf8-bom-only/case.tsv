@@ -1,0 +1,2 @@
+# A file holding only the mark has no lines, so the new section goes right behind it.
+set_or_insert	General	A	1

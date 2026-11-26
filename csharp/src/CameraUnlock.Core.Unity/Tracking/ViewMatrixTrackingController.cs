@@ -1,0 +1,718 @@
+using System;
+using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
+using CameraUnlock.Core.Processing;
+using CameraUnlock.Core.Protocol;
+using CameraUnlock.Core.Unity.Rendering;
+using CameraUnlock.Core.Unity.Utilities;
+using UnityEngine;
+
+namespace CameraUnlock.Core.Unity.Tracking
+{
+    /// <summary>
+    /// Per-frame head tracking controller that applies the full pipeline
+    /// (receiver -> interpolator -> processor) to the game camera by modifying
+    /// worldToCameraMatrix, leaving camera.transform untouched so game logic is unaffected.
+    ///
+    /// Handles render-hook registration (legacy and SRP), smooth transition in/out,
+    /// 6DOF detection, and view-matrix reset when tracking stops.
+    ///
+    /// Usage:
+    /// 1. Construct with the pipeline components and an optional game-specific camera resolver.
+    /// 2. Call Enable() once, then ProcessFrame(shouldTrack) every LateUpdate.
+    /// 3. Call Disable() on shutdown.
+    /// </summary>
+    public class ViewMatrixTrackingController
+    {
+        private const float TransitionInDuration = 0.5f;
+        private const float TransitionOutDuration = 0.3f;
+        private const float ProjectionEpsilon = 1e-6f;
+
+        private readonly ITrackingDataSource _receiver;
+        private readonly TrackingProcessor _processor;
+        private readonly PoseInterpolator _interpolator;
+        private readonly PositionProcessor _positionProcessor;
+        private readonly PositionInterpolator _positionInterpolator;
+        private readonly Func<Camera> _cameraResolver;
+        private readonly PerFrameCache<Camera> _mainCameraCache;
+        private readonly LeanClamp _leanClamp = new LeanClamp();
+
+        // Current processed values (set in ProcessFrame, applied in the render hook).
+        private float _currentYaw;
+        private float _currentPitch;
+        private float _currentRoll;
+        private Vec3 _currentPosition;
+        private bool _hasPosition;
+        private bool _shouldApply;
+
+        // Last applied values, used for the fade-out lerp.
+        private float _lastYaw;
+        private float _lastPitch;
+        private float _lastRoll;
+        private Vec3 _lastPosition;
+
+        private bool _wasApplyingTracking;
+        private bool _isTransitioningIn;
+        private float _transitionInProgress;
+        private bool _isTransitioningOut;
+        private float _transitionOutProgress;
+
+        // 6DOF stays off until the tracker delivers a non-zero position sample,
+        // so 3DOF-only users don't get a position offset before recentering.
+        private bool _detected6DOF;
+
+        // Only consulted while AutoRecenterOnConnect is on. Centering then fires once
+        // per enable, not on every IsReceiving resume: the tracker app stops sending
+        // while the face is lost, so capturing a center when packets resume bakes in
+        // whatever pose the user holds while sitting back down. Re-acquisition
+        // recentering is the app's decision, signaled through the packet trailer.
+        private bool _hasCentered;
+        private bool _recenterOnStabilize;
+
+        // Set by ResetState(false). The next session starts at the full pose instead of
+        // fading in from zero, because the game replaced the view in between (a map, a
+        // dialogue camera) and the player is not watching an untracked view that the
+        // pose would jump away from. A fade there reads as the camera starting off
+        // target and drifting onto where the player is looking.
+        private bool _skipNextTransitionIn;
+
+        // worldToCameraMatrix is a sticky override: once set, Unity stops
+        // recomputing it from camera.transform each frame. When we stop
+        // applying tracking we must call ResetWorldToCameraMatrix() once,
+        // otherwise the last head-rotated matrix sticks - producing a
+        // permanent residual offset in menus / after toggle-off.
+        private bool _needsMatrixReset;
+
+        // The camera the override was actually written to. Resetting whatever the resolver
+        // returns now is wrong the moment the game switches cameras: the reset lands on the
+        // cutscene camera while the gameplay camera keeps the head offset baked in, and a
+        // recenter cannot clear it because it only changes the delta, not the stale matrix.
+        private Camera _appliedCamera;
+
+        public bool PositionEnabled { get; set; }
+        public bool RotationEnabled { get; set; }
+        public bool WorldSpaceYaw { get; set; }
+
+        /// <summary>
+        /// The mod's world query for keeping a lean out of the level: a Physics.Raycast or
+        /// SphereCast from the clean eye (the camera transform's position) along a world-space
+        /// direction, answered as a <see cref="LeanObstruction"/>. Null leaves the lean
+        /// unclamped. The query runs in the render hook, after the game has placed the camera
+        /// for the frame, so it sweeps from the eye the frame is actually drawn from.
+        /// <see cref="LastTrackingPosition"/> stays the lean the tracker asked for.
+        /// </summary>
+        public LeanQuery LeanQuery { get; set; }
+
+        /// <summary>
+        /// The policy that acts on <see cref="LeanQuery"/>'s answers. Its Settings carry the
+        /// standoff (Skin, which must exceed the camera's near clip distance) and the release
+        /// smoothing; InContact and LastQueryFailed describe the last frame drawn. Reset on
+        /// every camera switch and tracking session by the controller.
+        /// </summary>
+        public LeanClamp LeanClamp
+        {
+            get { return _leanClamp; }
+        }
+
+        /// <summary>
+        /// Called in the render hook with the lean about to be drawn, after
+        /// <see cref="LeanQuery"/> has clamped it, and answers with the share of it the view
+        /// carries. A shooter mod hands the rest to its rig, or drops it, while the sights are
+        /// up (<see cref="CameraUnlock.Core.Ads.LeanHandover"/>). The lean is in the
+        /// processor's axes: x right, y up, negative z forward. Null: the view carries it all.
+        /// <see cref="LastTrackingPosition"/> stays the whole lean.
+        /// </summary>
+        public Func<Vec3, Vec3> CameraLeanShare { get; set; }
+
+        /// <summary>
+        /// Whether starting a tracking session captures the incoming pose as the center.
+        /// Off by default; see
+        /// <see cref="CameraUnlock.Core.Tracking.HeadTrackingSession.AutoRecenterOnConnect"/>
+        /// for why, which applies here unchanged.
+        /// </summary>
+        public bool AutoRecenterOnConnect { get; set; }
+
+        /// <summary>
+        /// Invoked after the controller consumes a tracker-app recenter request
+        /// (packet trailer) inside ProcessFrame. Hook notifications/logging here
+        /// rather than calling receiver.TryConsumeRecenterRequest() in mod code -
+        /// the controller already consumes the request, so a second consumer
+        /// competes with it and only one of the two sees a given press.
+        ///
+        /// Not a race if the mod's own consume is strictly ORDERED after
+        /// ProcessFrame: the controller gets first claim every frame and the mod's
+        /// call is a no-op in the normal path. Several mods do this to drive a
+        /// notification without holding a delegate. Calling it BEFORE ProcessFrame,
+        /// or from Update while ProcessFrame runs in LateUpdate, does steal presses.
+        /// </summary>
+        public Action OnRemoteRecenter { get; set; }
+        public bool IsApplyingTracking
+        {
+            get { return _wasApplyingTracking && !_isTransitioningOut; }
+        }
+
+        /// <summary>
+        /// Whether the latest <see cref="ProcessFrame"/> saw a remote connection, read from
+        /// the receiver and pushed onto both processors. A mod that also sets the flag on
+        /// the processors itself is harmless as long as it reads the same receiver: this
+        /// write happens later in the frame, immediately before either processor runs, so
+        /// the controller is authoritative.
+        /// </summary>
+        public bool IsRemoteConnection { get; private set; }
+
+        public float LastTrackingYaw
+        {
+            get { return _lastYaw; }
+        }
+
+        public float LastTrackingPitch
+        {
+            get { return _lastPitch; }
+        }
+
+        public float LastTrackingRoll
+        {
+            get { return _lastRoll; }
+        }
+
+        /// <summary>Position offset applied on the previous frame, in meters.</summary>
+        public Vec3 LastTrackingPosition
+        {
+            get { return _lastPosition; }
+        }
+
+        /// <summary>
+        /// Per-frame cached rendering camera, resolved through the camera resolver.
+        /// </summary>
+        public Camera MainCamera
+        {
+            get { return _mainCameraCache.Get(); }
+        }
+
+        /// <param name="cameraResolver">
+        /// Game-specific camera lookup (e.g. the game's camera manager singleton).
+        /// Null falls back to Camera.main. The result is cached per frame.
+        /// </param>
+        public ViewMatrixTrackingController(
+            ITrackingDataSource receiver, TrackingProcessor processor, PoseInterpolator interpolator,
+            PositionProcessor positionProcessor, PositionInterpolator positionInterpolator,
+            Func<Camera> cameraResolver = null)
+        {
+            if (receiver == null) throw new ArgumentNullException("receiver");
+            if (processor == null) throw new ArgumentNullException("processor");
+            if (interpolator == null) throw new ArgumentNullException("interpolator");
+            if (positionProcessor == null) throw new ArgumentNullException("positionProcessor");
+            if (positionInterpolator == null) throw new ArgumentNullException("positionInterpolator");
+
+            _receiver = receiver;
+            _processor = processor;
+            _interpolator = interpolator;
+            _positionProcessor = positionProcessor;
+            _positionInterpolator = positionInterpolator;
+            _cameraResolver = cameraResolver;
+            _mainCameraCache = new PerFrameCache<Camera>(ResolveCamera);
+
+            PositionEnabled = true;
+            RotationEnabled = true;
+            WorldSpaceYaw = true;
+        }
+
+        public void Enable()
+        {
+            // Both hooks are needed: onPreCull doesn't fire under SRP/URP, but legacy
+            // pipelines don't fire beginCameraRendering. Subscribing to both is safe -
+            // a given Unity build only invokes one path per frame. Both go through
+            // reflection: SRP-only Unity 6 builds strip the legacy Camera.onPreCull
+            // accessor, so a direct reference throws MissingMethodException at JIT time.
+            // Deliberately does NOT Remove first. The helper's registry is a single global
+            // slot per hook with no ownership token, so RemoveOnPreCull() clears whoever
+            // holds it - including a mod's own AddOnPreCull subscription, which is public
+            // API the helper's own docs invite. Clearing it blind would silently unhook
+            // that mod and leave its later Remove taking out this controller instead. The
+            // throw from a double Add is the diagnostic, and it is worth keeping: a
+            // controller recreated before the old one's Disable() ran is a lifecycle bug
+            // in the consumer that should surface loudly, not be papered over here.
+            RenderPipelineHelper.AddOnPreCull(OnPreCull);
+            RenderPipelineHelper.AddBeginCameraRendering(OnPreCull);
+        }
+
+        public void Disable()
+        {
+            RenderPipelineHelper.RemoveOnPreCull();
+            RenderPipelineHelper.RemoveBeginCameraRendering();
+
+            if (_appliedCamera != null)
+                _appliedCamera.ResetWorldToCameraMatrix();
+            _appliedCamera = null;
+            _needsMatrixReset = false;
+            _leanClamp.Reset();
+        }
+
+        /// <summary>
+        /// Process tracking data for this frame. Call from LateUpdate.
+        /// </summary>
+        /// <returns>True when tracking is being applied to the camera this frame.</returns>
+        public bool ProcessFrame(bool enabled)
+        {
+            // An enabled frame with no tracker data is drawn untracked in front of the
+            // player, so whatever session starts next is one they watch begin.
+            if (enabled && !_receiver.IsReceiving)
+                _skipNextTransitionIn = false;
+
+            if (enabled && _receiver.IsReceiving)
+            {
+                _isTransitioningOut = false;
+
+                // Re-read every frame, before either processor runs: the smoothing
+                // parameter is selected per connection, so a switch from a local
+                // tracker to a phone on WiFi must take effect without a restart.
+                // The controller owns this write because it owns the processors from
+                // construction - a mod routing everything through the controller has
+                // no other way to feed the flag, and without it both processors stay
+                // local forever and RemoteSmoothing becomes dead config.
+                IsRemoteConnection = _receiver.IsRemoteConnection;
+                _processor.IsRemoteConnection = IsRemoteConnection;
+                _positionProcessor.IsRemoteConnection = IsRemoteConnection;
+
+                if (!_wasApplyingTracking)
+                    BeginTrackingSession();
+
+                if (_receiver.TryConsumeRecenterRequest())
+                {
+                    Recenter();
+                    OnRemoteRecenter?.Invoke();
+                }
+
+                float scale = AdvanceTransitionIn();
+
+                var rawPose = _receiver.GetLatestPose();
+                var interpolated = _interpolator.Update(rawPose, Time.deltaTime);
+                var processed = _processor.Process(interpolated, Time.deltaTime);
+
+                ApplyRotation(processed, scale);
+                ApplyPosition(interpolated, scale);
+
+                _lastYaw = _currentYaw;
+                _lastPitch = _currentPitch;
+                _lastRoll = _currentRoll;
+                _lastPosition = _currentPosition;
+                _shouldApply = true;
+                _wasApplyingTracking = true;
+                return true;
+            }
+
+            // Drained, not left latched. The receive thread raises the request whenever a
+            // trailer press lands, but it is only consumed in the applying branch above, so
+            // a CENTER press made while tracking was off survived indefinitely and fired on
+            // the first frame of the NEXT session - where it cancelled the
+            // stabilise-then-recenter BeginTrackingSession had just armed (Recenter clears
+            // _recenterOnStabilize) and anchored the session to whichever raw pose happened
+            // to arrive first.
+            //
+            // Consumed here rather than capturing a centre: the app zeroed its own output
+            // at the press, so the centre that matches it is identity. Capturing the
+            // latest pose would anchor to wherever the head drifted since. Discarding the
+            // press outright would leave a centre installed by an earlier hotkey press
+            // subtracting from an already-zeroed stream, parking the view at the negated
+            // drift on the next session.
+            if (_receiver.TryConsumeRecenterRequest())
+            {
+                _processor.CenterManager.Reset();
+                _positionProcessor.SetCenter(default(PositionData));
+            }
+
+            if (_isTransitioningOut)
+            {
+                AdvanceTransitionOut();
+            }
+            else if (_wasApplyingTracking)
+            {
+                _isTransitioningOut = true;
+                _transitionOutProgress = 0f;
+                AdvanceTransitionOut();
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Projects the game's clean aim direction into the head-tracked view and returns its
+        /// screen offset from center in pixels (+X right, +Y up, matching uGUI anchoredPosition).
+        /// Uses the same rotation composition as the camera modification, selected by
+        /// <see cref="WorldSpaceYaw"/>, so the reticle lands exactly on the aim point.
+        /// Call after ProcessFrame. Returns false when tracking is not being applied, no camera
+        /// is available, or the aim point is outside the tracked view (behind the camera).
+        /// </summary>
+        public bool TryGetAimScreenOffset(out Vector2 screenOffset)
+        {
+            screenOffset = Vector2.zero;
+
+            Vector2 ndc;
+            if (!TryGetAimNdcOffset(out ndc))
+                return false;
+
+            screenOffset = new Vector2(ndc.x * (Screen.width * 0.5f), ndc.y * (Screen.height * 0.5f));
+            return true;
+        }
+
+        /// <summary>
+        /// The same projection as <see cref="TryGetAimScreenOffset"/>, but in normalized device
+        /// coordinates: ±1 at the edges of the camera's frustum, +X right, +Y up.
+        ///
+        /// This is the resolution-independent form, and the one to use whenever the target is a
+        /// uGUI element rather than a raw screen blit. Screen pixels are only the right unit for
+        /// a screen-space-overlay canvas that covers the whole window; a world-space HUD canvas,
+        /// or a game that renders through a render texture of a different aspect than the window,
+        /// needs the offset scaled by the canvas rather than by Screen.width/height.
+        /// </summary>
+        public bool TryGetAimNdcOffset(out Vector2 ndcOffset)
+        {
+            ndcOffset = Vector2.zero;
+
+            if (!IsApplyingTracking)
+                return false;
+
+            var cam = _mainCameraCache.Get();
+            if (cam == null)
+                return false;
+
+            Vector3 aimDirection = WorldSpaceYaw
+                ? ViewMatrixModifier.ComputeAimDirectionInTrackedViewDecomposed(
+                    cam.transform.rotation, _lastYaw, _lastPitch, _lastRoll)
+                : ViewMatrixModifier.ComputeAimDirectionInTrackedView(_lastYaw, _lastPitch, _lastRoll);
+
+            float forward = -aimDirection.z;
+            if (forward < ProjectionEpsilon)
+                return false;
+
+            float tanHalfFovY = Mathf.Tan(cam.fieldOfView * Mathf.Deg2Rad * 0.5f);
+            float tanHalfFovX = tanHalfFovY * cam.aspect;
+            if (tanHalfFovX < ProjectionEpsilon || tanHalfFovY < ProjectionEpsilon)
+                return false;
+
+            ndcOffset = new Vector2(
+                aimDirection.x / forward / tanHalfFovX,
+                aimDirection.y / forward / tanHalfFovY);
+            return true;
+        }
+
+        public void OnTrackingEnabled()
+        {
+            _skipNextTransitionIn = false;
+            ResetSmoothingState();
+            ResetInterpolators();
+            _isTransitioningOut = false;
+            // Re-arms the opt-in capture for the next session. A deliberate user
+            // re-enable recaptures the center; data gaps do not.
+            _hasCentered = false;
+        }
+
+        /// <summary>
+        /// Recenter to the latest received pose. Safe to call regardless of whether
+        /// tracking is currently being applied.
+        /// </summary>
+        public void Recenter()
+        {
+            RecenterToLatest();
+            ResetInterpolators();
+            _hasCentered = true;
+            _recenterOnStabilize = false;
+        }
+
+        public void OnTrackingDisabled()
+        {
+            if (_wasApplyingTracking)
+            {
+                _isTransitioningOut = true;
+                _transitionOutProgress = 0f;
+            }
+        }
+
+        public void ResetState()
+        {
+            ResetState(true);
+        }
+
+        /// <param name="fadeInOnResume">
+        /// False when the game hides or replaces the view for as long as tracking is off
+        /// (a full-screen menu, a dialogue or cutscene camera), so the next session
+        /// starts at the full head pose on its first frame. The skip is dropped if the
+        /// player sees an untracked view first: a hotkey re-enable, or tracking resuming
+        /// with the tracker silent.
+        /// </param>
+        public void ResetState(bool fadeInOnResume)
+        {
+            _skipNextTransitionIn = !fadeInOnResume;
+            if (_wasApplyingTracking || _isTransitioningOut)
+                _needsMatrixReset = true;
+            _mainCameraCache.Invalidate();
+            _isTransitioningOut = false;
+            _isTransitioningIn = false;
+            _transitionInProgress = 0f;
+            _wasApplyingTracking = false;
+            _shouldApply = false;
+            _lastYaw = 0f;
+            _lastPitch = 0f;
+            _lastRoll = 0f;
+            _lastPosition = Vec3.Zero;
+            _currentPosition = Vec3.Zero;
+            _hasPosition = false;
+            _detected6DOF = false;
+            _hasCentered = false;
+            _recenterOnStabilize = false;
+            _leanClamp.Reset();
+            ResetSmoothingState();
+            ResetInterpolators();
+        }
+
+        private void BeginTrackingSession()
+        {
+            if (AutoRecenterOnConnect && !_hasCentered)
+            {
+                RecenterToLatest();
+                _hasCentered = true;
+                _recenterOnStabilize = true;
+            }
+            _isTransitioningIn = !_skipNextTransitionIn;
+            _transitionInProgress = _skipNextTransitionIn ? 1f : 0f;
+            _skipNextTransitionIn = false;
+            _detected6DOF = false;
+            _leanClamp.Reset();
+            ResetInterpolators();
+            ResetSmoothingState();
+        }
+
+        private void RecenterToLatest()
+        {
+            _processor.RecenterTo(_receiver.GetLatestPose());
+            _positionProcessor.SetCenter(_receiver.GetLatestPosition());
+        }
+
+        private void ResetInterpolators()
+        {
+            _interpolator.Reset();
+            _positionInterpolator.Reset();
+        }
+
+        private void ResetSmoothingState()
+        {
+            _processor.ResetSmoothing();
+            _positionProcessor.ResetSmoothing();
+        }
+
+        private float AdvanceTransitionIn()
+        {
+            if (!_isTransitioningIn)
+                return 1f;
+
+            // Scaled, unlike AdvanceTransitionOut. This ramp only runs alongside the
+            // interpolator and processor, which are driven by Time.deltaTime - so on
+            // unscaled time at timeScale 0 it would fade in a frozen, stale head offset.
+            // Under AutoRecenterOnConnect its completion also fires RecenterToLatest(),
+            // capturing the centre on whatever pose the user happens to hold while the
+            // game is paused.
+            _transitionInProgress += Time.deltaTime / TransitionInDuration;
+            if (_transitionInProgress >= 1f)
+            {
+                _transitionInProgress = 1f;
+                _isTransitioningIn = false;
+
+                // Re-recenter after stabilization so the rest of the session uses
+                // a clean reference pose rather than whatever was first received.
+                // Only when this transition-in captured the center: skipped on
+                // re-acquisition resumes and after a deliberate recenter.
+                if (_recenterOnStabilize && _receiver.IsReceiving)
+                    RecenterToLatest();
+                _recenterOnStabilize = false;
+            }
+            return _transitionInProgress * _transitionInProgress;
+        }
+
+        private void ApplyRotation(TrackingPose processed, float scale)
+        {
+            if (RotationEnabled)
+            {
+                _currentYaw = processed.Yaw * scale;
+                _currentPitch = processed.Pitch * scale;
+                _currentRoll = processed.Roll * scale;
+            }
+            else
+            {
+                _currentYaw = 0f;
+                _currentPitch = 0f;
+                _currentRoll = 0f;
+            }
+        }
+
+        private void ApplyPosition(TrackingPose interpolated, float scale)
+        {
+            if (!PositionEnabled)
+            {
+                _currentPosition = Vec3.Zero;
+                _hasPosition = false;
+                return;
+            }
+
+            var rawPos = _receiver.GetLatestPosition();
+            if (!_detected6DOF && (rawPos.X != 0f || rawPos.Y != 0f || rawPos.Z != 0f))
+                _detected6DOF = true;
+
+            if (!_detected6DOF)
+            {
+                _currentPosition = Vec3.Zero;
+                _hasPosition = false;
+                return;
+            }
+
+            var interpolatedPos = _positionInterpolator.Update(rawPos, Time.deltaTime);
+
+            // Taken from the processor's smoothed state, exactly as both HeadTrackingSession
+            // ports do. Two things were wrong here and this fixes both:
+            //
+            // Pitch was negated, which no other call site does - three agreed and this one
+            // did not, so the vertical half of the compensation was applied backwards in
+            // view-matrix mods only.
+            //
+            // And it used the raw interpolated pose, which is UNCENTERED. The position
+            // centre is captured at the same moment as the rotation centre, so subsequent
+            // position deltas are relative to the centred orientation; measuring the arc
+            // from an uncentered rotation adds a constant offset that never cancels.
+            float physYaw, physPitch, physRoll;
+            _processor.GetSmoothedRotation(out physYaw, out physPitch, out physRoll);
+            var physicalRotQ = QuaternionUtils.FromYawPitchRoll(physYaw, physPitch, physRoll);
+
+            var finalPos = _positionProcessor.Process(interpolatedPos, physicalRotQ, Time.deltaTime);
+            _currentPosition = finalPos * scale;
+            _hasPosition = true;
+        }
+
+        private Camera ResolveCamera()
+        {
+            if (_cameraResolver != null)
+            {
+                var cam = _cameraResolver();
+                if (cam != null)
+                    return cam;
+            }
+            return Camera.main;
+        }
+
+        private void OnPreCull(Camera cam)
+        {
+            // The reset is deliberately not gated on cam == mainCam: it targets the camera the
+            // override was written to, which after a camera switch is no longer the one the
+            // resolver returns.
+            if (_needsMatrixReset && !_shouldApply && !_isTransitioningOut)
+            {
+                if (_appliedCamera != null)
+                    _appliedCamera.ResetWorldToCameraMatrix();
+                _appliedCamera = null;
+                _needsMatrixReset = false;
+                return;
+            }
+
+            var mainCam = _mainCameraCache.Get();
+            if (cam != mainCam || mainCam == null)
+                return;
+
+            if (_shouldApply)
+            {
+                ApplyToCamera(cam, _currentYaw, _currentPitch, _currentRoll,
+                    _hasPosition ? _currentPosition : Vec3.Zero);
+                _shouldApply = false;
+                return;
+            }
+
+            if (_isTransitioningOut)
+            {
+                float t = _transitionOutProgress;
+                float fadedYaw = Mathf.Lerp(_lastYaw, 0f, t);
+                float fadedPitch = Mathf.Lerp(_lastPitch, 0f, t);
+                float fadedRoll = Mathf.Lerp(_lastRoll, 0f, t);
+                var fadedPos = Vec3.Lerp(_lastPosition, Vec3.Zero, t);
+
+                if (fadedYaw != 0f || fadedPitch != 0f || fadedRoll != 0f ||
+                    fadedPos.X != 0f || fadedPos.Y != 0f || fadedPos.Z != 0f)
+                {
+                    ApplyToCamera(cam, fadedYaw, fadedPitch, fadedRoll, fadedPos);
+                }
+                else if (_appliedCamera != null)
+                {
+                    // The override is sticky: left in place it would freeze the view at the
+                    // transform it was last written from for the rest of the fade.
+                    _appliedCamera.ResetWorldToCameraMatrix();
+                    _appliedCamera = null;
+                }
+            }
+        }
+
+        private void ApplyToCamera(Camera cam, float yaw, float pitch, float roll, Vec3 position)
+        {
+            if (!ReferenceEquals(_appliedCamera, null) && !ReferenceEquals(_appliedCamera, cam))
+            {
+                // Unity's == reads a destroyed camera as null: it needs no matrix reset, but
+                // a scene load that destroyed it is still a camera cut.
+                if (_appliedCamera != null)
+                    _appliedCamera.ResetWorldToCameraMatrix();
+                // A camera cut: the allowance describes the previous camera's surroundings.
+                _leanClamp.Reset();
+            }
+            _appliedCamera = cam;
+
+            if (LeanQuery != null)
+                position = ClampLean(cam, position);
+            if (CameraLeanShare != null)
+                position = CameraLeanShare(position);
+
+            var offset = new Vector3(position.X, position.Y, position.Z);
+            if (WorldSpaceYaw)
+                ViewMatrixModifier.ApplyHeadRotationDecomposed(cam, yaw, pitch, roll, offset);
+            else
+                ViewMatrixModifier.ApplyHeadRotation(cam, yaw, pitch, roll, offset);
+        }
+
+        /// <summary>
+        /// Both ApplyHeadRotation paths move the eye along the camera's own axes, with the
+        /// processor's -z forward being the transform's +z forward, so that is the world-space
+        /// lean the query is asked about. The clamp only shortens the offset along its own
+        /// direction, so the camera-space offset is scaled by the same fraction.
+        /// </summary>
+        private Vec3 ClampLean(Camera cam, Vec3 position)
+        {
+            Transform camTransform = cam.transform;
+            Vector3 world = camTransform.rotation * new Vector3(position.X, position.Y, -position.Z);
+            float desired = world.magnitude;
+            Vector3 eye = camTransform.position;
+
+            // Unscaled, like the transition out this also runs under: the release is a
+            // visual ease, and a fade at timeScale 0 must still be clamped and released.
+            Vec3 allowed = _leanClamp.Apply(
+                new Vec3(eye.x, eye.y, eye.z),
+                new Vec3(world.x, world.y, world.z),
+                Time.unscaledDeltaTime,
+                LeanQuery);
+
+            if (desired <= 0f)
+                return position;
+            return position * (allowed.Magnitude / desired);
+        }
+
+        private void AdvanceTransitionOut()
+        {
+            // Unscaled, unlike AdvanceTransitionIn. This ramp only lerps the last applied
+            // rotation toward zero and consumes no pipeline state, so it is safe on real
+            // time - and it MUST be, because SceneGameStateDetector disables tracking on
+            // pause by default. On Time.deltaTime the fade could never complete at
+            // timeScale 0 and the pause menu rendered through a view matrix still rotated
+            // by whatever the head was doing when the player pressed Escape.
+            _transitionOutProgress += Time.unscaledDeltaTime / TransitionOutDuration;
+            if (_transitionOutProgress >= 1f)
+            {
+                _isTransitioningOut = false;
+                _wasApplyingTracking = false;
+                _shouldApply = false;
+                _needsMatrixReset = true;
+            }
+        }
+    }
+}

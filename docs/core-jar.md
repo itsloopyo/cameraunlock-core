@@ -1,0 +1,200 @@
+# Core as a jar
+
+`CameraUnlockCore.dll` is core for a host that can load a DLL. Some cannot ship one: a Steam
+Workshop item for Project Zomboid is uploaded by the game's own uploader, which refuses a file
+whose name ends in `.exe`, `.dll`, `.bat`, `.app`, `.dylib`, `.sh`, `.so` or `.zip` anywhere under
+the item's `Contents/` (`zombie.core.znet.SteamWorkshopItem.validateFileTypes`). The comparison is
+case-sensitive, and a name ending in `pyramid.zip`, in any case, is let through. For a host on a
+JVM, core is also a jar with no native file in it. It is the same C++, the same C interface and the same Java
+binding, so nothing is written twice.
+
+## What is in it
+
+`node scripts/build-core-jar.mjs <out.jar>` writes one jar:
+
+| Part | From |
+|---|---|
+| The binding and the boot class | `java/src` |
+| The C interface as JVM classes, `com.cameraunlock.core.wasm.CoreModule` | `cpp/` compiled to WebAssembly, then to Java bytecode by Endive's build-time compiler, which also copies code of its own into them (`CoreModuleMachineShaded`) |
+| The classes those run on | Endive 1.1.0: `runtime`, `wasm`, `wasi`, `log`, `annotations` |
+| The notices that travel with them | `META-INF/licenses/`, from `legal/` |
+
+`CameraUnlock.loadBundled()` starts it. Every method of `CameraUnlock` behaves as it does with
+`CameraUnlock.load()` and the DLL, and `pixi run test-java` and `pixi run vectors-java` run each
+check on both.
+
+A mod compiles against the jar and puts its whole content in its own jar. A loader that takes one
+jar per mod (ZombieBuddy) needs that, and so does the boot class a site config names
+([java-agent-mod.md](java-agent-mod.md)): `Boot` loads the jar it is in as the agent, so it has to
+be in the mod's jar.
+
+## How it is built
+
+`scripts/build-wasm.mjs` compiles the C interface's sources with wasi-sdk's clang for
+`wasm32-wasip1`, as a reactor module, with standard WebAssembly exception handling
+(`-fwasm-exceptions -mllvm -wasm-use-legacy-eh=false`), the one kind Endive runs. Endive's
+build-time compiler turns the module into Java bytecode, a class per group of functions, and
+stops the build if a function does not fit one JVM method rather than leave it to its
+interpreter. It writes three variants under `cpp/build-wasm/`: `core`, which ships, `testing`,
+with the entry points of `cameraunlock_testing.h`, and `other-abi`, for the test of a module of
+the ABI before this one.
+
+Every source of the C interface is compiled with `-Werror -Wall` here, where the MSVC build holds
+only the C interface's own targets to `/W4 /WX`. That is deliberate: clang sees warnings MSVC does
+not, it found a dead constant the DLL build let through, and `pixi run check` builds the module, so
+a warning in any of core's C++ that the jar carries stops the check rather than reaching a mod.
+
+The toolchain is pinned by version and SHA-256 in `scripts/wasm-toolchain.mjs` (wasi-sdk 34,
+Endive 1.1.0), fetched once into `%LOCALAPPDATA%\cameraunlock-core\toolchain` and checked before
+use. It runs on Windows, the same build a developer's `pixi run` and CI's run.
+
+## How the module reaches Windows
+
+The module has no Windows headers. Core's Win32 code includes `cameraunlock/os/win32.h`, which on
+Windows is `<windows.h>` and in the WebAssembly build (`CAMERAUNLOCK_WIN32_HOST`) is
+`cameraunlock/os/win32_host.h`: the types, constants and functions core calls, each function an
+import of module `cameraunlock_win32`. `java/src/com/cameraunlock/core/Win32Host.java` implements
+each import with the same call into kernel32, user32 or ws2_32 through `java.lang.foreign`, so the
+config owner's atomic replace, its file times, the hotkeys and the window centring behave as in the
+DLL. Defaults.ini's probe also calls shell32 (`SHGetKnownFolderPath`), ole32 (`CoTaskMemFree`) and,
+where it has them, Wine's functions in ntdll and kernel32. Windows' own DLLs are all it calls, and nothing native
+ships.
+
+The two sides differ in three ways, and Win32Host converts at each call:
+
+- `wchar_t` is 32 bits in the module, so a W function's text is UTF-32 there and lengths count
+  code points.
+- Pointers are 32 bits, and so are `HANDLE`, `HWND`, `HMONITOR` and `SOCKET` in the module. The
+  host sign-extends each to 64 bits on the way to Windows, and checks each value Windows hands
+  back before it cuts it to 32: each has to sign-extend back to the same value (an invalid handle
+  or `INVALID_SOCKET` is -1, which does), and anything else throws
+  `IllegalStateException`. `FindFirstFileW`'s handles are pointers past 32 bits, so the module
+  holds a number the host gives it in their place.
+- A struct passed by value is passed by pointer (`SetFilePointerEx`'s `LARGE_INTEGER`).
+
+`win32_host.h` declares only what core uses. A new Win32 call in core's Windows code does not
+compile for WebAssembly until it is declared there. A declared import Win32Host does not register
+would link, and fail only when the module is instantiated, so `pixi run build-java` runs
+`scripts/check-win32-imports.mjs` first: it reads the modules' imports of `cameraunlock_win32` and
+fails on one Win32Host does not register with the same signature, and on a function Win32Host
+registers that no module imports.
+
+The types and constants are in `win32_host_types.h`, which `cpp/tests/win32_host_constants.cpp`
+compiles beside the Windows SDK's in `pixi run test-cpp`: each constant's value and type, the base
+types and the layout of each structure must be the SDK's, and its own `inet_pton`, `inet_ntop` and
+byte order functions must answer as Winsock's do.
+
+Defaults.ini's probe is not one call each. It finds its functions by name with `GetProcAddress`,
+which code in WebAssembly cannot call through, so `ProbeDefaults` and `WineDosFileName` are imports
+Win32Host answers with the same lookups. The file log writes through `CreateFileW` and `WriteFile`
+like the DLL.
+
+## On Linux
+
+The module is the same on Linux. `WasmCore` hands its imports to
+`java/src/com/cameraunlock/core/PosixHost.java` where `os.name` is `Linux`,
+and PosixHost answers each one in plain Java (`java.nio.file`, `DatagramChannel`,
+`System.nanoTime`) with no native call, giving the results and Win32 error codes the C++ reads.
+`check-win32-imports.mjs` holds both hosts to the modules' imports. `pixi run test-java-linux`
+runs `java/tests/.../LinuxTests.java` in a pinned Linux container with Temurin 25 (Docker with
+Linux containers is needed, so it is not part of `check`).
+
+What differs from Windows, and what a mod on Linux does about it:
+
+- Paths are POSIX. `PosixPaths` is an import that answers 1 there, and the config owner then takes
+  a path starting with `/` as fully qualified and compares two paths case-sensitively.
+- The ANSI code page is UTF-8. Text in a code page other than UTF-8 is refused.
+- There are no share modes, so nothing fails as in use by another program. A file is read-only
+  when this user may not write it, and the config owner's replace refuses it as Windows does.
+- A first save puts the new file in place with a hard link, which fails on a name another program
+  took in the meantime as Windows' move does. On a file system with no hard links (FAT, exFAT)
+  that save fails, and the log says why.
+- A file name has to be one the locale's encoding can hold: under `LANG=C`, a path with a letter
+  past ASCII cannot be opened, and the log names the encoding.
+- Defaults.ini is looked for at `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini`, or
+  `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, then at
+  `~/Library/Application Support/CameraUnlock/Defaults.ini`, and is never created there.
+- Core cannot read the keys. The mod gives it a key source before `hotkeysStart`:
+  `CameraUnlock.keySource(IntPredicate)`, asked with a Windows virtual-key code on core's tick
+  thread whether that key is down in the game's window, with `VK_SHIFT`, `VK_CONTROL` and
+  `VK_MENU` answered for either key of the pair. It runs inside a call into the module, under its
+  lock, so it only reads a state the game's own thread keeps: it takes no lock and calls nothing of
+  `CameraUnlock`. `hotkeysStart` throws without one, and `keySource` throws on Windows, where core
+  reads the keys itself.
+- There is no window to centre: `windowCenter` throws `UnsupportedOperationException` before it
+  calls the module.
+- A datagram longer than a pose is read whole and reported as Windows reports it
+  (`WSAEMSGSIZE`), and an ICMP port unreachable is never reported on the unconnected socket, so
+  `SIO_UDP_CONNRESET` has nothing to turn off.
+
+## Threads
+
+The module runs on one thread at a time and has none of its own. `java/src/com/cameraunlock/core/WasmCore.java`
+holds one lock around every call into it, and does what the DLL's threads do:
+
+- A thread calls `cameraunlock_host_tick` every 16 ms, the hotkey poller's interval: one look at
+  the keys, and one step of each receiver's supervisor (the bind retried every 500 ms while it
+  fails, the socket reopened after its receive loop gives up).
+- For each socket a receiver opens, a thread waits with `select` (100 ms, so a stop is noticed),
+  `recvfrom`s, and hands each result to `cameraunlock_host_received`. `UdpReceiver` has the steps
+  both builds share: `SupervisorStep`, `Received`, `ReceiveLoopFailed`.
+
+`cameraunlock/c/host/cameraunlock_host.h` declares those three entry points. A DLL host never
+calls them.
+
+## When the module stops
+
+A trap, or an exception thrown by an import, leaves the module past the C++ code that would have
+let go of its mutexes. So after one the module is not called again: every later call throws
+`IllegalStateException` with the first cause, and the tick and the receive threads end. A tick that
+answers `CAMERAUNLOCK_ERROR` stops it the same way, where the DLL's poller would log and carry on,
+because the hotkeys and the receivers' retries would otherwise stop with nothing said.
+
+The reason of a failed call is read inside that call and kept for the thread that made it, so
+`cameraunlock_last_error` answers each thread with its own, as the DLL's thread_local does.
+
+## Cost
+
+`pixi run bench-java` measures both backends. On the machine core is developed on, with other
+builds running beside it:
+
+| | DLL | Module |
+|---|---|---|
+| Load, first in the JVM | 0.15 to 0.18 s | 1.7 to 2.7 s |
+| A frame, a datagram every fourth, warm | 0.3 to 0.4 us | 3.7 to 3.9 us |
+| The same at the 99th percentile | 0.5 us | 7.6 to 9.9 us |
+| A settings save, median | 5 ms | 7 ms |
+| The longest save | 10 to 46 ms | 9 to 18 ms |
+| The longest frame on another thread while saves run | under 1 ms | the longest save |
+| The same while the main thread only waits | 0.2 to 1.1 ms | 0.2 to 2.1 ms |
+
+The load is the whole of `loadBundled` or `load`, and a mod pays it once, where it loads core.
+
+Every call allocates its arguments' copies, so `frame`, `lean`, `viewFrame`, `viewLean`,
+`hotkeysTake` and `hotkeysDrop` allocate here, where with the DLL they do not.
+
+One lock is held through each call, so a call that waits holds every other thread's call up with
+it:
+
+- A settings save holds a frame on another thread for as long as the save takes: in the Module
+  column, the longest frame while saves ran was the longest save each time. A save that finds the
+  file in use by another program sleeps and tries again, up to nine times 20 ms, and the lock is
+  held through that too. A mod saves on a hotkey or a change in its options, so this is a hitch at
+  that moment.
+- `configReload` reads the two write times itself, outside the lock, and calls the module only
+  when one is not the time the module recorded. Each poll still makes four short calls for the
+  paths and the times. A write time Windows is slow to give (a virus scanner, a busy disk) once
+  held a frame for 1.87 s, with the stat inside the module. `configChanged` is the same look on
+  its own, for a host that reads its rows before a reload to compare them after: it reads them only
+  when `configChanged` is true.
+- `windowCenter` moves the window with `SetWindowPos`, which waits for the window's own thread to
+  answer. Called from any other thread while the window's thread waits for the lock (in `frame`,
+  say), neither goes on. Call it on the thread that made the window.
+
+## What it does not do
+
+- It runs on Windows and Linux only: on another system `loadBundled` throws.
+- No legacy import and the rest of what [c-interface.md](c-interface.md) lists under "What it
+  does not do".
+- The window finding and the one-shot raise (`os::FindGameWindow`, `os::CenterGameWindowOnce`)
+  are not in it.

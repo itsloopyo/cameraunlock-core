@@ -1,0 +1,7 @@
+# The same table rendered with values. Every global row reads Defaults.ini through
+# default in the fresh file; here each is a value, and CollisionChannel, which is not global, is active
+# away from its default.
+field	UdpPort	5000
+field	EnableOnStartup	false
+field	CollisionChannel	5
+field	LogPath	Other.log

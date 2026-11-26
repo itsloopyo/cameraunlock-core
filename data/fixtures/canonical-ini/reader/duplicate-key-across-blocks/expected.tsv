@@ -1,0 +1,7 @@
+# A key repeated across two blocks of one section; the same key in another section is not a duplicate.
+status	Readable
+format	1
+stamp	false
+key	Position	A	9	4	-
+key	General	A	2	6	2
+diagnostic	DuplicateKey	2,6

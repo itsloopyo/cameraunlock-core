@@ -1,0 +1,729 @@
+#pragma once
+
+// DX9 Overlay System
+// Minimal-dep DX9 overlay for drawing crosshair-style 2D primitives over a game.
+//
+// The Present entry points are read from the vtables of a windowed
+// probe device the overlay creates and releases inside Install(), and of its
+// implicit swap chain. That is what makes Install() work at any point in a
+// game's life rather than only before the game creates its own device.
+//
+// Both IDirect3DDevice9::Present and IDirect3DSwapChain9::Present are hooked:
+// a game can present through either, and one that presents only through its
+// swap chain never reaches the device's.
+//
+// The DX9 analog of dx9_overlay.h's DX11 sibling: fixed-function pipeline,
+// pretransformed (D3DFVF_XYZRHW) vertices drawn with DrawPrimitiveUP, so there
+// are no shaders, no managed resources, and nothing to recreate on device reset.
+//
+// Design goals:
+//   - No ImGui, no kiero. Consumers already vendor MinHook for game hooks; reuse it.
+//   - Header-only with a single TU defining CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION.
+//   - Pixel-space drawing API (top-left = 0,0). Colours are D3DCOLOR (0xAARRGGBB).
+//
+// Required external dependencies (TU with CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION):
+//   - <d3d9.h>
+//   - <MinHook.h>
+//
+// Example:
+//   DX9Overlay overlay;
+//   overlay.SetRenderCallback([](DX9DrawContext& dc) {
+//       dc.DrawCross(dc.Width()/2, dc.Height()/2, 12.0f, 0xFFFFFFFF, 1.5f, 4.0f);
+//   });
+//   overlay.Install();
+//   ...
+//   overlay.Remove();
+
+#include <cstdint>
+#include <functional>
+#include <vector>
+
+#include "cameraunlock/rendering/overlay_draw_list.h"
+
+namespace cameraunlock::rendering {
+
+// D3DCOLOR: 0xAARRGGBB (fixed-function diffuse).
+using Argb = uint32_t;
+
+// Pretransformed vertex: screen-space x/y, rhw=1, packed colour.
+struct DX9OverlayVertex {
+    float x;
+    float y;
+    float z;
+    float rhw;
+    Argb  color;
+};
+
+// Drawing context passed to the render callback. Accumulates triangles into a
+// CPU-side vector; the overlay flushes them once per frame with DrawPrimitiveUP.
+class DX9DrawContext {
+public:
+    DX9DrawContext(float w, float h) : m_width(w), m_height(h) {}
+
+    float Width()  const { return m_width;  }
+    float Height() const { return m_height; }
+
+    void DrawLine(float x1, float y1, float x2, float y2, Argb color, float thickness = 1.0f);
+    void DrawRect(float x, float y, float w, float h, Argb color);
+    void DrawDot(float cx, float cy, float radius, Argb color);
+
+    // Crosshair: 4 line segments centred at (cx, cy), each `arm` long with a
+    // central `gap` left empty.
+    void DrawCross(float cx, float cy, float arm, Argb color, float thickness = 1.0f, float gap = 0.0f);
+
+    // The triangles of a shared draw list (overlay_draw_list.h), whose colours
+    // are 0xAABBGGRR, turned to D3DCOLOR and shifted as this context's own are.
+    void AppendDrawList(const OverlayDrawList& list);
+
+    const std::vector<DX9OverlayVertex>& TriVerts() const { return m_triVerts; }
+
+private:
+    float m_width;
+    float m_height;
+    std::vector<DX9OverlayVertex> m_triVerts;  // triangle list
+};
+
+using DX9RenderCallback = std::function<void(DX9DrawContext&)>;
+// The same drawn through the shared draw list, which is what aim_marker.h and a
+// mod's overlay code written once for every API draw into.
+using DX9DrawListCallback = std::function<void(OverlayDrawList&)>;
+
+// Optional diagnostic log sink.
+using DX9LogFn = void (*)(const char* msg);
+void SetDX9OverlayLogger(DX9LogFn fn);
+
+// Called once when a device table is captured, during Install() for a probe or
+// on the CreateDevice thread for a game device. The table is an overlay-owned
+// copy of the 119 IDirect3DDevice9 entries for hooking additional methods.
+using DX9DeviceReadyFn = void (*)(void** deviceVTable);
+void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn);
+
+// Called in the hooked Present after the overlay has drawn and before the frame
+// goes to the screen, with the presenting IDirect3DDevice9, for a mod that reads
+// the finished frame back (a capture). Present can be hooked once per process,
+// so this is how a second reader of it shares the overlay's hook.
+using DX9BeforePresentFn = void (*)(void* device);
+void SetDX9BeforePresentCallback(DX9BeforePresentFn fn);
+
+class DX9Overlay {
+public:
+    DX9Overlay() = default;
+    ~DX9Overlay();
+    DX9Overlay(const DX9Overlay&)            = delete;
+    DX9Overlay& operator=(const DX9Overlay&) = delete;
+
+    // Install the Present hook. Caller must have already initialized MinHook
+    // (MH_Initialize). Returns false on failure.
+    bool Install();
+
+    // Tear down the hook.
+    void Remove();
+
+    void SetRenderCallback(DX9RenderCallback cb);
+    void SetRenderCallback(DX9DrawListCallback cb);
+
+    bool IsInstalled() const { return m_hookInstalled; }
+
+    // Both Presents are hooked. Install() can succeed with only the
+    // CreateDevice hook armed, which draws nothing for a device that already
+    // exists.
+    bool PresentHooked() const;
+
+private:
+    DX9RenderCallback m_callback;
+    bool m_hookInstalled = false;
+};
+
+#ifdef CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION
+
+// ============================================================================
+// Implementation
+// ============================================================================
+
+} // namespace cameraunlock::rendering - re-opened after includes
+
+#include <d3d9.h>
+#include <MinHook.h>
+#include <Windows.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <cstdio>
+#include <memory>
+#include <mutex>
+
+#pragma comment(lib, "d3d9.lib")
+
+namespace cameraunlock::rendering {
+
+// ---------- DX9DrawContext ----------------------------------------------------
+
+inline void DX9DrawContext::DrawRect(float x, float y, float w, float h, Argb color) {
+    // Pretransformed coords are sampled at pixel centres; the -0.5 texel shift
+    // keeps thin primitives from straddling two pixels.
+    DX9OverlayVertex v0{x - 0.5f,     y - 0.5f,     0.0f, 1.0f, color};
+    DX9OverlayVertex v1{x + w - 0.5f, y - 0.5f,     0.0f, 1.0f, color};
+    DX9OverlayVertex v2{x + w - 0.5f, y + h - 0.5f, 0.0f, 1.0f, color};
+    DX9OverlayVertex v3{x - 0.5f,     y + h - 0.5f, 0.0f, 1.0f, color};
+    m_triVerts.push_back(v0); m_triVerts.push_back(v1); m_triVerts.push_back(v2);
+    m_triVerts.push_back(v0); m_triVerts.push_back(v2); m_triVerts.push_back(v3);
+}
+
+inline void DX9DrawContext::DrawLine(float x1, float y1, float x2, float y2, Argb color, float thickness) {
+    // Render a line as a thin quad so thickness is reliable (line-list raster is
+    // 1px only on many adapters).
+    float dx = x2 - x1, dy = y2 - y1;
+    float len = std::sqrt(dx*dx + dy*dy);
+    if (len < 1e-3f) return;
+    float nx = -dy / len, ny = dx / len;   // perpendicular
+    float t = thickness * 0.5f;
+    float ox = nx * t, oy = ny * t;
+
+    DX9OverlayVertex a{x1 - ox - 0.5f, y1 - oy - 0.5f, 0.0f, 1.0f, color};
+    DX9OverlayVertex b{x2 - ox - 0.5f, y2 - oy - 0.5f, 0.0f, 1.0f, color};
+    DX9OverlayVertex c{x2 + ox - 0.5f, y2 + oy - 0.5f, 0.0f, 1.0f, color};
+    DX9OverlayVertex d{x1 + ox - 0.5f, y1 + oy - 0.5f, 0.0f, 1.0f, color};
+    m_triVerts.push_back(a); m_triVerts.push_back(b); m_triVerts.push_back(c);
+    m_triVerts.push_back(a); m_triVerts.push_back(c); m_triVerts.push_back(d);
+}
+
+inline void DX9DrawContext::DrawDot(float cx, float cy, float radius, Argb color) {
+    constexpr int kSegments = 16;
+    constexpr float kTau = 6.28318530718f;
+    DX9OverlayVertex centre{cx - 0.5f, cy - 0.5f, 0.0f, 1.0f, color};
+    DX9OverlayVertex p0{cx + radius - 0.5f, cy - 0.5f, 0.0f, 1.0f, color};
+    for (int i = 0; i < kSegments; ++i) {
+        float a1 = (kTau * (i + 1)) / kSegments;
+        DX9OverlayVertex p1{cx + std::cos(a1) * radius - 0.5f, cy + std::sin(a1) * radius - 0.5f, 0.0f, 1.0f, color};
+        m_triVerts.push_back(centre);
+        m_triVerts.push_back(p0);
+        m_triVerts.push_back(p1);
+        p0 = p1;
+    }
+}
+
+inline void DX9DrawContext::AppendDrawList(const OverlayDrawList& list) {
+    for (const OverlayVertex& v : list.TriVerts()) {
+        const Argb argb = (v.color & 0xFF00FF00u) | ((v.color & 0x000000FFu) << 16) | ((v.color & 0x00FF0000u) >> 16);
+        m_triVerts.push_back({v.x - 0.5f, v.y - 0.5f, 0.0f, 1.0f, argb});
+    }
+}
+
+inline void DX9DrawContext::DrawCross(float cx, float cy, float arm, Argb color, float thickness, float gap) {
+    if (arm <= gap) return;
+    DrawLine(cx - arm, cy, cx - gap, cy, color, thickness);
+    DrawLine(cx + gap, cy, cx + arm, cy, color, thickness);
+    DrawLine(cx, cy - arm, cx, cy - gap, color, thickness);
+    DrawLine(cx, cy + gap, cx, cy + arm, color, thickness);
+}
+
+// ---------- DX9Overlay --------------------------------------------------------
+//
+// Singleton-by-design: the Present hook is a free function, so we keep one
+// active overlay at a time. Every mod we ship has exactly one HUD.
+
+namespace detail9 {
+
+struct DX9State {
+    bool hookInstalled = false;
+    void* createDeviceTarget = nullptr;
+    HRESULT (__stdcall* origCreateDevice)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD,
+                                          D3DPRESENT_PARAMETERS*, IDirect3DDevice9**) = nullptr;
+
+    void* presentTarget = nullptr;
+    HRESULT (__stdcall* origPresent)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*) = nullptr;
+
+    void* swapChainPresentTarget = nullptr;
+    HRESULT (__stdcall* origSwapChainPresent)(IDirect3DSwapChain9*, const RECT*, const RECT*, HWND, const RGNDATA*,
+                                              DWORD) = nullptr;
+
+    // A device can own its vtable storage, which Release() invalidates.
+    std::array<void*, 119> deviceVTable{};
+    bool   deviceCaptured = false;
+    bool   presentHooked = false;
+
+    // The callback is assigned from the mod thread and invoked from the render
+    // thread; a settings hot-reload that re-registers it would otherwise tear
+    // the std::function under RenderFrame.
+    // Held by shared_ptr so RenderFrame copies a refcount rather than the functor.
+    // Copying a std::function allocates whenever its target exceeds the small-object
+    // buffer, which any lambda capturing more than a pointer or two does - that was a
+    // heap allocation per frame on the render thread, inside a hooked Present.
+    // Replacing the pointer keeps an in-flight invocation's target alive, which is one
+    // of the two things the copy was doing.
+    //
+    // The other is a deliberate behaviour change: the per-frame copy also gave each
+    // invocation a PRIVATE target, so a mutable lambda's captured state was rebuilt
+    // from the master every frame and every mutation thrown away. Invocations now
+    // share one target, so a `[n = 0](...) mutable` counter actually advances. That is
+    // almost certainly what anyone writing one intended, but it is a change.
+    std::shared_ptr<const DX9RenderCallback> callback;
+    std::mutex        callbackMutex;
+    DX9LogFn          logFn = nullptr;
+    DX9DeviceReadyFn  deviceReadyFn = nullptr;
+    std::atomic<DX9BeforePresentFn> beforePresentFn{nullptr};
+    bool              firstPresentLogged = false;
+    bool              firstChainPresentLogged = false;
+    bool              chainDeviceFailureLogged = false;
+};
+
+inline DX9State& State() {
+    static DX9State s;
+    return s;
+}
+
+inline void Log(const char* msg) {
+    auto& s = State();
+    if (s.logFn) s.logFn(msg);
+}
+
+inline void RenderFrame(IDirect3DDevice9* dev) {
+    auto& s = State();
+
+    std::shared_ptr<const DX9RenderCallback> callback;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        callback = s.callback;
+    }
+    if (!callback || !*callback) return;
+
+    D3DVIEWPORT9 vp = {};
+    if (FAILED(dev->GetViewport(&vp)) || vp.Width == 0 || vp.Height == 0) return;
+
+    DX9DrawContext dc(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
+    (*callback)(dc);
+    const auto& verts = dc.TriVerts();
+    if (verts.empty()) return;
+
+    // Snapshot the full device state and restore it after our draw, so the
+    // game's pipeline is left exactly as it was.
+    IDirect3DStateBlock9* block = nullptr;
+    if (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &block)) || !block) return;
+
+    dev->SetVertexShader(nullptr);
+    dev->SetPixelShader(nullptr);
+    dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    dev->SetTexture(0, nullptr);
+    dev->SetStreamSource(0, nullptr, 0, 0);
+    dev->SetIndices(nullptr);
+
+    dev->SetRenderState(D3DRS_LIGHTING, FALSE);
+    dev->SetRenderState(D3DRS_ZENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    dev->SetRenderState(D3DRS_FOGENABLE, FALSE);
+    dev->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+    dev->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    dev->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+    dev->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0000000F);
+
+    dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    dev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+
+    UINT triCount = static_cast<UINT>(verts.size() / 3);
+    if (triCount > 0) {
+        dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, triCount, verts.data(), sizeof(DX9OverlayVertex));
+    }
+
+    block->Apply();
+    block->Release();
+}
+
+// Set while this thread is inside either hooked Present, so a Present whose
+// implementation reaches the other one draws the frame once.
+inline bool& Presenting() {
+    static thread_local bool inside = false;
+    return inside;
+}
+
+// Set while a swap chain Present with D3DPRESENT_DONOTWAIT is answered
+// D3DERR_WASSTILLDRAWING: the game presents the same back buffer again, which
+// already carries this frame's drawing.
+inline bool& FrameAlreadyDrawn() {
+    static thread_local bool drawn = false;
+    return drawn;
+}
+
+inline void BeforeFrame(IDirect3DDevice9* dev) {
+    auto& s = State();
+    if (!s.firstPresentLogged) {
+        s.firstPresentLogged = true;
+        Log("dx9_overlay: Present hook fired (first invocation)");
+    }
+    RenderFrame(dev);
+    if (const auto before = s.beforePresentFn.load(std::memory_order_acquire)) before(dev);
+}
+
+inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, const RECT* dst,
+                                       HWND wnd, const RGNDATA* dirty) {
+    auto& s = State();
+    // Remove() nulls this; a thread that entered just before it ran has no
+    // trampoline left to forward to.
+    auto orig = s.origPresent;
+    // REACHABLE. MH_DisableHook restores the original bytes, but it does not drain
+    // threads already inside this detour - it relocates instruction pointers only
+    // within the target and trampoline regions, and this function is not in either.
+    // A thread that entered before Remove() and reaches here afterwards finds the
+    // trampoline nulled, which is the point: the alternative is calling through
+    // memory MH_RemoveHook has already returned to MinHook's pool. Returning an
+    // error is correct - the frame genuinely was not presented.
+    if (!orig) return D3DERR_INVALIDCALL;
+    if (Presenting()) return orig(dev, src, dst, wnd, dirty);
+    BeforeFrame(dev);
+    Presenting() = true;
+    const HRESULT hr = orig(dev, src, dst, wnd, dirty);
+    Presenting() = false;
+    return hr;
+}
+
+// Draws only for the device's implicit swap chain, the one the device's own
+// Present shows: an additional swap chain is another window, and the device's
+// bound target and viewport are not its back buffer.
+inline HRESULT __stdcall HookedSwapChainPresent(IDirect3DSwapChain9* chain, const RECT* src, const RECT* dst,
+                                                HWND wnd, const RGNDATA* dirty, DWORD flags) {
+    auto& s = State();
+    auto orig = s.origSwapChainPresent;
+    // Null after Remove(), as in HookedPresent.
+    if (!orig) return D3DERR_INVALIDCALL;
+    if (Presenting()) return orig(chain, src, dst, wnd, dirty, flags);
+
+    IDirect3DDevice9* dev = nullptr;
+    const HRESULT got = chain->GetDevice(&dev);
+    if (FAILED(got) || !dev) {
+        if (!s.chainDeviceFailureLogged) {
+            s.chainDeviceFailureLogged = true;
+            char line[128];
+            std::snprintf(line, sizeof(line),
+                          "dx9_overlay: a swap chain's device could not be read (HRESULT 0x%08lX), so its frames are not drawn on",
+                          static_cast<unsigned long>(got));
+            Log(line);
+        }
+        return orig(chain, src, dst, wnd, dirty, flags);
+    }
+    IDirect3DSwapChain9* implicit = nullptr;
+    const bool isImplicit = SUCCEEDED(dev->GetSwapChain(0, &implicit)) && implicit == chain;
+    if (implicit) implicit->Release();
+    if (isImplicit && !FrameAlreadyDrawn()) {
+        if (!s.firstChainPresentLogged) {
+            s.firstChainPresentLogged = true;
+            Log("dx9_overlay: swap chain Present hook fired (first invocation)");
+        }
+        BeforeFrame(dev);
+    }
+    dev->Release();
+
+    Presenting() = true;
+    const HRESULT hr = orig(chain, src, dst, wnd, dirty, flags);
+    Presenting() = false;
+    FrameAlreadyDrawn() = isImplicit && hr == D3DERR_WASSTILLDRAWING;
+    return hr;
+}
+
+// Hooks both Presents: the device's from s.deviceVTable, the swap chain's
+// from `device`'s implicit swap chain. Both go in or neither does.
+inline bool HookPresents(IDirect3DDevice9* device) {
+    auto& s = State();
+    IDirect3DSwapChain9* chain = nullptr;
+    const HRESULT got = device->GetSwapChain(0, &chain);
+    if (FAILED(got) || !chain) {
+        char line[128];
+        std::snprintf(line, sizeof(line), "dx9_overlay: the device's swap chain could not be read (HRESULT 0x%08lX)",
+                      static_cast<unsigned long>(got));
+        Log(line);
+        return false;
+    }
+    void* chainPresent = (*reinterpret_cast<void***>(chain))[3];  // IDirect3DSwapChain9::Present
+    chain->Release();
+    void* devicePresent = s.deviceVTable[17];  // IDirect3DDevice9::Present
+
+    MH_STATUS st = MH_CreateHook(devicePresent, reinterpret_cast<LPVOID>(&HookedPresent),
+                                 reinterpret_cast<LPVOID*>(&s.origPresent));
+    if (st == MH_OK) {
+        st = MH_CreateHook(chainPresent, reinterpret_cast<LPVOID>(&HookedSwapChainPresent),
+                           reinterpret_cast<LPVOID*>(&s.origSwapChainPresent));
+        if (st != MH_OK) MH_RemoveHook(devicePresent);
+    }
+    if (st == MH_OK) {
+        st = MH_EnableHook(devicePresent);
+        if (st == MH_OK) {
+            st = MH_EnableHook(chainPresent);
+            if (st != MH_OK) MH_DisableHook(devicePresent);
+        }
+        if (st != MH_OK) {
+            MH_RemoveHook(chainPresent);
+            MH_RemoveHook(devicePresent);
+        }
+    }
+    if (st != MH_OK) {
+        s.origPresent = nullptr;
+        s.origSwapChainPresent = nullptr;
+        char line[160];
+        std::snprintf(line, sizeof(line),
+                      "dx9_overlay: the Present hooks did not go in (MinHook status %d; device Present %p, swap chain Present %p)",
+                      static_cast<int>(st), devicePresent, chainPresent);
+        Log(line);
+        return false;
+    }
+    s.presentTarget = devicePresent;
+    s.swapChainPresentTarget = chainPresent;
+    s.presentHooked = true;
+    return true;
+}
+
+// Read the Present entry point from a temporary device so Install() can also
+// hook a game device that was created before the overlay.
+//
+// The probe is WINDOWED and is released before this returns, so it never takes
+// exclusive mode and never holds an adapter. D3DCREATE_FPU_PRESERVE is not
+// optional: creating a device without it switches the process FPU to single
+// precision, and the process here is a running game whose float maths we have
+// no business touching.
+inline bool HookPresentViaProbeDevice() {
+    auto& s = State();
+    if (s.presentHooked) return true;
+
+    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    if (!d3d) return false;
+
+    HWND window = CreateWindowExA(0, "STATIC", "", WS_OVERLAPPED, 0, 0, 1, 1,
+                                  nullptr, nullptr, nullptr, nullptr);
+    if (!window) {
+        d3d->Release();
+        return false;
+    }
+
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.Windowed = TRUE;
+    pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp.BackBufferFormat = D3DFMT_UNKNOWN;
+    pp.hDeviceWindow = window;
+
+    IDirect3DDevice9* probe = nullptr;
+    HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING |
+                                       D3DCREATE_FPU_PRESERVE |
+                                       D3DCREATE_NOWINDOWCHANGES,
+                                   &pp, &probe);
+    if (FAILED(hr) || !probe) {
+        DestroyWindow(window);
+        d3d->Release();
+        char line[160];
+        std::snprintf(line, sizeof(line),
+                      "dx9_overlay: probe device creation failed (HRESULT 0x%08lX); "
+                      "falling back to waiting for the game's own CreateDevice",
+                      static_cast<unsigned long>(hr));
+        Log(line);
+        return false;
+    }
+
+    std::copy_n(*reinterpret_cast<void***>(probe), s.deviceVTable.size(),
+                s.deviceVTable.begin());
+    s.deviceCaptured = true;
+
+    const bool hooked = HookPresents(probe);
+    probe->Release();
+    DestroyWindow(window);
+    d3d->Release();
+
+    if (!hooked) {
+        Log("dx9_overlay: Present hook via the probe device failed");
+        return false;
+    }
+    Log("dx9_overlay: device and swap chain Present hooks enabled via a probe device");
+
+    if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable.data());
+    return true;
+}
+
+// Captures the game's real IDirect3DDevice9 the moment it is created. This is
+// the fallback for a machine where the probe above could not create a device,
+// and Install() arms it only in that case - the probe creates a device of its
+// own, and an armed hook would catch that one instead.
+inline HRESULT __stdcall HookedCreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type,
+                                            HWND focusWnd, DWORD flags,
+                                            D3DPRESENT_PARAMETERS* pp,
+                                            IDirect3DDevice9** outDev) {
+    auto& s = State();
+    auto orig = s.origCreateDevice;
+    if (!orig) return D3DERR_INVALIDCALL;
+    HRESULT hr = orig(self, adapter, type, focusWnd, flags, pp, outDev);
+    if (SUCCEEDED(hr) && outDev && *outDev && !s.deviceCaptured) {
+        s.deviceCaptured = true;
+        std::copy_n(*reinterpret_cast<void***>(*outDev), s.deviceVTable.size(),
+                    s.deviceVTable.begin());
+        Log("dx9_overlay: captured game device via CreateDevice");
+
+        if (HookPresents(*outDev)) Log("dx9_overlay: device and swap chain Present hooks enabled on real device");
+        else Log("dx9_overlay: Present hook on real device failed");
+
+        if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable.data());
+    }
+    return hr;
+}
+
+} // namespace detail9
+
+inline DX9Overlay::~DX9Overlay() { Remove(); }
+
+inline void SetDX9OverlayLogger(DX9LogFn fn) { detail9::State().logFn = fn; }
+
+inline void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn) { detail9::State().deviceReadyFn = fn; }
+
+inline bool DX9Overlay::PresentHooked() const { return detail9::State().presentHooked; }
+
+inline void SetDX9BeforePresentCallback(DX9BeforePresentFn fn) {
+    detail9::State().beforePresentFn.store(fn, std::memory_order_release);
+}
+
+inline bool DX9Overlay::Install() {
+    auto& s = detail9::State();
+    if (s.hookInstalled) {
+        // Refused, not silently taken over. The hooks and the callback slot are
+        // process-wide but there is exactly one of each, so a second instance
+        // claiming them evicts the first: the live overlay stops rendering, and
+        // whichever instance is destroyed FIRST tears down the hooks and D3D
+        // resources out from under the other. Returning true here also told the
+        // caller it had a working overlay when it had stolen someone else's.
+        detail9::Log("dx9_overlay: Install refused, another DX9Overlay in this "
+                    "module already owns the hooks");
+        return false;
+    }
+
+    // Before either hook, so Present cannot fire between being hooked and having
+    // something to draw.
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        s.callback = std::make_shared<const DX9RenderCallback>(m_callback);
+    }
+    s.hookInstalled = true;
+    m_hookInstalled = true;
+
+    // Present outright, off a probe device's vtable. This is the whole path on
+    // any machine that can create a device.
+    if (detail9::HookPresentViaProbeDevice()) {
+        return true;
+    }
+
+    // Only if it could not. The CreateDevice hook is armed AFTER the probe and
+    // never before it: the probe creates a device of its own, so an armed hook
+    // catches that instead of the game's, reports our own probe as the captured
+    // device, and leaves the probe's own MH_CreateHook failing as
+    // already-created.
+    //
+    // Direct3DCreate9 returns only the IDirect3D9 factory (no device, no adapter
+    // exclusivity), so this succeeds even while the game is fullscreen. Its
+    // vtable is shared with the game's IDirect3D9, so hooking CreateDevice here
+    // fires when the game creates its device.
+    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    if (!d3d) {
+        detail9::Log("dx9_overlay: Direct3DCreate9 failed");
+        s.hookInstalled = false;
+        m_hookInstalled = false;
+        return false;
+    }
+    void** d3dVTable = *reinterpret_cast<void***>(d3d);
+    s.createDeviceTarget = d3dVTable[16];  // IDirect3D9::CreateDevice
+    d3d->Release();
+
+    const MH_STATUS created = MH_CreateHook(s.createDeviceTarget, &detail9::HookedCreateDevice,
+                                            reinterpret_cast<LPVOID*>(&s.origCreateDevice));
+    if (created != MH_OK) {
+        char line[96];
+        std::snprintf(line, sizeof(line), "dx9_overlay: MH_CreateHook(CreateDevice) failed (MinHook status %d)",
+                      static_cast<int>(created));
+        detail9::Log(line);
+        s.createDeviceTarget = nullptr;
+        s.hookInstalled = false;
+        m_hookInstalled = false;
+        return false;
+    }
+    if (MH_EnableHook(s.createDeviceTarget) != MH_OK) {
+        detail9::Log("dx9_overlay: MH_EnableHook(CreateDevice) failed");
+        MH_RemoveHook(s.createDeviceTarget);
+        s.createDeviceTarget = nullptr;
+        s.hookInstalled = false;
+        m_hookInstalled = false;
+        return false;
+    }
+
+    detail9::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
+    return true;
+}
+
+inline void DX9Overlay::Remove() {
+    // Keyed on this instance, not the shared state: an instance that never
+    // installed anything must not tear down the live overlay's hooks.
+    if (!m_hookInstalled) return;
+
+    auto& s = detail9::State();
+    // Targets AND trampolines are cleared. MH_DisableHook does NOT drain threads out
+    // of the user detour first - it freezes threads and relocates instruction pointers
+    // only within the target and trampoline regions, and HookedPresent is arbitrary
+    // code MinHook has never heard of, so a thread inside it is invisible.
+    // MH_RemoveHook then returns the trampoline to MinHook's pool for the next
+    // MH_CreateHook to reuse, so a straggler that skips the null check calls through
+    // freed, likely recycled memory. The detours' null branch is the only thing
+    // standing between that and a crash.
+    if (s.presentHooked) {
+        MH_DisableHook(s.presentTarget);
+        MH_DisableHook(s.swapChainPresentTarget);
+        MH_RemoveHook(s.presentTarget);
+        MH_RemoveHook(s.swapChainPresentTarget);
+        s.presentHooked = false;
+        s.presentTarget = nullptr;
+        s.swapChainPresentTarget = nullptr;
+        s.origPresent = nullptr;
+        s.origSwapChainPresent = nullptr;
+    }
+    if (s.createDeviceTarget) {
+        MH_DisableHook(s.createDeviceTarget);
+        MH_RemoveHook(s.createDeviceTarget);
+        s.createDeviceTarget = nullptr;
+        s.origCreateDevice = nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        s.callback = nullptr;
+    }
+    s.deviceCaptured = false;
+    s.hookInstalled = false;
+    m_hookInstalled = false;
+}
+
+// The shared slot is only written when this instance owns the hooks, or when nobody
+// does. Refusing a second Install() was not enough on its own: the documented usage
+// order is SetRenderCallback() then Install(), so instance B evicted A's callback
+// BEFORE it was ever told no, and A's overlay went blank while both objects still
+// reported success.
+inline void DX9Overlay::SetRenderCallback(DX9RenderCallback cb) {
+    m_callback = cb;
+    auto& s = detail9::State();
+    if (s.hookInstalled && !m_hookInstalled) {
+        detail9::Log("dx9_overlay: SetRenderCallback ignored, another overlay owns the hooks");
+        return;
+    }
+    std::lock_guard<std::mutex> lock(s.callbackMutex);
+    s.callback = std::make_shared<const DX9RenderCallback>(std::move(cb));
+}
+
+inline void DX9Overlay::SetRenderCallback(DX9DrawListCallback cb) {
+    SetRenderCallback(DX9RenderCallback([draw = std::move(cb)](DX9DrawContext& dc) {
+        OverlayDrawList list(dc.Width(), dc.Height());
+        draw(list);
+        dc.AppendDrawList(list);
+    }));
+}
+
+#endif // CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION
+// Non-implementation TUs see only the declarations above; method definitions
+// live in the impl TU and resolve at link time.
+
+} // namespace cameraunlock::rendering

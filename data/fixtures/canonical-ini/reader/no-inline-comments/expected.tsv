@@ -1,0 +1,9 @@
+# No inline comments, quotes or escapes: everything after '=' is the value.
+status	Readable
+format	1
+stamp	false
+key	General	B	true ; c	2	-
+key	General	C	"quoted"	3	-
+key	General	D	'x' # y	4	-
+key	General	E	a\\tb	5	-
+key	General	F	;starts	6	-

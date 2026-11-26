@@ -1,0 +1,4 @@
+# Section and key match ASCII case-insensitively, and a line names them as the file spells them.
+value	UdpPort	accepted	2	5000
+value	ToggleKey	refused	4	hotkeys	togglekey	Mouse4	Mouse4 is not one of the key names this file takes
+line	ToggleKey	Defaults.ini: line 4: [hotkeys] togglekey=Mouse4 is not read (Mouse4 is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y is used.

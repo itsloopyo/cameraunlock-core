@@ -1,0 +1,7 @@
+# RotationEnabled=maybe is invalid and PositionEnabled is missing: an invalid row makes the
+# mode invalid, whatever the other row is. The mod reads both as their defaults, both.
+binds	three-state
+preference	tracking_mode	invalid	both
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true

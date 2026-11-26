@@ -1,0 +1,6 @@
+# Section and key names in any ASCII case; the stamp and ConfigFormat still count.
+status	Readable
+format	1
+stamp	true
+key	cameraunlock	CONFIGFORMAT	1	2	-
+key	GeNeRaL	togglekey	End	4	-

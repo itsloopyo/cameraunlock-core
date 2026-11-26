@@ -1,0 +1,396 @@
+#include "cameraunlock/config/canonical_ini.h"
+
+#include "ascii_text_internal.h"
+#include "canonical_ini_internal.h"
+#include "cameraunlock/config/value_codecs.h"
+
+#include <algorithm>
+#include <climits>
+#include <cstddef>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+namespace cameraunlock::config {
+
+namespace detail {
+
+bool StartsWithUtf16Mark(std::string_view bytes) {
+    return bytes.size() >= 2 &&
+           ((bytes[0] == '\xFF' && bytes[1] == '\xFE') || (bytes[0] == '\xFE' && bytes[1] == '\xFF'));
+}
+
+}  // namespace detail
+
+namespace {
+
+using detail::CanonicalLineOfOffset;
+using detail::EqualsAsciiIgnoreCase;
+using detail::FoldAscii;
+using detail::StartsWithUtf16Mark;
+using detail::TrimSpaceOrTab;
+
+constexpr std::string_view kStampSection = "CameraUnlock";
+constexpr std::string_view kFormatKey = "ConfigFormat";
+
+// Calls visit(line, number) for each line, untrimmed and without its terminator.
+template <class Visit>
+void ForEachLine(std::string_view bytes, Visit visit) {
+    size_t pos = 0;
+    if (bytes.size() >= 3 && bytes.substr(0, 3) == "\xEF\xBB\xBF") pos = 3;
+    int number = 0;
+    while (pos < bytes.size()) {
+        size_t end = pos;
+        while (end < bytes.size() && bytes[end] != '\r' && bytes[end] != '\n') ++end;
+        visit(bytes.substr(pos, end - pos), ++number);
+        if (end < bytes.size() && bytes[end] == '\r' && end + 1 < bytes.size() && bytes[end + 1] == '\n') {
+            pos = end + 2;
+        } else {
+            pos = end + 1;
+        }
+    }
+}
+
+struct Header {
+    bool closed = false;
+    std::string_view name;
+    std::string_view trailing;
+};
+
+// `line` is trimmed and starts with '['.
+Header ParseHeader(std::string_view line) {
+    Header header;
+    const size_t close = line.find(']', 1);
+    if (close == std::string_view::npos) return header;
+    header.closed = true;
+    header.name = TrimSpaceOrTab(line.substr(1, close - 1));
+    header.trailing = TrimSpaceOrTab(line.substr(close + 1));
+    return header;
+}
+
+bool HasStampInBytes(std::string_view bytes) {
+    bool found = false;
+    ForEachLine(bytes, [&](std::string_view raw, int) {
+        const std::string_view line = TrimSpaceOrTab(raw);
+        if (found || line.empty() || line[0] != '[') return;
+        const Header header = ParseHeader(line);
+        found = header.closed && EqualsAsciiIgnoreCase(header.name, kStampSection);
+    });
+    return found;
+}
+
+// Every code unit above 0x7F becomes 0x80, which is not a byte the header rule or the
+// name "CameraUnlock" treats specially, so the header rule reads the result exactly as it
+// would read the units themselves. An odd last byte is not a unit and is dropped.
+std::string NarrowUtf16(std::string_view bytes) {
+    const bool little_endian = bytes[0] == '\xFF';
+    std::string narrow;
+    narrow.reserve(bytes.size() / 2);
+    for (size_t i = 2; i + 1 < bytes.size(); i += 2) {
+        const unsigned lo = static_cast<unsigned char>(bytes[little_endian ? i : i + 1]);
+        const unsigned hi = static_cast<unsigned char>(bytes[little_endian ? i + 1 : i]);
+        const unsigned unit = (hi << 8) | lo;
+        narrow.push_back(unit < 0x80 ? static_cast<char>(unit) : '\x80');
+    }
+    return narrow;
+}
+
+CanonicalDiagnostic MakeDiagnostic(CanonicalDiagnosticKind kind, int line, std::string_view section,
+                                   std::string_view key, std::string_view value) {
+    CanonicalDiagnostic d;
+    d.kind = kind;
+    d.lines.push_back(line);
+    d.section = std::string(section);
+    d.key = std::string(key);
+    d.value = std::string(value);
+    return d;
+}
+
+// ConfigFormat's number, or -1 when the value is not one: digits only, 1 or more.
+int ParseFormatNumber(std::string_view value) {
+    if (value.empty()) return -1;
+    long long number = 0;
+    for (char c : value) {
+        if (c < '0' || c > '9') return -1;
+        if (number < INT_MAX) number = std::min<long long>(number * 10 + (c - '0'), INT_MAX);
+    }
+    return number < 1 ? -1 : static_cast<int>(number);
+}
+
+void ReadFormat(CanonicalIni& doc, int stamp_header_line) {
+    doc.format_version = kConfigFormat;
+    const CanonicalSection* stamp = doc.FindSection(kStampSection);
+    if (stamp == nullptr) return;
+    const CanonicalValue* format = stamp->Find(kFormatKey);
+    if (format == nullptr) {
+        doc.diagnostics.push_back(
+            MakeDiagnostic(CanonicalDiagnosticKind::ConfigFormatMissing, stamp_header_line, stamp->name, "", ""));
+        return;
+    }
+    const int number = ParseFormatNumber(format->value);
+    if (number < 0) {
+        doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::ConfigFormatInvalid, format->line,
+                                                 stamp->name, format->key, format->value));
+        return;
+    }
+    doc.format_version = number;
+    if (number > kConfigFormat) {
+        doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::ConfigFormatNewer, format->line,
+                                                 stamp->name, format->key, format->value));
+    }
+}
+
+std::string JoinLines(const std::vector<int>& lines) {
+    std::string text;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (i > 0) text += (i + 1 == lines.size()) ? " and " : ", ";
+        text += std::to_string(lines[i]);
+    }
+    return text;
+}
+
+}  // namespace
+
+const CanonicalValue* CanonicalSection::Find(std::string_view key) const {
+    for (const CanonicalValue& value : values) {
+        if (EqualsAsciiIgnoreCase(value.key, key)) return &value;
+    }
+    return nullptr;
+}
+
+const CanonicalSection* CanonicalIni::FindSection(std::string_view name) const {
+    for (const CanonicalSection& section : sections) {
+        if (EqualsAsciiIgnoreCase(section.name, name)) return &section;
+    }
+    return nullptr;
+}
+
+const CanonicalValue* CanonicalIni::Find(std::string_view section, std::string_view key) const {
+    const CanonicalSection* found = FindSection(section);
+    return found == nullptr ? nullptr : found->Find(key);
+}
+
+CanonicalIni ParseCanonicalIni(std::string_view bytes) {
+    CanonicalIni doc;
+    if (StartsWithUtf16Mark(bytes)) {
+        doc.status = CanonicalReadStatus::Utf16;
+        return doc;
+    }
+    const size_t nul = bytes.find('\0');
+    if (nul != std::string_view::npos) {
+        doc.status = CanonicalReadStatus::NulByte;
+        doc.unreadable_line = CanonicalLineOfOffset(bytes, nul);
+        return doc;
+    }
+
+    // Index into doc.sections, or -1 above the first header and below one naming none.
+    int current = -1;
+    // Sections and each section's keys by folded name, so a file of many keys is read in
+    // one pass rather than comparing every line with every earlier one.
+    const auto fold = [](std::string_view text) {
+        std::string folded(text);
+        for (char& c : folded) c = FoldAscii(c);
+        return folded;
+    };
+    std::unordered_map<std::string, int> section_index;
+    std::vector<std::unordered_map<std::string, size_t>> key_index;
+    int stamp_header_line = 0;
+    ForEachLine(bytes, [&](std::string_view raw, int number) {
+        const std::string_view line = TrimSpaceOrTab(raw);
+        if (line.empty() || line[0] == ';' || line[0] == '#') return;
+
+        if (line[0] == '[') {
+            const Header header = ParseHeader(line);
+            current = -1;
+            if (!header.closed) {
+                doc.diagnostics.push_back(
+                    MakeDiagnostic(CanonicalDiagnosticKind::UnclosedSectionHeader, number, "", "", line));
+                return;
+            }
+            if (!header.trailing.empty()) {
+                doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::TextAfterSectionHeader, number,
+                                                         header.name, "", header.trailing));
+            }
+            if (header.name.empty()) {
+                doc.diagnostics.push_back(
+                    MakeDiagnostic(CanonicalDiagnosticKind::EmptySectionName, number, "", "", line));
+                return;
+            }
+            const auto known = section_index.emplace(fold(header.name), static_cast<int>(doc.sections.size()));
+            current = known.first->second;
+            if (known.second) {
+                doc.sections.push_back(CanonicalSection{std::string(header.name), {}, number});
+                key_index.emplace_back();
+                if (stamp_header_line == 0 && EqualsAsciiIgnoreCase(header.name, kStampSection)) {
+                    stamp_header_line = number;
+                }
+            }
+            return;
+        }
+
+        const size_t equals = line.find('=');
+        if (equals == std::string_view::npos) {
+            doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::MissingEquals, number, "", "", line));
+            return;
+        }
+        const std::string_view key = TrimSpaceOrTab(line.substr(0, equals));
+        const std::string_view value = TrimSpaceOrTab(line.substr(equals + 1));
+        if (key.empty()) {
+            doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::EmptyKey, number, "", "", line));
+            return;
+        }
+        if (current < 0) {
+            doc.diagnostics.push_back(
+                MakeDiagnostic(CanonicalDiagnosticKind::KeyOutsideSection, number, "", key, value));
+            return;
+        }
+        CanonicalSection& section = doc.sections[static_cast<size_t>(current)];
+        const auto known = key_index[static_cast<size_t>(current)].emplace(fold(key), section.values.size());
+        if (!known.second) {
+            CanonicalValue& existing = section.values[known.first->second];
+            existing.earlier_lines.push_back(existing.line);
+            existing.key = std::string(key);
+            existing.value = std::string(value);
+            existing.line = number;
+            return;
+        }
+        section.values.push_back(CanonicalValue{std::string(key), std::string(value), number, {}});
+    });
+
+    for (const CanonicalSection& section : doc.sections) {
+        for (const CanonicalValue& value : section.values) {
+            if (value.earlier_lines.empty()) continue;
+            CanonicalDiagnostic d =
+                MakeDiagnostic(CanonicalDiagnosticKind::DuplicateKey, 0, section.name, value.key, value.value);
+            d.lines = value.earlier_lines;
+            d.lines.push_back(value.line);
+            doc.diagnostics.push_back(std::move(d));
+        }
+    }
+    ReadFormat(doc, stamp_header_line);
+
+    std::stable_sort(doc.diagnostics.begin(), doc.diagnostics.end(),
+                     [](const CanonicalDiagnostic& a, const CanonicalDiagnostic& b) {
+                         if (a.lines.front() != b.lines.front()) return a.lines.front() < b.lines.front();
+                         return static_cast<int>(a.kind) < static_cast<int>(b.kind);
+                     });
+    return doc;
+}
+
+bool HasCanonicalStamp(std::string_view bytes) {
+    if (StartsWithUtf16Mark(bytes)) return HasStampInBytes(NarrowUtf16(bytes));
+    return HasStampInBytes(bytes);
+}
+
+namespace detail {
+
+std::vector<CanonicalKeyLine> CanonicalKeyLines(std::string_view bytes) {
+    std::vector<CanonicalKeyLine> found;
+    std::optional<std::string> section;
+    ForEachLine(bytes, [&](std::string_view raw, int number) {
+        const std::string_view line = TrimSpaceOrTab(raw);
+        if (line.empty() || line[0] == ';' || line[0] == '#') return;
+        if (line[0] == '[') {
+            const Header header = ParseHeader(line);
+            section.reset();
+            if (header.closed && !header.name.empty()) section = std::string(header.name);
+            return;
+        }
+        const size_t equals = line.find('=');
+        if (equals == std::string_view::npos) return;
+        const std::string_view key = TrimSpaceOrTab(line.substr(0, equals));
+        if (key.empty()) return;
+        found.push_back(CanonicalKeyLine{section, std::string(key), std::string(TrimSpaceOrTab(line.substr(equals + 1))), number});
+    });
+    return found;
+}
+
+}  // namespace detail
+
+const char* CanonicalReadStatusName(CanonicalReadStatus status) {
+    switch (status) {
+        case CanonicalReadStatus::Readable: return "Readable";
+        case CanonicalReadStatus::Utf16: return "Utf16";
+        case CanonicalReadStatus::NulByte: return "NulByte";
+    }
+    throw std::invalid_argument("CanonicalReadStatus " + std::to_string(static_cast<int>(status)) +
+                                " has no name");
+}
+
+const char* CanonicalDiagnosticKindName(CanonicalDiagnosticKind kind) {
+    switch (kind) {
+        case CanonicalDiagnosticKind::TextAfterSectionHeader: return "TextAfterSectionHeader";
+        case CanonicalDiagnosticKind::UnclosedSectionHeader: return "UnclosedSectionHeader";
+        case CanonicalDiagnosticKind::EmptySectionName: return "EmptySectionName";
+        case CanonicalDiagnosticKind::EmptyKey: return "EmptyKey";
+        case CanonicalDiagnosticKind::MissingEquals: return "MissingEquals";
+        case CanonicalDiagnosticKind::KeyOutsideSection: return "KeyOutsideSection";
+        case CanonicalDiagnosticKind::DuplicateKey: return "DuplicateKey";
+        case CanonicalDiagnosticKind::ConfigFormatMissing: return "ConfigFormatMissing";
+        case CanonicalDiagnosticKind::ConfigFormatInvalid: return "ConfigFormatInvalid";
+        case CanonicalDiagnosticKind::ConfigFormatNewer: return "ConfigFormatNewer";
+        case CanonicalDiagnosticKind::InvalidValue: return "InvalidValue";
+        case CanonicalDiagnosticKind::UnknownSection: return "UnknownSection";
+        case CanonicalDiagnosticKind::UnknownKey: return "UnknownKey";
+        case CanonicalDiagnosticKind::RetiredKey: return "RetiredKey";
+        case CanonicalDiagnosticKind::NonCanonicalConcept: return "NonCanonicalConcept";
+        case CanonicalDiagnosticKind::NoTrackingMode: return "NoTrackingMode";
+        case CanonicalDiagnosticKind::MisplacedKey: return "MisplacedKey";
+    }
+    throw std::invalid_argument("CanonicalDiagnosticKind " + std::to_string(static_cast<int>(kind)) +
+                                " has no name");
+}
+
+std::string DescribeCanonicalDiagnostic(const CanonicalDiagnostic& d) {
+    const std::string line = (d.lines.size() > 1 ? "Lines " : "Line ") + JoinLines(d.lines) + ": ";
+    const std::string format = std::to_string(kConfigFormat);
+    switch (d.kind) {
+        case CanonicalDiagnosticKind::TextAfterSectionHeader:
+            return line + "\"" + d.value + "\" after [" + d.section +
+                   "] is ignored. Comments go on their own line.";
+        case CanonicalDiagnosticKind::UnclosedSectionHeader:
+            return line + "\"" + d.value +
+                   "\" has no closing ], so the settings below it are ignored up to the next section header.";
+        case CanonicalDiagnosticKind::EmptySectionName:
+            return line + "\"" + d.value +
+                   "\" names no section, so the settings below it are ignored up to the next section header.";
+        case CanonicalDiagnosticKind::EmptyKey:
+            return line + "\"" + d.value + "\" has no setting name before the =, so it is ignored.";
+        case CanonicalDiagnosticKind::MissingEquals:
+            return line + "\"" + d.value + "\" is not a setting (it has no =), so it is ignored.";
+        case CanonicalDiagnosticKind::KeyOutsideSection:
+            return line + d.key + " is not under a section header, so it is ignored.";
+        case CanonicalDiagnosticKind::DuplicateKey:
+            return "[" + d.section + "] " + d.key + " is set on lines " + JoinLines(d.lines) + ". Line " +
+                   std::to_string(d.lines.back()) + " is used.";
+        case CanonicalDiagnosticKind::ConfigFormatMissing:
+            return line + "[" + d.section + "] has no ConfigFormat, so the file is read as format " + format + ".";
+        case CanonicalDiagnosticKind::ConfigFormatInvalid:
+            return line + d.key + "=" + d.value + " is not a format number, so the file is read as format " +
+                   format + ".";
+        case CanonicalDiagnosticKind::ConfigFormatNewer:
+            return line + d.key + "=" + d.value +
+                   " was written by a newer version of the mod. This version reads format " + format + ".";
+        case CanonicalDiagnosticKind::InvalidValue:
+            return line + "[" + d.section + "] " + d.key + "=" + d.value + " is not valid (" + d.detail +
+                   "), so the default is used.";
+        case CanonicalDiagnosticKind::UnknownSection:
+            return line + "[" + d.section + "] is not a section this mod reads, so everything in it is ignored.";
+        case CanonicalDiagnosticKind::UnknownKey:
+            return line + "[" + d.section + "] " + d.key + " is not a setting this mod reads, so it is ignored.";
+        case CanonicalDiagnosticKind::RetiredKey:
+            return line + "[" + d.section + "] " + d.key + " is a setting this mod no longer uses, so it is ignored.";
+        case CanonicalDiagnosticKind::NonCanonicalConcept:
+            return line + "[" + d.section + "] " + d.key + " is ignored. " + d.detail;
+        case CanonicalDiagnosticKind::NoTrackingMode:
+            return line + "RotationEnabled and PositionEnabled are both false, which is not a tracking mode, so both "
+                          "are read as their defaults.";
+        case CanonicalDiagnosticKind::MisplacedKey:
+            return line + "[" + d.section + "] " + d.key + " is ignored. This mod reads it as " + d.detail + ".";
+    }
+    throw std::invalid_argument(std::string("CanonicalDiagnosticKind ") + CanonicalDiagnosticKindName(d.kind) +
+                                " has no description");
+}
+
+}  // namespace cameraunlock::config

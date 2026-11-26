@@ -1,0 +1,1304 @@
+# Isolated input: testing a mod in a game, in the background
+
+Every in-game test of a mod runs with the game behind other windows, taking its
+keyboard and mouse from the mod's dev build instead of from the real devices.
+The person at the machine keeps their mouse, keyboard and foreground window, and
+several tests can run at once.
+
+**No test sends real keyboard or mouse input, and none brings the game to the
+foreground.** A game this cannot drive yet is a gap to close here first. That is
+how coverage grows: the first mod to meet a new kind of game adds the missing
+piece to core, and every later one gets it.
+
+- `cameraunlock/dev/input_script.h`: the command language. Pure, tested.
+- `cameraunlock/dev/directinput_state.h`: what a DirectInput keyboard and mouse
+  report for the input a script plays. Pure, tested.
+- `cameraunlock/dev/isolated_input.h`: the Win32 half, compiled into a dev build.
+- `cpp/tools/isolated_input_host`: that header as a DLL, for a mod with no native
+  code. `CameraUnlock.Core.Dev.IsolatedInput` is what a C# mod loads it with.
+- `powershell/IsolatedGameTest.psm1`: the lock on the game, the whole session
+  round a script block, launch, play, capture, proof, restore, a log wait and a
+  process sampler.
+- `data/isolated-input.json`: what is covered, and what to build for what is not.
+
+## Testing a title
+
+1. **Ask whether it is covered.** Before the first in-game test:
+
+   ```text
+   Import-Module cameraunlock-core/powershell/IsolatedGameTest.psm1
+   Assert-IsolatedInputCovers -BinaryPath <the binary that reads input> -ModHost native
+   ```
+
+   The binary is the game exe for most native engines and `UnityPlayer.dll` for a
+   Unity game. `-ModHost` is `native` for a C++ mod, `managed` for a C# one,
+   `script` for a mod with no native code of its own. If it throws, go to
+   [A game it does not cover yet](#a-game-it-does-not-cover-yet).
+
+2. **Wire the dev build.** In a source file compiled only into the dev build, define
+   `CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION`, include `<cameraunlock/dev/isolated_input.h>`,
+   and call `cameraunlock::dev::StartIsolatedInput(commandFile, &Log)` when the command file
+   exists: after `MH_Initialize`, before the mod's own hotkey thread starts.
+   far-cry-6-headtracking's `src/dev/isolated_input.cpp` is that file in a mod.
+   A C# mod has no such file: see [A C# mod](#a-c-mod).
+
+   The command file is `CameraUnlockInput.txt` beside the mod's DLL. Gating on it
+   keeps the same dev build answering to the real keyboard when the file is not
+   there. It never goes into a release build: with it on, the game does not answer
+   to the real keyboard.
+
+3. **Run the session** with `Invoke-IsolatedGameSession`, which takes the game's
+   rig, saves what the test changes, launches, runs your block, and puts
+   everything back on every way out. [A whole session](#a-whole-session) is the
+   call and a worked script.
+
+   Inside the block:
+
+   ```text
+   Invoke-GameInput -Session $session -Commands 'tap Space', 'wait 5000'      # title, menus, load
+   Test-IsolatedInputProof -Session $session -Commands <something visible> -Folder <scratch>
+   Set-TestPose -PoseFile $session.PoseFile -Yaw 15; Invoke-GameInput ...; Save-GameCapture ...
+   ```
+
+   Per game, the prepare step makes the game windowed and keeps it running
+   unfocused (Starfield needs `bAlwaysActive=1`). What is the game's own stays in
+   the mod's `.lab`: the way from the title screen into a save, its cheats, and
+   what to look for in a capture.
+
+4. **Prove it once per title, then trust it.** `Test-IsolatedInputProof` sends
+   something the game visibly reacts to and passes only if the picture changed
+   and the game never held the real foreground. Until it passes for a title,
+   nothing a script did in that title counts.
+
+Rules a run has to meet:
+
+- **A run in which the game held the foreground does not count.**
+  `Invoke-GameInput` samples the real foreground for the whole script and says
+  so. The real devices reach a foreground game, so that run is repeated.
+- **One session has a game at a time.** Take its rig before touching the game's
+  files, through `Invoke-IsolatedGameSession` or `Enter-GameRig`. Never delete a
+  lock, and never start the game round one. See
+  [One session at a time](#one-session-at-a-time).
+- **Only stop what the session started**, by process id. `Start-IsolatedGame`
+  refuses to launch while the game is already running: that one is someone's.
+- **Restore everything**, whether the run passed or not.
+- **A capture that never changes is a broken instrument.** Check
+  `Test-CaptureDiffers` on two captures a second apart, once per title.
+
+## One session at a time
+
+An installed game is one thing on the machine: one process, one set of saves,
+one settings file, and a share of one graphics card. Two sessions that both save
+the game's files, launch and restore do not fail loudly. Each puts back a save
+the other has played in. `Enter-GameRig` is the lock that stops that, and every
+session that touches a game takes it first, whichever repo or worktree it is
+working in.
+
+```text
+$rig = Enter-GameRig -Game <process name> -Owner <who you are> -What 'the lean check, run 3'
+try { ... } finally { Exit-GameRig -Rig $rig }
+```
+
+`Invoke-IsolatedGameSession` does this itself. Call `Enter-GameRig` directly for
+work on a game that is not a session: a deploy into the game folder, a build
+whose output a running game would load.
+
+- **The lock is keyed by the game and lives outside every repo**, in
+  `%LOCALAPPDATA%\CameraUnlock\rig\<process name>\lock`. Two worktrees of one
+  mod, and two mods for one game, meet the same lock.
+- **It says who has it.** `owner.json` in the lock holds the owner's name, the
+  process id, when it was taken, `-What`, and where the session saved the
+  game's files. `Get-GameRig -Game <name>` shows it, with whether the lock is
+  live and who is waiting.
+- **It waits, oldest first.** A session that finds the rig taken queues and is
+  served in the order it asked, for an hour by default (`-WaitSeconds`; 0 takes
+  the rig now or throws). There is nothing to poll and no race to win. While it
+  waits it prints who holds the rig and how many asked before it, each time
+  that changes. A `-Waiting` block is handed that line in place of the print.
+- **It is on the hivemind board.** Run by an agent (Claude Code or Codex) on a
+  machine with [hivemind](https://github.com/itsloopyo/hivemind) installed,
+  taking the rig runs `hivemind reserve --quiet rig-<process name>` with the
+  owner and `-What`, and releasing it runs `hivemind release`, so the other
+  agents see who has which game in `hivemind status`. A rig left with its
+  running game (`-KeptIn`) stays on the board. It is a copy for them to read:
+  this lock alone decides who gets the rig, and waiters are not on the board.
+  When hivemind refuses, as it does an agent that has not joined, a warning
+  says so and the rig is held all the same.
+- **Only the session that took a lock releases it.** `Exit-GameRig` throws, and
+  removes nothing, for a lock that is someone else's.
+- **A lock is taken over only when its taker's process has gone and the game is
+  not running.** The game alone keeps a lock live, so a session that starts the
+  game in one process and stops it in another holds the rig in between.
+- **A lock left by a session that never put the game's files back is not taken
+  over.** `Enter-GameRig` throws and names the folder that session saved into.
+  Run `Restore-GameTestState -Folder` on it, then ask again.
+- **A game running with no lock on it was started by hand**, by the person at
+  the machine or by a script that does not take the rig. `Enter-GameRig` waits
+  for it to end.
+- **A session whose own process was killed with its game up still holds the
+  rig**, and nothing will ever stop that game for it. Whoever waits is told the
+  holder's process has gone, and `Get-GameRig` names the file the session is
+  kept in when it was started with `-SessionFile`.
+  `Stop-IsolatedGameSession -SessionFile <that file>` then stops the game, puts
+  its files back and releases the rig, from any process. It cannot tell a
+  killed runner from a session that is between two of its own processes, so
+  only do it for a runner known to do the whole run in one.
+
+A script that leaves the game running when it ends, to be run again to restart
+it, leaves its lock with the game instead of releasing it:
+
+```text
+$kept = Join-Path $PSScriptRoot 'rig-token.json'
+$rig = Enter-GameRig -Game <process name> -Owner <who you are> -KeptIn $kept -StopKept
+try { <deploy, launch, wait for the game's process> } finally { Exit-GameRig -Rig $rig -KeptIn $kept }
+```
+
+While the game runs, `Exit-GameRig -KeptIn` writes the lock's token to that file
+and leaves the lock held by the game alone. The next `Enter-GameRig -KeptIn`
+takes it back, from any process, and the game left up is that run's to stop.
+With the game gone the rig is released and the file removed. One file serves
+every such script of a repo. A script of the same repo that wants the rig from
+the start (a session, above all) calls `Stop-KeptGame -Game <name> -KeptIn $kept`
+first: it stops the game left up and releases its lock, and does nothing when
+none is kept.
+
+The lock is left with processes, by process id, and with no others: the ones it
+was left with before that still run, and whatever of the game's names (the game,
+and anything in `-Processes`) started after the script took the rig. A game that
+was already up when the script came is never the script's, so `-StopKept` and
+`Stop-KeptGame` do not touch one someone started by hand, and a script stops the
+game it left through `-StopKept`, never by process name. Once the processes a
+lock was left with have ended the lock is not live and the file is stale:
+`Enter-GameRig` then waits for whatever of that name is running. A script that
+ends before the game's own process has appeared has left the lock with nothing,
+so wait for that process before the script ends.
+
+A process that takes a kept lock back and dies with the game still up (a tool
+timeout on a long wait) does not strand it: the next `Enter-GameRig -KeptIn`
+takes it back again, for as long as the processes it was left with still run.
+
+Work that wants the whole card (`-WholeGpu`, below) is refused at once while a
+game left running holds a rig and nobody who asked before it is still waiting.
+Nothing says when that game will end, and every session that asked after the
+waiter would wait behind it. The refusal names the
+file `Stop-KeptGame` needs.
+
+Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
+image generation run, a benchmark. It waits until no rig is held, and no game's
+rig is given out while it holds. It needs no game:
+
+```text
+$rig = Enter-GameRig -WholeGpu -Owner <who you are> -What 'eight pictures'
+try { & python generate.py --count 8 } finally { Exit-GameRig -Rig $rig }
+```
+
+Run the work from the PowerShell that took the lock: with no game to keep it
+live, the lock of a process that has ended is anyone's to take over. Hold it for
+a batch, not for an evening, because every game session on the machine waits
+behind it.
+
+While it waits, a whole-card waiter holds off new rigs only once it is next on
+every rig: once nobody who asked before it is still waiting. Until then a
+session that asked after it takes a free copy or a free game, so copies are not
+left idle while the waiter could not start anyway. The waiter pays for that: a
+rig taken in the meantime and held past the moment the waiter comes first holds
+it up for as long. It is never starved: a ticket is never numbered before one
+already in the queue, so the sessions ahead of it only leave, and once it is
+first nothing new is given out, so it starts when the last held rig comes back.
+While it is first, a rig held for a long time keeps every other copy idle until
+it comes back.
+
+The lock is a convention, not a fence. A session that never asks is not seen,
+and a script that still calls `Start-IsolatedGame` without the rig runs beside
+whoever holds it.
+
+Taking and releasing happen inside one named mutex, so no two sessions ever
+decide on the same state, and the lock folder is renamed into place with its
+owner record already in it. A folder made with `New-Item -ItemType Directory`
+is not a lock: PowerShell looks and then makes, and in Project Zomboid on
+2026-10-05 three runs started in the same second got through one.
+
+### Several copies of one game at once
+
+One copy of a game is one test at a time, whoever waits. A game that will run
+from a copy of its own install can be kept in several private copies, so that
+several sessions test it at once. Each copy has its own exe name (so its own
+process name and its own lock), its own data folder and its own mod config, and
+shares nothing another copy writes. `-Pool` names every copy and takes
+whichever is free first:
+
+```text
+$rig = Enter-GameRig -Pool PZRig1, PZRig2, PZRig3 -Owner <who you are> -What 'the lean check'
+try { <run the copy named $rig.Game> } finally { Exit-GameRig -Rig $rig }
+```
+
+The queue still serves whoever asked first. A session gets a copy beside the
+sessions that asked before it only while there is a free copy for each of them
+as well, and a copy that is the only one a session ahead may take is left for
+it. A pool of one is `-Game`. `-Token` and `-KeptIn` take back one game's lock
+and so stay `-Game` only.
+
+`Invoke-IsolatedGameSession -Slots` is the session over a pool. Each slot is a
+hashtable with the copy's `ProcessName` and any of `Launch`, `ModFolder`,
+`WorkingDirectory`, `IniPath`, `Port`, `Arguments`, `Environment` and
+`StateFolder`, each of which replaces the value given to the session. The
+session runs with the slot it took and carries it whole in `Slot`, keys of the
+caller's own included, and `-Prepare` is handed the session, so it can build
+into that copy:
+
+```text
+$slots = 1..3 | ForEach-Object { @{ ProcessName = "PZRig$_"; Launch = "$copies\$_\PZRig$_.exe"; ModFolder = "$copies\$_"
+                                    Port = $port + $_; Arguments = @("-cachedir=$copies\$_\data") } }
+Invoke-IsolatedGameSession -Slots $slots -Owner <who you are> -Prepare { param($s) ... } -Run { param($s) ... }
+```
+
+Every copy is still a game on the graphics card. `-WholeGpu` waits for every
+copy that is held and holds them all off while it runs.
+
+### How many rigs the machine runs at once
+
+Each pool and each game queues on its own, so on their own they let as many
+rigs run as there are copies and games. `Set-GameRigLimit -Count <n>` caps the
+rigs held at once, of every game together, and `Enter-GameRig` queues a session
+past it: whoever asked first, for any game, gets the next free place, unless
+every game it may take is held. The number is the machine's and is kept in the
+rig root (`max-rigs.txt`), outside every repo. Measure it from the rigs
+themselves: on 2026-10-26 five Project Zomboid rigs, two game copies at up to
+10 GB private each and three offline renders at 9.5 to 11 GB, left 7 GB free of
+62, so that machine runs four.
+
+## A whole session
+
+`Invoke-IsolatedGameSession` is the run a mod's `.lab/isolated.ps1` otherwise
+writes out by hand. In order:
+
+1. Takes the game's rig, waiting its turn, then runs `-Enter` with the session.
+   Nothing has been saved yet, so this is where to take a second lock that
+   other users of the game still go by, and to wait out one of them that is
+   still putting the game's files back.
+2. Saves `-Files` and `-Folders` into `-StateFolder` (`Save-GameTestState`).
+3. Runs `-Prepare`: build and deploy the dev build, change the game's settings.
+   A build made here cannot land under another session's running game.
+4. Writes `-Port` into `-IniPath` (`Set-ModTestPort`), and starts the pose
+   sender on it when `-PoseFile` is given.
+5. Launches (`Start-IsolatedGame`), from `-WorkingDirectory` and with
+   `-Environment` set for the launch alone when those are given. `-Launched`
+   runs as the game's process appears, before the settling: a sampler started
+   there has the process from its first seconds.
+6. Runs `-Run` with the session.
+7. Stops the game and the pose sender, runs `-Collect`, puts every file and
+   folder back, runs `-Leave`, releases the rig. `-Leave` is `-Enter`'s other
+   half, and runs even when `-Enter` threw: it must do nothing where `-Enter`
+   did nothing.
+
+Step 7 runs however the call ends: the block throwing, the game not starting,
+the prepare step failing. Its order is the order of what each part protects:
+
+- **The game first.** The stop returns once the game's process has gone, which
+  is when the files it had loaded come free. A game that has not stopped throws
+  at once, as `the game (pid N) has not stopped, so nothing was put back under
+  it and the rig is still held`, with the reason after it: the stop was
+  refused, or the process was ended and had still not gone 120 seconds later.
+  Nothing is put back under a game that is still there, the rig stays held, and
+  the session can be stopped again once the game has gone
+  (`Stop-IsolatedGameSession -SessionFile`).
+- **Then the game's files.** `-Collect` runs, then the restore. The rig is
+  released only once the files are back, so a restore that fails leaves the
+  game refused to everyone, with the folder to restore named, until someone has
+  run `Restore-GameTestState` on it.
+- **The host DLL of a `-ModHost managed` session last**, once the files are
+  back. It is a copy of core's own in the mod folder and nothing of the game's,
+  so one that will not delete never fails the session: see
+  [A host DLL that will not delete](#a-host-dll-that-will-not-delete).
+- `-Leave`, and the rig is released. A `-Collect` or `-Leave` that threw is
+  thrown once everything else is done.
+
+`Stop-IsolatedGame` waits on the process itself, not with `Wait-Process`.
+Measured 2026-10-08 with a stand-in that had touched 4 GB of memory and loaded
+the host DLL: `Wait-Process` returned 17 ms after `Stop-Process -Force`, with
+the process still listed and the DLL still refusing to be deleted, and both
+went together 240 ms later. A stand-in of 2 GB took 140 ms and one of 9 MB was
+gone before `Wait-Process` returned. On 2026-10-07, an evening the machine was
+short of commit, a Project Zomboid had not gone 25 seconds after its stop: the
+run's log shows the DLL tried for 10 seconds and the process then waited on
+for 15. That is what the 120 seconds are for.
+
+A mod's `.lab/isolated.ps1` on it:
+
+```text
+param([Parameter(Mandatory)][string]$Name, [string]$Owner = $env:RIG_OWNER)
+$ErrorActionPreference = 'Stop'
+$repo = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $repo 'cameraunlock-core\powershell\IsolatedGameTest.psm1')
+
+$game  = '<the game folder>'
+$saves = '<the folder the game keeps its saves in>'
+$prefs = '<the settings file of the game>'
+$asi   = Join-Path $game '<Mod>.asi'
+$ini   = Join-Path $game 'CameraUnlock.ini'
+$log   = Join-Path $game '<Mod>.log'
+$out   = Join-Path $PSScriptRoot "runs\$Name"
+New-Item -ItemType Directory -Force $out | Out-Null
+
+Invoke-IsolatedGameSession -ProcessName '<Game>' -Launch 'steam://rungameid/<id>' -ModFolder $game `
+    -Owner $Owner -What "isolated.ps1 $Name" `
+    -Files $asi, $prefs, $log -Folders $saves -StateFolder (Join-Path $PSScriptRoot 'state') `
+    -IniPath $ini -Port (Get-ModTestPort -RepoName (Split-Path -Leaf $repo)) -PoseFile (Join-Path $out 'pose.txt') `
+    -Prepare {
+        # build the dev build and copy it to $asi; make the game windowed and running unfocused in $prefs
+    } `
+    -Run {
+        param($session)
+        Wait-GameLogLine -Path $log -Match '<the line the mod logs once it is in>' -Session $session | Out-Null
+        Invoke-GameInput -Session $session -Commands 'tap Space', 'wait 5000' | Out-Null    # the way into the save
+        $sampler = Start-GameProcessSampler -ProcessId $session.ProcessId -Path (Join-Path $out 'process.csv')
+        Set-TestPose -PoseFile $session.PoseFile -Yaw 15
+        $played = Invoke-GameInput -Session $session -Commands 'tap Insert', 'wait 500'
+        if ($played.GameHeldForeground) { throw 'the game held the foreground: this run does not count' }
+        Save-GameCapture -Session $session -Path (Join-Path $out 'yaw15.png') | Out-Null
+        Stop-GameProcessSampler -Sampler $sampler | Out-Null
+    } `
+    -Collect { Copy-Item $log, $ini $out -Force }
+```
+
+What is left in the script is the game's: its paths, the build, the way into a
+save, the inputs and what to capture. A C# mod adds `-ModHost managed`.
+
+The parts, for a script that needs one alone:
+
+- **`Save-GameTestState -Files ... -Folders ...`** takes whole folders as well as
+  files. Name a folder for anything the game writes while it runs: a save folder
+  gains files as the game plays, and only putting the folder back removes them.
+  `Restore-GameTestState` mirrors a folder back with robocopy. It never empties
+  the folder first, it tries a file the stopped game still holds for 20 seconds,
+  and when it gives up the folder has everything else in place, the saved copy is
+  still there and it can be run again. Remove-then-copy left Project Zomboid's
+  save folder half deleted once, on one locked file. `-RetrySeconds` gives a
+  single file the same patience, for a DLL the game holds after it has gone.
+- **`Set-ModTestPort -IniPath <config> -Port <port>`** replaces the last
+  `UdpPort` line and keeps every other byte. A config that does not exist
+  throws: a mod on the canonical config imports its older settings only while
+  `CameraUnlock.ini` is absent, so a test that made the file would not test what
+  a player gets. `-Create` is for the test that means to.
+- **`Wait-GameLogLine -Path <log> -Match <regex> -TimeoutSeconds 120`** returns
+  the line and its number, or throws with the log's last line. With `-Session`
+  it stops waiting when the game has gone. A log left by an earlier run can hold
+  the line already: delete it in `-Prepare`, or pass `-After` a line number.
+- **`Start-GameProcessSampler -ProcessId <pid> -Path <csv>`** writes a row every
+  two seconds (`-IntervalSeconds`): `time`, `elapsedSeconds`, `privateMB`,
+  `workingSetMB`, `dedicatedVideoMB`, `cpuSeconds`. `dedicatedVideoMB` is the sum
+  of Windows' `GPU Process Memory` counters for the process, and is empty in a
+  row where Windows had none. `cpuSeconds` counts from the start of the process,
+  so the load between two rows is the difference over the time between them. It
+  ends by itself when the process goes, and `Stop-GameProcessSampler` ends it
+  between two rows.
+
+### A session over several processes
+
+A session driven a step at a time (start, look at a capture, decide what to
+play, stop) runs over several PowerShell processes. `Start-IsolatedGameSession`
+and `Stop-IsolatedGameSession` are the two halves of `Invoke-IsolatedGameSession`,
+with the session kept in a file between them:
+
+```text
+# start
+Start-IsolatedGameSession ... -SessionFile $sessionFile | Out-Null
+# play, any number of times
+$session = Get-IsolatedGameSession -SessionFile $sessionFile
+Invoke-GameInput -Session $session -Commands $Commands
+# stop
+Stop-IsolatedGameSession -SessionFile $sessionFile -Collect { ... }
+```
+
+`Invoke-GameInput` writes the session back to its file with each script, so the
+next process has the sequence it reached. Call `Save-IsolatedGameSession` after
+changing the session by hand: a new `ProcessId` once a launcher has handed over,
+a property of the mod's own.
+
+The rig stays held between the processes, by the running game. If the game goes
+before the stop, the session's saved state is what keeps the rig from being
+taken over, and `Stop-IsolatedGameSession` still restores and releases.
+
+`Invoke-IsolatedGameSession` takes `-SessionFile` too. The session is written
+there as soon as the game's process appears, before the settling, so a run
+whose PowerShell is killed at any point after that can be ended by another
+process with `Stop-IsolatedGameSession -SessionFile`. Give each run a file of
+its own (one named for `$PID`): a start refuses a file that already holds a
+session, before it has asked for the rig.
+
+## A C# mod
+
+A C# mod cannot compile `isolated_input.h`, so the detours come in a DLL of
+core's, `CameraUnlockIsolatedInput.dll`, and the mod's dev build loads it.
+
+1. **Build the host DLL once per core checkout**, and again when
+   `isolated_input.h` changes:
+
+   ```text
+   pixi run build-isolated-input-host
+   ```
+
+   or, where pixi is not set up (a mod's submodule checkout), the two commands
+   that task runs, from the core folder:
+
+   ```text
+   cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build
+   cmake --build cpp/tools/isolated_input_host/build --config Release
+   ```
+
+   It lands at `cpp/tools/isolated_input_host/build/Release/CameraUnlockIsolatedInput.dll`:
+   x64, MinHook and the C++ runtime linked in, one export. It is never committed
+   and never goes into a mod's package.
+
+2. **Call the entry point from the dev build**, in code a release build does not
+   compile, as the plugin starts (`Awake` in a BepInEx plugin):
+   `CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked(modFolder, log)`, where
+   `modFolder` is the folder the plugin's DLL is in and `log` takes one line of
+   text. In a BepInEx 5 plugin that is
+   `IsolatedInput.StartIfAsked(Path.GetDirectoryName(Info.Location), line => Logger.LogInfo(line))`.
+
+   With no `CameraUnlockInput.txt` in that folder it does nothing and returns
+   false, so the same dev build answers to the real keyboard. With the file
+   there it loads `CameraUnlockIsolatedInput.dll` from the same folder, starts
+   it and returns true. It throws when the file is there and the DLL is missing,
+   does not load, or does not start, and the message says which. Let it throw:
+   a test session that believes the detours are in when they are not sends the
+   game nothing.
+
+3. **Start the session with `-ModHost managed`.** `Start-IsolatedGame` then
+   copies the host DLL into `-ModFolder` beside the command file
+   (`Copy-IsolatedInputHost` is that step alone), and `Stop-IsolatedGame`
+   removes the copy. `-HostDll <path>` names a build that is not this checkout's
+   x64 one, such as a 32-bit build (`-A Win32` and a build folder of its own) for
+   a 32-bit game.
+
+   It is copied, and under that one name, because that is where every dev build
+   looks for it: `StartIfAsked` loads `CameraUnlockIsolatedInput.dll` from the
+   mod folder it is handed, and that code is compiled into each mod at the core
+   commit the mod pins.
+
+### A host DLL that will not delete
+
+Windows deletes no DLL that a process still has loaded and writes over none,
+and it renames one freely. The copy in the mod folder is loaded by the game, so
+it comes free when the game's process has gone, which the stop waits for.
+Anything else that still has it is not the session's to wait on, and neither
+the stop nor the next start depends on it:
+
+- **At the stop**, a copy that will not delete for 10 seconds is moved aside as
+  `CameraUnlockIsolatedInput.dll.left-<id>` in the same folder, and a warning
+  says so, with the path, the error and the process Windows names as having it
+  open or loaded. The session ends as it should: the game stopped, its files
+  back, the rig released. `Stop-IsolatedGame` by itself warns the same way and
+  does not throw.
+- **At the start**, a copy an earlier run left is deleted, or moved aside the
+  same way when it is still loaded, with the same warning, and the fresh copy
+  goes in under the name the mod loads.
+- **Every start and stop** in a folder deletes the `.left-` files there that
+  have come free, and says nothing about one that has not.
+- A copy that can be neither deleted nor moved (open in a process that shares
+  nothing) is left where it is with a warning at the stop. Only at the start
+  is it an error, after 10 seconds, naming the process, with nothing launched.
+
+The host logs to `CameraUnlockIsolatedInput.log` in the mod folder, keeping the
+run before it as `CameraUnlockIsolatedInput.prev.log`. What the native route
+writes to the mod's own log is in there: which paths the game reads, each script
+played, each time the foreground was handed back. `Stop-IsolatedGame` leaves both
+logs to be read, so name them in `Save-GameTestState -Files` to have the restore
+remove them.
+
+The DLL's start is `int CameraUnlockStartIsolatedInput(const wchar_t* commandFile)`:
+0 when it started, 1 when MinHook did not initialise, 2 when a detour could not
+be installed (none is left in), 3 when it was already started in this process.
+Loading the DLL starts nothing.
+
+`int CameraUnlockHoldIsolatedKey(int vk, int down)` holds a virtual key down
+(`down` 1) or lets it go (0) for `GetAsyncKeyState`, `GetKeyState` and
+`GetKeyboardState` alone, and posts nothing to the game's window: 0 when held, 1
+before the start, 2 for a key code outside 1 to 255. It is for a harness inside
+the game that feeds the game's own keyboard another way and has to reach the
+mod's hotkey poller as well, which reads `GetAsyncKeyState`.
+
+For a Unity game the binary that reads input is `UnityPlayer.dll`, and a native
+plugin of the game can read input too: Untitled Goose Game ships Rewired's
+`Rewired_DirectInput.dll`, which imports `dinput8.dll`. Run `Get-GameInputPaths`
+on each.
+
+Checked outside a game, 2026-10-04 (`pixi run test-isolated-input-host`): Windows
+PowerShell loaded the net472 `CameraUnlock.Core`, `StartIfAsked` started the host,
+every detour went in, and with a script holding `A` down `GetKeyState`,
+`GetKeyboardState` and `GetAsyncKeyState` each reported `A` and no other key.
+That process has no window, so it says nothing about what a game's window
+receives. Untitled Goose Game is the first game driven this way: see
+[Measured](#measured).
+
+## A Java agent mod
+
+A mod that is a Java agent in a game on a JVM has no native code that could
+compile `isolated_input.h`, and loads the same host DLL a C# mod does.
+
+1. Build the host DLL as for [a C# mod](#a-c-mod).
+2. In the dev agent, when `CameraUnlockIsolatedInput.dll` and
+   `CameraUnlockInput.txt` are both in the folder it is given, load the DLL
+   through `java.lang.foreign` (`SymbolLookup.libraryLookup`) and call
+   `CameraUnlockStartIsolatedInput` with the command file's path as a
+   NUL-terminated UTF-16 string. Throw unless it answers 0.
+3. Start the session with `-ModHost managed`, which copies the DLL into
+   `-ModFolder`. `Assert-IsolatedInputCovers` takes `-ModHost jvm`.
+4. A probe that feeds the game's keyboard from Java (Project Zomboid's) reaches
+   the mod's hotkeys too by calling `CameraUnlockHoldIsolatedKey` on the same
+   DLL for each key it presses and lets go.
+
+Where the JVM is told what to load through the launch's environment
+(`JAVA_TOOL_OPTIONS`), `Invoke-IsolatedGameSession -Environment` sets it for the
+launch alone.
+
+An LWJGL game reads its keyboard and mouse through GLFW, and no import table of
+the game shows it: Project Zomboid's exe imports no input API, `lwjgl.dll`
+imports only `KERNEL32.dll`, and `glfw.dll` is packed inside the game's jar. A
+copy with the same bytes is unpacked in an `lwjgl_<user>` folder under the temp
+folder. `Get-GameInputPaths` on that file shows what GLFW itself reads. See
+[Measured](#measured) for where that stands.
+
+## A game it does not cover yet
+
+`Assert-IsolatedInputCovers` throws with what to build, taken from
+`data/isolated-input.json`. Then:
+
+1. Build what it names, in core: detours go in `isolated_input.h`, anything that
+   is not Win32 gets a tested pure half beside `input_script.h`.
+2. Prove it in the game with `Test-IsolatedInputProof`.
+3. Change the entry to `supported` and name the game under `proven_in`, add what
+   was measured to [Measured](#measured), and commit and push core.
+4. Bump the mod and carry on with the test.
+
+A game whose input path is in no entry at all gets a new entry, with what an
+import table shows for it, in the same change.
+
+Stop and say so, instead of building, only where the detours would be a risk to
+the person's account: a game with anti-cheat. Name it in the mod's notes and
+test that title by hand with its owner.
+
+## The command file
+
+The harness writes the whole file at once: a whole number on the first line,
+commands after it. The mod plays it each time the number changes and writes
+`<file>.done` holding that number, or the number and what went wrong. Every line
+is parsed before any is played, so a script with a mistake in it sends the game
+nothing. Whatever the file holds when the game starts is not played.
+
+```text
+down <key>            press and hold: a key name, or Ctrl, Shift or Alt
+up <key>              release it
+tap <binding> [ms]    press and release, held ms (default 60); a chord works: Ctrl+Shift+U
+post <key> [ms]       the key as window messages alone, held ms (default 60), to every window of the game
+activate              tell every window of the game it has the foreground
+mouse <left|right|middle> <down|up|click>
+move <dx> <dy>        relative mouse movement, in counts
+cursor <x> <y>        put the mouse cursor at a point of the game window's client area, in pixels
+text <characters>     typed one character at a time, to the end of the line
+wait <ms>
+pad <n> <button> <down|up|tap>        a controller button: a b x y lb rb ls rs start back up down left right
+pad <n> stick <left|right> <x> <y>    a stick held at -1 to 1 each way, up positive
+pad <n> trigger <left|right> <pull>   a trigger held at 0 to 1
+```
+
+`pad` is an XInput controller, `n` from 0 to 3. A controller is plugged in from
+its first command on and holds what it was last told, so a stick is let go with
+`pad 1 stick left 0 0`. A `tap` holds the button 150 ms: a pad is polled once a
+frame. The real controllers are not read while isolated input is on.
+
+Key names are the ones hotkey lists use (`data/keys.json`). A key with no name is
+its code: the backquote is `tap 0xC0`, the digit 2 is `tap 0x32`.
+
+`post` is for a menu that `tap` does not reach. It posts `WM_KEYDOWN`, the `WM_CHAR`
+the key types (a letter in lower case) and, after the hold, `WM_KEYUP`, to every
+top-level window of the game process, shown or not. Nothing else sees it: not raw
+input, DirectInput, GameInput or the key state functions, so a game that reads its
+keys any of those ways does not see a `post`. It is sent even where the game
+registered its keyboard with `RIDEV_NOLEGACY`, which `tap` respects. Mirror's Edge
+ignored `tap Return` at "Press Any Key" and went on to the rooftop after `post Return`.
+In Dishonored `post Return` passed the mission briefing's "Press any key", but did
+nothing on the main menu, nor did posted arrow keys; there `cursor` on CONTINUE and a
+left button held 250 ms started the game (2026-11-02). Batman: Arkham City
+went on the same way from a separate tool that posts these messages; `post` has not
+been run there.
+
+`activate` posts `WM_ACTIVATEAPP`, `WM_NCACTIVATE`, `WM_ACTIVATE` and `WM_SETFOCUS`,
+each saying the window has the foreground, to every top-level window of the game.
+The window isolated input takes for the game is told this when it is found; a game
+with more than one window can have the one that draws elsewhere. It does not show a
+minimized window. Dishonored and Mirror's Edge came up minimized under the rig; once
+the rig had shown the window without activating it (`SW_SHOWNOACTIVATE`), `activate`
+made it draw, where before it drew nothing (2026-11-02).
+
+A hotkey that does one thing tapped and another held (`RegisterHoldKeyBindings`, or a row of the
+C interface's `cameraunlock_config_local_hotkey_held`, which holds for 400 ms) is driven by the
+hold time of a `tap`: `tap Delete 80` is its tap and `tap Delete 800` its hold.
+
+One that also counts taps (`RegisterTapKeyBindings`, or a row of
+`cameraunlock_config_local_hotkey_taps`, where each press has 300 ms from the one before it being
+let go) is tapped more than once with a `wait` between the taps, which is played as that many
+milliseconds with the key up. Twice:
+
+```text
+tap Delete 80
+wait 120
+tap Delete 80
+```
+
+Its single tap is answered 300 ms after the key is let go, so a script that reads the result
+follows `tap Delete 80` with `wait 400` or more.
+
+`move` is for a game that turns the camera by how the mouse moved. `cursor` is
+for a menu that reads where the cursor is: after the first `cursor`, a `mouse`
+button also arrives as the click a pointer at that point would make. The point is
+in the client area, so take it from a capture and subtract the title bar and the
+border.
+
+Pass a script's commands through `powershell -Command "& script.ps1 -Commands 'tap E','wait 500'"`.
+With `powershell -File` the list arrives as one string and the mod refuses line 2.
+
+To a DirectInput keyboard, `text` presses the key that types each character on a
+US keyboard, with Shift held for upper case and the shifted symbols. It types
+printable ASCII and nothing else: no Tab, no Enter (`tap Return`), no accented
+letters. Each key is held 40 ms.
+
+## The game link
+
+For a harness that plays the game as it goes (a simulated player that reacts to
+what happens), the command file is too slow and says nothing back. The game link
+is a TCP connection to the dev build, on 127.0.0.1 only, that plays each command
+as it arrives and carries messages out.
+
+It is on when the folder of the command file also holds `CameraUnlockLink.txt`
+with a port number in it, read once as isolated input starts. Every dev build
+with isolated input has it, the host DLL included; a mod adds nothing to get it.
+Write the file in `-Prepare` and name it in `-Files`, so the session takes it
+away again. A container on Docker Desktop reaches the link through
+`host.docker.internal`.
+
+In, one line at a time:
+
+```text
+<a line of the command language>   played at once; not `wait`: the client times its own commands
+mod <text>                         queued for the mod to take, for what only the mod can reach
+```
+
+A `tap` is played with its hold, and the link takes nothing else meanwhile: a
+client that drives several controllers at once sends `down` and `up` itself.
+
+Out, one JSON object a line:
+
+```text
+{"type":"hello","protocol":1,"pid":<the game's process id>}   on connecting
+{"type":"error","line":"<the line>","message":"<why>"}        a line not played
+```
+
+and whatever the mod publishes. One client at a time; the next is taken once the
+last has gone. A line over 4096 bytes is answered with an error and the client is
+let go.
+
+A native mod publishes with `cameraunlock::dev::PublishToGameLink(json)` and takes
+`mod` commands with `cameraunlock::dev::TakeModCommand(line)`, from any thread
+(`cameraunlock/dev/game_link.h`). A mod on the host DLL calls its exports:
+`CameraUnlockPublishToGameLink(const char* json)` (0 sent, 1 not sent: nobody
+connected, or not one line holding an object) and
+`CameraUnlockTakeModCommand(char* buffer, int size)` (the length taken, 0 when none
+waits, or minus the size needed, keeping the command for the next call; 4097
+bytes is always enough). Input that isolated input does not reach, such as
+Project Zomboid's controllers through GLFW, comes to the mod as `mod` commands
+for it to play itself.
+
+## What the dev build detours
+
+For a game that reads raw input: each synthetic event is posted to the game's
+window as a `WM_INPUT` whose handle is one of ours, and the `GetRawInputData`
+detour answers for those handles. Windows sends a background window no raw input
+unless it registered with `RIDEV_INPUTSINK`. Where one did, a real keyboard or
+mouse event is emptied on its way through `GetRawInputData` and
+`GetRawInputBuffer`: it keeps its header and moves and presses nothing.
+
+A key is also posted as `WM_KEYDOWN` and `WM_KEYUP`, as Windows sends it beside
+raw input. Unreal Engine 4 registers raw input for the mouse and takes its keys
+from the window procedure, so without these it turns its view for `move` and
+answers to no key. They are not posted where the game registered its keyboard
+with `RIDEV_NOLEGACY`, because Windows sends none there. A mouse button reaches
+such a game as a window message too, which is posted once a `cursor` command has
+placed the cursor: start the script with `cursor <x> <y>`.
+
+| Function | Answer | Why |
+|---|---|---|
+| `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
+| `GetFocus` | what Windows answers, and on the game window's thread the game's own window where that is none | a game that polls it reads its own window as having the focus. Kingdom Come: Deliverance raises its focus-lost event on a NULL `GetFocus`, and its mouse then keeps the cursor shown and unclipped through play |
+| `GetActiveWindow` | what Windows answers, and the game's own window, on every thread of the game, where that is none | an engine on GLFW reads its window as focused (`glfwGetWindowAttrib(GLFW_FOCUSED)` compares `GetActiveWindow` with its window). No Man's Sky's `cTkSystem` focus flag read 1 with it in a background session; its frontend still showed no reaction to scripted input, and its PrintWindow captures did not change at all, so NMS is not proven (2026-11-04) |
+| `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
+| `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press. A held `Ctrl`, `Shift` or `Alt` is also held as its left-hand key | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
+| the same three, for `VK_LBUTTON`, `VK_RBUTTON` and `VK_MBUTTON` | held while a `mouse` command holds that button | Windows reports mouse buttons through the key state too, and a game can take its aim or fire button from there |
+| `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
+| `SetCursorPos`, after the dev build called `LetGameMoveScriptedCursor(true)` | moves the script's cursor to that point, once a `cursor` command has placed it; the real cursor stays put | a mod that places the cursor itself (The Ascent rests it on the point the shot lands, because the game draws its crosshair as the cursor) can be seen to land it |
+| `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
+| `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
+| `SetForegroundWindow` | nothing | the game cannot take the foreground back |
+| `GetRawInputData`, `GetRawInputBuffer`, for an event of the real keyboard or mouse | the event with no movement, no buttons and no key | a window registered with `RIDEV_INPUTSINK` is sent the real devices in the background. The log says so the first time one arrives |
+| `GetCursorPos` | the point the last `cursor` command gave, and the middle of the game window until one has | a menu with a pointer follows the script's cursor, and a game that reads the cursor never follows the real one |
+| `GetCursorInfo` | the cursor as the game last set it: `CURSOR_SHOWING` while its `ShowCursor` display count is not negative and it has a cursor set, the cursor handle it set (the arrow until it sets one), and the point `GetCursorPos` answers | Windows answers for the foreground window, which is never the game's, so a mod that holds its pose while a menu shows the cursor would read the desktop's cursor and hold in every state. The log says once that it is read |
+| `ShowCursor`, `SetCursor` | passed on, and the display count returned and the cursor given are kept for `GetCursorInfo` | this is how a game shows and hides its cursor. Each is kept from whichever thread called last |
+| the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE`, `WM_KILLFOCUS` or `WM_NCACTIVATE` saying it lost the foreground, and is posted all four saying it has it when the window is found | a game that stops, or stops following its mouse, when deactivated carries on |
+| the game window's procedure, once when the window is taken over | `ShowCursor(TRUE)` then `ShowCursor(FALSE)`, sent without waiting and run on the window's thread, keeping the count the second returns for `GetCursorInfo`. A count a `ShowCursor` call already brought through the detour is kept instead, so a call from another thread before the window was found wins. The log gives the count read | the display count belongs to the thread, and a game that hid its cursor before the mod loaded never passed the `ShowCursor` detour. Fallout 4 injected 70 s after launch read as cursor up all through play (2026-11-02) |
+| the game window's procedure, after a `WM_SETCURSOR` | the window thread's cursor (`GetCursor`) is kept for `GetCursorInfo` | `DefWindowProc` puts the window class's cursor back without calling `SetCursor`. Windows sends `WM_SETCURSOR` only when the real mouse is over the window, and the script sends none |
+| the game window's procedure, for `WM_MOUSELEAVE` | never sees it. The log says so the first time | Windows sends it when the real cursor is not over the window, and the script's cursor never leaves it. SDL2 drops its mouse focus on one, and Amnesia: Rebirth turns on relative mouse mode only while SDL says the mouse is in its window: launched behind other windows, it never did, and its view turned thousands of degrees a second |
+
+The dev build also watches the real foreground itself. Whenever a window of the
+game holds it, the game gives it back to the window that had it before, or to the
+desktop if there is none. Only the foreground process may hand the foreground
+on, so this is done from inside the game once its isolated input has started.
+
+A window of another process running isolated input is never the one it gives
+back to. Each such process holds the event `Local\CameraUnlock.IsolatedInput.<pid>`
+from just before its detours go in until it ends, and the window is checked both
+when it is remembered and when the foreground is handed to it, because a game's
+window can take the foreground before that game's event exists. An event that
+exists but cannot be opened (a process at a higher integrity level) counts. A
+process in an AppContainer makes its `Local\` objects in a namespace of its own,
+where this check cannot see them. Without the check, two isolated games handed
+the foreground to each other over and over (2026-11-03).
+
+Before the game's isolated input has started, the launch is covered by the guard
+and the shim: see [The guarded launch](#the-guarded-launch). Until 2026-11-16
+`Start-IsolatedGame` instead handed the foreground back every half second of its
+settle time, after the game had already taken it, and nothing watched after that.
+
+For a game that reads DirectInput 8 (`dinput8.dll` loaded in the process): the
+methods of the keyboard and mouse devices are detoured in the device vtable,
+found from throwaway devices, so a device the game makes later is covered too.
+The detours go in from the command-file thread once `dinput8.dll` is loaded, and
+`dinput8.dll` is never loaded into a game that has not loaded it. A DirectInput
+device that is neither a keyboard nor a mouse is left as it was.
+
+A game that reads DirectInput 7 or earlier (`dinput.dll` loaded in the process)
+gets the same detours on `dinput.dll`'s device vtables, found from throwaway
+devices made through `DirectInputCreateEx`: what `CreateDevice` hands out, and
+what `CreateDeviceEx` hands out for `IDirectInputDevice`, `IDirectInputDevice2`
+and `IDirectInputDevice7`, in A and W. So a game is covered whether it calls
+`DirectInputCreateA`, `DirectInputCreateW` or `DirectInputCreateEx`.
+`GetDeviceData` answers its 16-byte records as it answers DirectInput 8's.
+`dinput.dll` is never loaded into a game that has not loaded it either.
+
+| Method | Answer | Why |
+|---|---|---|
+| `GetDeviceState` | in the data format the game set: `0x80` at the offset of each key or button the script holds, the movement since that device last asked at the offset of X and of Y, and 0 everywhere else. With `c_dfDIKeyboard` that is 256 bytes with `0x80` at each held key's `DIK_` code; with `c_dfDIMouse` or `c_dfDIMouse2` it is `DIMOUSESTATE` or `DIMOUSESTATE2` | the real device is never read |
+| `SetDataFormat` | passed on, and the format then read back from DirectInput | DirectInput checks the format against the real device, and the answers above follow whatever layout it took |
+| `GetDeviceData` | the events played since that device last asked: `dwOfs` a `DIK_` code or `DIMOFS_X`, `DIMOFS_Y`, `DIMOFS_BUTTON0` to `2`. Honours the caller's capacity, `DIGDD_PEEK` and a null buffer, and answers `DI_BUFFEROVERFLOW` after more than 256 unread events | a game that reads buffered input is covered as well |
+| `Acquire`, `Poll` | `DI_OK`, without reaching DirectInput | the real keyboard and mouse are never acquired, so a lost or refused acquire cannot reach the game |
+| `SetCooperativeLevel` | passed on as `DISCL_BACKGROUND \| DISCL_NONEXCLUSIVE` | the device stays usable behind other windows |
+| `Release` | passed on | forgets a device that is gone |
+
+For a game that has an XInput DLL loaded (`xinput1_4.dll`, `xinput1_3.dll`,
+`xinput9_1_0.dll`, `xinput1_2.dll`, `xinput1_1.dll`; none is ever loaded for it):
+
+| Function | Answer | Why |
+|---|---|---|
+| `XInputGetState` | the script's controller at that index, or `ERROR_DEVICE_NOT_CONNECTED` for one the script has not named | the real controllers never reach the game, and a second player can be played from a script |
+| `XInputSetState` | `ERROR_SUCCESS` for a plugged-in script controller, without reaching XInput | rumble goes nowhere |
+| `XInputGetCapabilities` | a gamepad (`XINPUT_DEVTYPE_GAMEPAD`, `XINPUT_DEVSUBTYPE_GAMEPAD`) with every button, both triggers, both sticks and both motors for a plugged-in script controller, `ERROR_DEVICE_NOT_CONNECTED` for any other | a game that sets a controller up only once XInput describes it takes the script's, with no real controller at that index |
+
+A controller's first command also tells the game window of it with
+`WM_DEVICECHANGE`, as Windows does when a controller is plugged in: it posts
+`DBT_DEVNODES_CHANGED`, which is when Unreal Engine 4 looks for new controllers,
+and sends (Windows will not post it) `DBT_DEVICEARRIVAL` with a `DEV_BROADCAST_DEVICEINTERFACE` naming an XInput
+controller's HID interface, which is when Wreckfest does. Wreckfest sets up its
+controllers only at startup and on that arrival, so a script pad it was not told
+of is never read. The log says once that the game reads XInput.
+
+That first command is held back: the controller goes in with nothing held, and
+the command is played once the game has read it three times, or after 5 seconds
+if it has not. Wreckfest rebuilds its controllers on the arrival, and a press
+that is already down when the rebuilt controller first reads the pad is never
+seen going down. The log says how many reads it took and how long; when the wait
+runs out, the log says so and the script's `.done` reports a step that could not
+be sent.
+
+For a game that has GameInput loaded (`GameInputRedist.dll` from the Microsoft.GameInput NuGet
+package, or the inbox `GameInput.dll`; neither is ever loaded for it): GameInput reads the devices
+itself, and it does not stand down for a game behind other windows: before this, the real mouse
+turned Minecraft Bedrock's view while the game was in the background. (GameInput imports
+`GetForegroundWindow`, which answers the game's window here; whether that is how it decides it
+has the focus was not followed up.) One GameInput object answers
+every API version, each through a vtable of its own, and so does each reading. The detours write
+over those vtables' slots, so the game's own object is covered however early it was made.
+
+| Version | Answer |
+|---|---|
+| 2 | `GetCurrentReading`, `GetNextReading`, `GetPreviousReading` and the callbacks of `RegisterReadingCallback` pass the game GameInput's own readings, and every reading answers from the script: `GetKeyCount` and `GetKeyState` the keys the script holds (the left-hand key for a held Ctrl, Shift or Alt), `GetMouseState` the buttons held and the movement played so far as `positionX` and `positionY`, `GetGamepadState` script pad 0 (at rest until a `pad 0` command), the controller axis, button and switch counts 0, and every other state false |
+| 0, 1, 3 and 4 | no readings: `GAMEINPUT_E_READING_NOT_FOUND`, and `RegisterReadingCallback` answers `E_NOTIMPL` |
+| any other | `GameInputInitialize` refuses it with `E_NOINTERFACE` |
+
+The real devices make readings as they always do, and each one answers the script's state, so a
+game that reads its mouse as the change between two readings sees no movement of its own. A
+script's `move` reaches a game that reads `GetCurrentReading` as it polls. It makes no reading of
+its own, so a game that only takes readings as they arrive sees it with the next one the real
+devices make. The log says which of the four the game calls, the first time it calls each, and
+says once when a reading of the real keyboard, of the real mouse moving or pressed, or of a real
+gamepad was answered from the script instead. The detours go in from the command-file thread
+once the DLL is loaded. A GameInput the dev build cannot wrap stops the game, rather than leave it
+reading the real devices.
+
+`Get-GameInputPaths` finds GameInput only in a binary that imports it. Minecraft Bedrock loads it
+through the NuGet package's loader and imports neither DLL, so there the log is what shows it.
+
+Any data format is answered, standard or the game's own. F.E.A.R. sets formats of
+its own: 504 bytes for its keyboard, 44 for its mouse. Where each key, axis and button sits is asked of DirectInput
+(`GetObjectInfo` with `DIPH_BYOFFSET`, which answers the object at an offset of the
+format set; `EnumObjects` answers the device's own layout), so a format the game
+set before the detours went in, as it is when the mod is injected after launch,
+is read back as well. Its size is then not known, and a `GetDeviceState` is
+answered at the size the game asks for when every object fits in it. A key reads
+its `DIK_` code as DirectInput's instance number; a mouse lists X, Y and the wheel
+as instances 0 to 2 and buttons 0 to 7 as 3 to 10. The log says, for each device,
+how many of the format's keys, buttons and axes it answers, and a
+`GetDeviceState` of a size that is not the format's is refused. There is no mouse
+wheel command, so the wheel is always 0. A game that waits on
+`SetEventNotification` is not signalled. The log names, once for each device,
+which of `GetDeviceState` and `GetDeviceData` the game reads it through.
+
+## The guarded launch
+
+`Start-IsolatedGame` starts every game under a guard, and refuses to start one
+without it. The tools are in `cpp/tools/rig_guard`; `pixi run build-rig-guard`
+builds them for x64 and Win32 into `cpp/tools/rig_guard/build/out`.
+
+**The guard** (`CameraUnlockRig.x64.exe guard <folder>`) is up before anything is
+launched. It ends every process of the run on the first of:
+
+- a window of one of them is the foreground window (looked at every 2 ms, and on
+  the system's own foreground event; not while it is putting the shim into a
+  process it has just found, which takes it tens of milliseconds and up to half
+  a second when that process is stopped inside the loader),
+- the display mode of any screen changes, whoever changed it. It sets no mode
+  itself: if the display is still changed 1.5 s after it ended the run, the log
+  says so,
+- `-GuardMinutes` are up (30 unless the session says otherwise),
+- one of them cannot be given the shim or cannot be opened (an elevated or
+  protected process).
+
+It writes one line saying which, with the window's title and class, to
+`guard.verdict` and `guard.log` in the session's `GuardFolder`
+(`<rig root>\_guard\<stamp>-<process>-<pid>`). `Start-IsolatedGame` and
+`Invoke-GameInput` throw with that line. The guard only ends processes: the
+session's own way out still puts the saves back, as after any game that died.
+`Stop-IsolatedGame` and `Complete-IsolatedGameSession` stop the guard, which ends
+what is left of the run (a launcher, a crash reporter) before any file goes back.
+A guard that does not stop in 30 seconds is ended, and the run goes with it: the
+run's processes are in a job that ends them when the guard does, however it ends.
+
+A guard nobody stops (its script was ended) goes by itself two minutes after
+the last process of its run has gone, and `Start-IsolatedGame` stops any guard an
+earlier run left up for the same process name before it starts its own: two
+guards that both know a process by name both try to take it in.
+
+The limit holds for a game a script leaves running too (`Exit-GameRig -KeptIn`):
+give `-GuardMinutes` the time it may stay up.
+
+The run is the process the guard started, every process started after the guard
+whose executable is named `-ProcessName` or one of `-Processes`, and everything
+those start. **Name every launcher the game comes up through in `-Processes`**:
+a launcher nobody named is not watched. The other side of that: a process with
+one of those names that the person at the machine starts during the run is
+taken in and ended with it, so name only launchers that are the game's own.
+`Start-RigGuard -Names` also takes the whole path of an executable.
+
+**The shim** (`CameraUnlockRigShim.<arch>.dll`) is what keeps a game from tripping
+the guard. Inside the game:
+
+| What the game does | What happens |
+| --- | --- |
+| makes or shows a top-level window | it is made `WS_EX_NOACTIVATE` and shown without activating, never topmost, not raised by the game's own calls. Each window without an owner that is not a tool window is put at the bottom of the window order the first time it is shown; an owned window (a dialog) or a tool window stays where Windows put it, which can be on top, without being activated. A window shown on its own thread is activated inside the game's own input queue, so the game is sent `WM_ACTIVATE`, `WM_ACTIVATEAPP` and `WM_SETFOCUS` as if it were in front |
+| makes, shows, moves or resizes a top-level window that has no owner and is not a tool window (`SetWindowPos`, `MoveWindow`, `DeferWindowPos`, `SetWindowPlacement`) | the window sits in the bottom right corner of the work area at the size the game gave it, from before it is first shown, whether or not the game asked for fullscreen. A move is answered as done and leaves it there; a resize is made and the window moved so that it stays in the corner. A minimised window comes back to the corner when it is restored, and a maximised window is left as it is. A window with an owner (a dialog), a tool window, a child window and a message-only window are placed by the game |
+| `SetForegroundWindow`, `SwitchToThisWindow`, `BringWindowToTop`, `FlashWindowEx`, `LockSetForegroundWindow`, `AllowSetForegroundWindow`, `SendInput`, `AttachThreadInput` to another process's thread | nothing, answered as done |
+| `ChangeDisplaySettings(Ex)`, `SetDisplayConfig` | nothing, answered as done. A test of a mode (`CDS_TEST`) is passed on |
+| `ClipCursor`, `SetCursorPos`, `SetPhysicalCursorPos` | nothing, answered as done |
+| registers raw input with `RIDEV_INPUTSINK`, `RIDEV_EXINPUTSINK` or `RIDEV_CAPTUREMOUSE` | registered without them |
+| Direct3D 9 `CreateDevice(Ex)`, `Reset(Ex)` asking for fullscreen | made windowed, the game told it got fullscreen, the window put bottom right at 1280x720 at most |
+| DXGI `CreateSwapChain`, `CreateSwapChainForHwnd`, `D3D11CreateDeviceAndSwapChain` asking for fullscreen; `SetFullscreenState` | made windowed; `GetFullscreenState` answers what the game asked for |
+| DirectInput 8 `SetCooperativeLevel` asking for exclusive | made non-exclusive. Foreground or background is left as asked |
+| starts another process | started suspended and given the shim, of either bitness, before it runs. One the shim cannot be put into is ended and the game's `CreateProcess` fails with access denied; the shim's log in the guard folder names it |
+
+The detours are on win32u's system call stubs, below user32, so they also cover
+what user32 does from inside itself. A 32-bit stub whose shape is not the one the
+shim was written against stops the shim from starting, and the guard ends the
+run as one it cannot cover.
+
+How early the shim is in depends on who starts the game:
+
+- **`-Launch` is the game's executable**: the guard starts it suspended and the
+  shim is in before its first instruction.
+- **`-Launch` is anything else** (a `steam://` URI):
+  Steam or the shell starts the game, and the guard holds it still and puts the
+  shim in when it sees the name in the process list, which it reads every 15 ms.
+  `guard.log` says how long the process had been running, and says so when it
+  already had a visible window. A window or a Direct3D
+  device made before that is not covered. Launch the executable itself wherever
+  the game allows it.
+
+`-NoShim` leaves the shim out and keeps the guard, for a game the shim breaks.
+Such a game is ended if its window takes the foreground: that is the guard
+doing its job, and the game is then one the rig cannot run in the background.
+
+What the shim does not touch: DirectDraw, DirectInput 7 and older, Direct3D 10's
+own create-with-swap-chain calls, a DirectInput made through `CoCreateInstance`,
+a borderless window the size of the screen (it is not activated and sits at the
+bottom, but it is not made smaller), low-level keyboard and mouse hooks, and
+`RegisterHotKey`. For the first four the guard is what is left. A window whose
+own procedure answers a move with another place (`WM_WINDOWPOSCHANGING`), or
+changes the size of a move made through `DeferWindowPos`, is not held in the
+corner, nor is one made visible, given no owner or made a top-level window by a
+change of style or parent alone, until the next call that shows or places it.
+The corner is the one the work area had at that call. A console window
+is not the game's own (it belongs to the console host), so neither the shim nor
+the guard sees one a game opens. A packaged app (`shell:AppsFolder`) cannot read
+what the injector leaves for the shim, so it is ended as one that cannot be
+given the shim; `-NoShim` is the only way to run one.
+
+`pixi run test-rig-guard` proves the two together with no game: see
+`powershell/tests/RigGuard.Tests.ps1`. It cannot show the guard ending a run for
+taking the foreground without taking the foreground from whoever is at the
+machine, so it shows the ending on a time limit instead, which is the same code
+from the verdict on.
+
+## Limits
+
+- A game the shim is in from its first instruction has not been seen to take the
+  foreground in the test program; no real game has been run under it yet. One the
+  guard took in by name can have taken it before the shim was in: the guard ends
+  that run. Nothing hands the foreground back from outside the game any more.
+- Someone who clicks into the game window: not tried with the shim in. If the
+  click makes it the foreground window, the guard ends the run.
+- A launcher can start a stub that hands over to the game's own process (Far Cry
+  6 does). `Start-IsolatedGame` returns the first process it sees, so take the
+  process id again once the game is up.
+- The first window a game shows can be its splash screen. The dev build looks
+  for the game window again once the one it had is gone or hidden.
+- Games running at once share the GPU and the speakers. How many a machine
+  carries has not been measured. The rig keeps two sessions off one game, and
+  off the card while `-WholeGpu` work holds it. It does not stop two different
+  games running side by side.
+- The rig sees only sessions that take it.
+- `Test-IsolatedInputProof` compares two captures, so a picture that moves by
+  itself (a weapon swaying at idle) passes it with no input taken. Prove such a
+  title with an input whose effect the mod also logs, and read the log.
+
+## Measured
+
+Wreckfest 1.308438 (Steam, 64-bit DX11), 2026-11-02, the host DLL started by an ASI shim under
+Ultimate ASI Loader, no real controller plugged in:
+
+- The exe imports `XInputGetState`, `XInputSetState` and `XInputGetCapabilities` from
+  `xinput1_3.dll` by ordinal. It builds a controller for each index only at startup and when its
+  window is sent `WM_DEVICECHANGE` with `DBT_DEVICEARRIVAL` and a named device interface, and it
+  keeps one only if `XInputGetCapabilities` succeeds and does not report a wheel.
+- With neither answered, the title ignored every pad and keyboard script. With
+  `XInputGetCapabilities` answered alone, one launch took the pad and the next never
+  did.
+- With `XInputGetCapabilities` answered and the arrival sent, the first pad command made the
+  game rebuild its controllers (the title dimmed and came back, and that press was not taken),
+  and every press after it was: `pad 0 a down`, `wait 200`, `pad 0 a up` passed the title, and
+  the pad drove the menus, a race, the pause menu and the results screen.
+- `tap Return` at the title did nothing before the change, and was not tried after it.
+- With the first command held back until the game had read the new pad three times (the game
+  read it 3 times in 359 ms), the first script after launch, `pad 0 a down`, `wait 400`,
+  `pad 0 a up`, passed the title on the first try.
+
+Minecraft Bedrock 1.26.6005 (Microsoft Store, GDK, `GameInputRedist.dll` 4.0.302.0), 2026-11-02, a
+native backend injected 8 seconds after launch, windowed and behind other windows for the whole
+session, the game never holding the foreground:
+
+- The exe imports neither GameInput DLL. It holds the IID of `IGameInput` version 2 (and of version
+  0, which the NuGet package's loader keeps for an old inbox DLL), and loads
+  `GameInputRedist.dll` from System32.
+- The log read `the game reads GameInput through GetCurrentReading (kinds 0x20)`: the mouse, polled.
+  No other GameInput call was seen. Keys reached the menus as window messages, as before.
+- Real mouse movement sent with `SendInput` (30 moves of 20 counts right, then back) while the game
+  was in a world: the log read `the game was handed a GameInput reading of the real mouse moving or
+  pressed; it reads the script's mouse in its place`, and the view did not turn. Captures before and
+  during differed in 9% of sampled pixels, less than two captures a second apart with nothing sent
+  (12.5%: smoke, a walking villager). Before this, the real mouse turned the view.
+- `Test-IsolatedInputProof` passed on `move 400 0`: the view turned, 83% of pixels changed.
+- Not tried: a real mouse button or key through GameInput. `SendInput` would have pressed it in
+  the window that had the foreground. The button state comes from the same answer as the movement.
+- The worlds folder was saved before the launch and put back after it.
+
+Project Zomboid (Steam, a Java agent on the game's own Java 25 runtime), from the mod's notes of
+2026-10-05 and the host's log of one run, not measured again for this entry:
+
+- The host DLL, loaded from the dev agent through `java.lang.foreign`, started and its detours
+  went in. The log read `DirectInput keyboard and mouse devices answer from the command file (10
+  detours over 4 device vtables)`, `the game reads key state through GetKeyState`, the same for
+  `GetKeyboardState`, and `the game reads the cursor's position (GetCursorPos)`.
+- The mod's hotkeys, which core's poller reads with `GetAsyncKeyState`, fired once each for
+  `tap PageUp`, `tap Ctrl+Shift+H`, `tap Insert` and `tap End`, and the game never held the
+  foreground.
+- The game's own keyboard and mouse were not driven through isolated input. The mod's dev probe
+  answers the game's `org.lwjglx` key and button polls from Java. Whether the raw-input path
+  drives the game's GLFW window has not been tried, which is why `glfw` is `unsupported` in
+  `data/isolated-input.json`. The game's `glfw.dll` imports `GetRawInputData`,
+  `RegisterRawInputDevices`, `GetKeyState` and `GetCursorPos`.
+
+Red Eclipse 2.0.9 (Steam, Cube 2 / Tesseract on SDL2, ASI under Ultimate ASI Loader as
+`winmm.dll`), 2026-10-04, windowed and behind other windows for the whole session, the game
+never holding the foreground:
+
+- The exe imports `SDL2.dll` and reads no input of its own beyond `GetKeyState` and
+  `GetCursorPos`. `Get-GameInputPaths` on `SDL2.dll` shows raw input, and that path drove the
+  game: nothing was pushed through SDL's event queue.
+- Keyboard: `E` joined the match from the spectator camera, `Return` opened the chat prompt,
+  `[` and `]` stepped the scope's zoom level, and the mod's hotkeys fired, `Insert` and the
+  `Ctrl+Shift` and `Shift+Alt` chords.
+- `text` typed into the chat prompt, slash, lower case, space and digits.
+- Mouse: `move` turned the view (300 counts, about 50 degrees), the right button held the
+  scope up (the mod's log read `Sights up`) and the left fired a round (the ammunition count
+  dropped). No `cursor` was needed first.
+- In the launches where the log read `the game had the real foreground and gave it back` as the
+  window appeared, `move` and the mouse buttons did nothing until a `cursor 640 360` had been
+  played. After it the right button raised the scope and `move` turned the view, and the left
+  button fired only when held (`mouse left down`, `wait 200`, `mouse left up`): a `click` did not.
+- `Test-IsolatedInputProof` passed on `move 300 0`.
+- The pose sender drove the mod through whole sessions, rotation and position, on the mod's
+  test port.
+- `Save-GameCapture` showed live frames, the game's own HUD, crosshair and scope overlay
+  included, quickly enough to catch a 150 ms transition in a burst of captures.
+- The game runs on a home folder given with `-h<folder>`, so a test never reads or writes the
+  player's own settings, and `-x<commands>` runs console commands at start (a player name, the
+  map), which skips the first-run menu.
+- Not tried: `cursor`, `pad`.
+
+S.T.A.L.K.E.R.: Call of Prypiat - Enhanced Edition (Steam, X-Ray 1.10.3.653, ASI under Ultimate
+ASI Loader as `dinput8.dll`), 2026-10-04, windowed and behind other windows for the whole session:
+
+- The log named the paths: keyboard and mouse through DirectInput `GetDeviceData`, key state
+  through `GetKeyState` and `GetKeyboardState`, and the cursor's position through `GetCursorPos`.
+  The exe also imports SDL2, and nothing needed pushing through it.
+- The loader being the `dinput8.dll` proxy in the game folder made no difference: the device
+  detours went in (10 detours over 4 device vtables).
+- Keyboard: the backquote opened the console at the main menu and in play, the arrow keys and
+  Return chose a main menu row and loaded the save, `W` walked, the number keys chose weapons,
+  and the mod's hotkeys fired, nav keys and the `Ctrl+Shift+U` chord.
+- Mouse: `move` turned the view (about 8 counts a degree), the right button held the sights up
+  (the mod's log read `sights=1` and the field of view went from 67.5 to 37.5) and the left
+  fired a round (the ammunition count dropped).
+- `text` typed console commands, lower case and digits. A shifted character came out unshifted:
+  `(` typed `9` and `_` typed `-`. Holding Shift as its own step typed it:
+  `down Shift`, `wait 80`, `tap 0xBD 80`, `wait 80`, `up Shift` gave `_`, and
+  `mtb_fsr_frame_generation on` ran that way. Whether `text` needs the wait or the synthetic key
+  state for Shift was not followed up.
+- The console closes the sights when it opens, so a script raises them again after it.
+- The game went on running unfocused, where it otherwise opens its menu and pauses.
+- `Save-GameCapture` showed live frames, the game's own HUD and crosshair included.
+- The pose sender drove the mod through whole sessions, rotation and position, on the mod's
+  test port.
+- Not tried: `cursor`, `pad`.
+
+Deus Ex: Mankind Divided 1.19 build 801.0 (Steam), 2026-10-04, windowed and behind
+other windows for the whole session:
+
+- No scripted key or click did anything until the game was kept from seeing
+  `WM_NCACTIVATE` with a false `wParam`, and was posted one with a true `wParam` when its
+  window was found. The game's window procedure reads a `WM_INPUT` through `GetRawInputData`
+  only while the application object reports itself active, and that state follows
+  `WM_NCACTIVATE`, not `WM_ACTIVATE` or `WM_ACTIVATEAPP`. Before the change every `WM_INPUT`
+  and `WM_KEYDOWN` reached the window procedure and `GetRawInputData` was never called.
+- The launcher is a window of the same process and takes `Return` as a window message. The
+  script that presses it is reported as `1 of N steps could not be sent`, because the
+  launcher's window is gone before the key comes up.
+- Keyboard: `Return` went through the intro screens and the main menu into the save, and the
+  mod's hotkeys fired, nav keys and chords.
+- Mouse: `move` turned the view, and after a `cursor` the right button raised and lowered the
+  sights (the mod's log read `ADS: sights up`).
+- `Test-IsolatedInputProof` passed on `move 500 0`.
+- The pose sender drove the mod through this module, rotation and position.
+- `Save-GameCapture` shows live frames.
+- With five other games running on the machine the game drew three to four frames a second,
+  and about fifteen with its process at `AboveNormal`.
+
+The Ascent (Steam, Unreal Engine 4, build `++depot+release-CL-72946`), 2026-10-04,
+windowed and behind other windows for the whole session, the game never holding
+the foreground:
+
+- Keyboard and `cursor`: the title screen, the menus, a new game, the pause menu,
+  the journal and a dialogue's choices were driven, and `W`, `D`, `F`, `Ctrl`
+  and a held `Space` walked, interacted, crouched and closed tutorial cards.
+- Controller: in the couch co-op lobby `pad 1 a tap` joined a second player,
+  `pad 1 down tap` moved through its profile list and `pad 1 a tap` chose one.
+  In play `pad 1 stick left 0 1` for a second walked the second player 4.4 m,
+  and the right stick turned and pitched that player's view. The log read
+  `the game reads controllers through XInput`.
+- `SetCursorPos` is swallowed, so a mod that recentres the cursor every frame
+  has to measure mouse movement from where the cursor came to rest, read back
+  with `GetCursorPos`, and not from the point it asked for.
+- `Save-GameCapture` showed live frames, both halves of a split screen included.
+
+Untitled Goose Game 1.1.4 (Steam, Unity 2018.4.1f1, BepInEx 5 plugin), 2026-10-04,
+through the host DLL and `Start-IsolatedGame -ModHost managed`:
+
+- Keyboard: the title menu, the player count and the save slot were driven into
+  the world, and the arrow keys walked and turned the goose. The proof passed in
+  the world, and the game never held the foreground.
+- The game reads its keyboard through Rewired, whose native keyboard support
+  registers raw input to a window of its own. Unity saw every scripted key and
+  Rewired saw none until the script's raw input was also posted to the window
+  `GetRegisteredRawInputDevices` names. Turning Rewired's native support off at
+  run time is not a way round it: Rewired resets and the game's cached players
+  go invalid.
+- A chord (`tap Ctrl+Shift+Y`) did not reach a plugin that checks
+  `Input.GetKey(KeyCode.LeftControl)` and `LeftShift`, though the letter did:
+  the script held `VK_CONTROL` and `VK_SHIFT` only, and the game reads key state
+  through `GetKeyState`. With the left-hand keys (`VK_LCONTROL`, `VK_LSHIFT`,
+  `VK_LMENU`) held in the synthetic state as well, the mod's `Ctrl+Shift+Y` and
+  `Ctrl+Shift+G` fired. `down Ctrl` and `down Shift` on their own left the goose
+  where it stood.
+- BepInEx's log console is a visible window of the game's process. It was taken
+  for the game window by the host (every script went to it) and by
+  `Save-GameCapture` (every capture was of the log) until both skipped
+  `ConsoleWindowClass`.
+- BepInEx 5 logs the host DLL in `plugins` as not a .NET assembly and skips it.
+- The host DLL could not be deleted for a moment after the game was stopped:
+  the game's process had not gone yet. `Stop-IsolatedGame` waits for the
+  process to go.
+- Not driven: the mouse.
+
+Starfield 1.16.244.0 (Steam), 2026-10-03, with the real foreground sampled
+through every script and the game never holding it:
+
+- Keyboard: the title screen, the main menu and its confirm prompt were driven to
+  a loaded save, and letter keys opened the game's own screens.
+- Mouse: the right button raised and lowered the sights.
+- `text`: console commands typed and ran (`tgm`, `help grenade 4 weap`,
+  `player.additem ...`). The quote character did not type; leave quotes out.
+- The mod's hotkeys fired through the synthetic key state, nav keys and chords.
+- A whole session ran through `IsolatedGameTest.psm1`: launch, load, proof
+  passed, sights, capture, stop, restore.
+- The pose sender was checked against a local listener, not yet in a game
+  through this module.
+
+Deep Rock Galactic 1.40.154534.0 (Steam, Unreal Engine 4.27), 2026-10-03, with
+the real foreground sampled through every script and the game never holding it:
+
+- `move` turned the view (200 counts, about 16 degrees) before this change and
+  after it.
+- Keyboard: before keys were posted as window messages, `down W` did not walk
+  the player and `Escape` opened nothing. After, `down W`, `wait 1500`, `up W`
+  walked the player 4.2 m and `Escape` opened and closed the pause menu.
+- Mouse: `mouse left click` fired nothing until a `cursor 640 360` had been
+  played, and fired the equipped weapon after it.
+- Modifiers held (2026-10-04): `down Ctrl`, `down Shift`, `tap G` threw a grenade and the same
+  with `H` ran the game's HUD toggle, and `down Ctrl` alone showed the laser pointer until
+  `up Ctrl`. The game's `GetKeyState` import was not followed up: these did not need it.
+
+Fallout: New Vegas 1.4.0.525 (Steam, 32-bit, DirectInput 8), 2026-10-03, with the
+real foreground sampled through every script and the game never holding it:
+
+- The log named the paths: keyboard through `GetDeviceState` (256 bytes) and
+  `GetDeviceData`, mouse through `GetDeviceState` (20 bytes).
+- Keyboard: the console opened at the main menu and in play, and the game's own
+  screenshot key saved its files.
+- `text`: `load "Save 176   Courier  Primm  01 22 56"` typed with its quotes and
+  spaces and loaded the save; `tgm`, `player.additem` and `player.equipitem` ran.
+  No character came out twice.
+- Mouse: the right button raised and lowered the sights, the left fired (the
+  ammunition count dropped).
+- The mod's hotkeys fired through the synthetic key state.
+- A 60 ms `tap` was missed about one time in four by keys the game polls
+  (console, screenshot). `down`, `wait 400`, `up` was not missed.
+- `move` did not show a cursor on the main menu, and `down W` did not walk the
+  player. Neither was followed up.
+- `Save-GameCapture` returns a black frame for this renderer, so
+  `Test-IsolatedInputProof` cannot pass here. The proof was the game's own
+  screenshots before and after each script. Those are taken before a mod draws
+  on `Present`, so a mod's overlay needs the presented frame saved by the dev
+  build (`fallout-new-vegas-headtracking/src/isolated_input.cpp`).
+- The game stops when its window is deactivated. The dev build drops the
+  deactivation messages in a window procedure of its own.
+- The game finds its data through the working directory: launch it from the game
+  folder.
+
+Far Cry 6 (Ubisoft Connect, engine fingerprint 6824D119, DirectInput 8), 2026-10-03,
+windowed and behind other windows for the whole session:
+
+- The log named the paths: keyboard and mouse through `GetDeviceData`, and the
+  cursor's position through `GetCursorPos`.
+- Keyboard: Escape opened and closed the game's menus, the number keys chose a
+  weapon, and the mod's hotkeys (nav keys and a chord) fired.
+- Mouse: `move` turned the camera, the right button raised the sights and the
+  left fired a round (the ammunition count dropped).
+- Menus: `move` does not move the menu pointer. `cursor` does, and a click then
+  activates what is under it, but only with the deactivation messages kept from
+  the window procedure: a build without that left the pointer still.
+- `Test-IsolatedInputProof` passed on `move 700 0`.
+- The game's windows took the real foreground five times in one launch, as they
+  appeared and during the intro, and the game gave it back each time. A script
+  that spanned those moments was flagged, and the proof run was not. Before the
+  dev build did this, a game that took the foreground after
+  `Start-IsolatedGame`'s settle time kept it, and Windows refused a hand-back
+  from outside the game.
+- The pose sender drove the mod through this module, rotation and position, on
+  the mod's test port.
+- `Save-GameCapture` shows the frame as presented, a mod's Direct3D 12 overlay
+  included.
+- The game's own Quit to Desktop, reached by `cursor` and a click, ended the
+  process with exit code 0.
+- The intro before the main menu does not skip on Space and runs about three
+  minutes.
+
+Resident Evil Requiem 1.3.1.0 (Steam, REFramework 1.5.9.1), 2026-10-03, windowed and
+behind other windows for the whole session:
+
+- `SetCursorPos` could not be detoured when the plugin loaded: MinHook answered
+  `MH_ERROR_UNSUPPORTED_FUNCTION` and the function started `C3 46 D3 4F FD 00`
+  where this machine's `user32.dll` has `FF 25 3A 39 04 00`, a jump to
+  `NtUserSetCursorPos`. The dev build detours that in `win32u.dll` instead.
+- The log named the keyboard path: DirectInput through `GetDeviceState` (256
+  bytes). It named none for the mouse.
+- Keyboard: `F` held 200 ms chose Main Story and then Continue, and the save
+  loaded.
+- Mouse: `move 700 0` turned the camera, and the right button raised and lowered
+  the sights (the mod's log read `sights up`).
+- The mod's hotkeys fired through the synthetic key state, `Insert` and the
+  `Ctrl+Shift+U` chord.
+- `Test-IsolatedInputProof` passed on `move 700 0`, and the picture also moves by
+  itself here: two captures a second apart with no input differed. The turn was
+  read off the captures.
+- The pose sender drove the mod through this module, rotation and position.
+- The game took the real foreground once as it started and gave it back.
+- `Save-GameCapture` shows the frame with the game's own reticle and HUD.
+- Not tried: `cursor`, `text`.
+
+A Plague Tale: Innocence (Steam, build 4336652), 2026-10-04, windowed and behind other
+windows for the whole session:
+
+- Keyboard: the title screen, the save slot and Continue were driven with `Return`, `W`
+  walked and `E` picked up.
+- Mouse: `move` turned the camera. The right button raised the sling only once the script
+  also held `VK_RBUTTON` in the key state, and the left button primed and threw only with
+  `VK_LBUTTON` held there. The `mouse` command now holds both.
+- `cursor` and a click chose a pause menu row.
+- The scripted pad's sticks and triggers moved nothing in the game. Not followed up.
+- `Save-GameCapture` showed live frames.
+
+Ready or Not (Steam, Unreal Engine 5.3), 2026-10-03, game behind other windows:
+
+- Unreal takes mouse buttons from window messages, not from raw input: with no
+  cursor placed, the scripted right button left the sights down. After
+  `cursor 960 540` the right button raised and lowered them (the mod's log read
+  `aiming=1` and the field of view went from 90 to 67.5) and the left fired a
+  round.
+- The mod's hotkeys fired through the synthetic key state, `Insert` and the
+  `Ctrl+Shift+U` chord.
+- `Test-IsolatedInputProof` passed with the sights still down, on idle weapon
+  sway alone. The log is what proved the input.
+- The first window found was the launch splash.
+- The pose sender drove the mod through whole sessions, rotation and position,
+  on the mod's test port.
+- `Save-GameCapture` worked with the window at the bottom of the z-order. With
+  DLSS frame generation on, some captures showed a moving HUD element bent or
+  doubled and others showed it sharp; with it off every capture was sharp.
+- Not tried: `move`, `text`, and the game's own keyboard bindings.

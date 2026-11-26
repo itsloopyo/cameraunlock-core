@@ -1,0 +1,3 @@
+# Section and key match ignoring ASCII case; the file keeps its spelling.
+set	General	EnableOnStartup	0
+set	Network	UdpPort	5555

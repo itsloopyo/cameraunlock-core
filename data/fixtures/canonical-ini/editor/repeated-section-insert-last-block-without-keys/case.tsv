@@ -1,0 +1,2 @@
+# A last block with no key line gets the new key straight after its header.
+set_or_insert	General	B	2

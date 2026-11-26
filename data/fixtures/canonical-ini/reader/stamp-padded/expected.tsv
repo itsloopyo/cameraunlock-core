@@ -1,0 +1,5 @@
+# A padded, lower-case stamp header counts.
+status	Readable
+format	1
+stamp	true
+diagnostic	ConfigFormatMissing	1

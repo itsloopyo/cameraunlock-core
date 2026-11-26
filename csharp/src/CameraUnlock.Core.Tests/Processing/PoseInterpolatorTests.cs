@@ -1,0 +1,343 @@
+using Xunit;
+using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Processing;
+
+namespace CameraUnlock.Core.Tests.Processing
+{
+    public class PoseInterpolatorTests
+    {
+        private const float DeltaTime = 1f / 120f; // 120Hz frame rate
+
+        private static TrackingPose MakePose(float yaw, float pitch, float roll, long timestamp)
+        {
+            return new TrackingPose(yaw, pitch, roll, timestamp);
+        }
+
+        [Fact]
+        public void FirstSample_ReturnsRawPose()
+        {
+            var interp = new PoseInterpolator();
+            var pose = MakePose(10f, 20f, 5f, 1000);
+
+            var result = interp.Update(pose, DeltaTime);
+
+            Assert.Equal(10f, result.Yaw);
+            Assert.Equal(20f, result.Pitch);
+            Assert.Equal(5f, result.Roll);
+        }
+
+        [Fact]
+        public void InvalidPose_ReturnsUnmodified()
+        {
+            var interp = new PoseInterpolator();
+            var invalid = new TrackingPose(10f, 20f, 5f, 0);
+
+            var result = interp.Update(invalid, DeltaTime);
+
+            Assert.Equal(10f, result.Yaw);
+            Assert.Equal(20f, result.Pitch);
+            Assert.Equal(5f, result.Roll);
+            Assert.Equal(0, result.TimestampTicks);
+        }
+
+        [Fact]
+        public void SameTimestamp_OutputsSamePose()
+        {
+            var interp = new PoseInterpolator();
+            var pose = MakePose(10f, 20f, 5f, 1000);
+
+            // First call establishes the sample
+            interp.Update(pose, DeltaTime);
+
+            // Second call with same timestamp - from=to, so output stays the same
+            var result = interp.Update(pose, DeltaTime);
+
+            Assert.Equal(10f, result.Yaw, precision: 4);
+            Assert.Equal(20f, result.Pitch, precision: 4);
+            Assert.Equal(5f, result.Roll, precision: 4);
+        }
+
+        [Fact]
+        public void AfterTwoSamples_InterpolatesBetweenThem()
+        {
+            var interp = new PoseInterpolator();
+
+            // First sample: yaw=0
+            var pose1 = MakePose(0f, 0f, 0f, 1000);
+            interp.Update(pose1, DeltaTime);
+
+            // Simulate 3 frames passing at 120Hz
+            for (int i = 0; i < 3; i++)
+            {
+                interp.Update(pose1, DeltaTime);
+            }
+
+            // Second sample: yaw moved to 10
+            var pose2 = MakePose(10f, 0f, 0f, 2000);
+            interp.Update(pose2, DeltaTime);
+
+            // Next frame - should be interpolating between pose1 and pose2
+            var result = interp.Update(pose2, DeltaTime);
+
+            Assert.True(result.Yaw > 0f && result.Yaw < 10f,
+                $"Expected interpolated yaw between 0 and 10, got {result.Yaw}");
+        }
+
+        [Fact]
+        public void ExtrapolationHoldsThenExpires_WhenNoNewSample()
+        {
+            var interp = new PoseInterpolator();
+
+            // Establish two samples: 0 → 10 yaw
+            var pose1 = MakePose(0f, 0f, 0f, 1000);
+            interp.Update(pose1, DeltaTime);
+            for (int i = 0; i < 3; i++)
+            {
+                interp.Update(pose1, DeltaTime);
+            }
+
+            var pose2 = MakePose(10f, 0f, 0f, 2000);
+            interp.Update(pose2, DeltaTime);
+
+            // Run many frames without new sample - should extrapolate then cap
+            // A short gap - a dropped packet or a Wi-Fi burst - is still a live
+            // feed: extrapolate half a sample period past the target, then hold
+            // there (from + (to - from) * 1.5).
+            float held = 0f;
+            int holdFrames = (int)(PoseInterpolator.ExtrapolationHoldSeconds / DeltaTime) - 2;
+            for (int i = 0; i < holdFrames; i++)
+            {
+                held = interp.Update(pose2, DeltaTime).Yaw;
+            }
+            Assert.Equal(15f, held, precision: 1);
+
+            // Keep the feed stalled and the prediction expires: it converges
+            // back to what the tracker actually reported. Holding 1.5x forever
+            // left the view half again past where the head was.
+            float settled = 0f;
+            int decayFrames = (int)(PoseInterpolator.ExtrapolationDecaySeconds / DeltaTime) + 10;
+            for (int i = 0; i < decayFrames; i++)
+            {
+                settled = interp.Update(pose2, DeltaTime).Yaw;
+            }
+            Assert.Equal(10f, settled, precision: 1);
+        }
+
+        [Fact]
+        public void NoExtrapolation_HoldsAtTarget()
+        {
+            var interp = new PoseInterpolator { MaxExtrapolationFraction = 0f };
+
+            // Establish two samples
+            var pose1 = MakePose(0f, 0f, 0f, 1000);
+            interp.Update(pose1, DeltaTime);
+            for (int i = 0; i < 3; i++)
+            {
+                interp.Update(pose1, DeltaTime);
+            }
+
+            var pose2 = MakePose(10f, 0f, 0f, 2000);
+            interp.Update(pose2, DeltaTime);
+
+            // Run many frames without new sample - should hold at target
+            float lastYaw = 0f;
+            for (int i = 0; i < 100; i++)
+            {
+                var r = interp.Update(pose2, DeltaTime);
+                lastYaw = r.Yaw;
+            }
+
+            Assert.Equal(10f, lastYaw, precision: 3);
+        }
+
+        [Fact]
+        public void Reset_ClearsState()
+        {
+            var interp = new PoseInterpolator();
+
+            // Establish some state
+            var pose1 = MakePose(0f, 0f, 0f, 1000);
+            interp.Update(pose1, DeltaTime);
+            for (int i = 0; i < 3; i++)
+            {
+                interp.Update(pose1, DeltaTime);
+            }
+            var pose2 = MakePose(10f, 0f, 0f, 2000);
+            interp.Update(pose2, DeltaTime);
+
+            // Reset
+            interp.Reset();
+
+            // After reset, first sample should return raw
+            var pose3 = MakePose(5f, 5f, 5f, 3000);
+            var result = interp.Update(pose3, DeltaTime);
+
+            Assert.Equal(5f, result.Yaw);
+            Assert.Equal(5f, result.Pitch);
+            Assert.Equal(5f, result.Roll);
+
+            // Subsequent same-timestamp frame should stay at same pose (from=to)
+            var result2 = interp.Update(pose3, DeltaTime);
+            Assert.Equal(5f, result2.Yaw, precision: 4);
+        }
+
+        [Fact]
+        public void HighFrequencyInput_PassesThrough()
+        {
+            var interp = new PoseInterpolator();
+
+            // Simulate new sample every frame (like a local tracker at 120Hz)
+            float yaw = 0f;
+            TrackingPose result = default;
+            for (int i = 0; i < 20; i++)
+            {
+                yaw += 0.5f; // steady movement
+                var pose = MakePose(yaw, 0f, 0f, 1000 + i); // unique timestamp each frame
+                result = interp.Update(pose, DeltaTime);
+            }
+
+            // With a new sample every frame, output should match the raw pose
+            Assert.Equal(yaw, result.Yaw, precision: 5);
+        }
+
+        [Fact]
+        public void SteadyMotion_ProducesLinearOutput()
+        {
+            var interp = new PoseInterpolator();
+
+            // First sample at yaw=0
+            interp.Update(MakePose(0f, 0f, 0f, 1000), DeltaTime);
+            // 3 stale frames
+            for (int i = 0; i < 3; i++)
+                interp.Update(MakePose(0f, 0f, 0f, 1000), DeltaTime);
+
+            // Second sample at yaw=10 - establishes interval
+            interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
+            // 3 stale frames (interpolating toward 10)
+            for (int i = 0; i < 3; i++)
+                interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
+
+            // Third sample at yaw=20 - now we can check linearity
+            // Collect 4 frames (isNewSample + 3 stale) and verify constant frame-to-frame deltas
+            var values = new float[4];
+            values[0] = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime).Yaw;
+            for (int i = 1; i < 4; i++)
+                values[i] = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime).Yaw;
+
+            // All frame-to-frame deltas should be approximately equal (linear interpolation)
+            float refDelta = values[1] - values[0];
+            Assert.True(refDelta > 0f, $"Expected positive delta, got {refDelta}");
+            for (int i = 2; i < 4; i++)
+            {
+                float delta = values[i] - values[i - 1];
+                Assert.True(System.Math.Abs(delta - refDelta) < 0.5f,
+                    $"Frame deltas should be equal: {refDelta} vs {delta} at frame {i}");
+            }
+        }
+
+        // A 30 Hz tracker and a 60 fps game, the head turning 2 degrees a sample (60 a second).
+        // Frame i is drawn at i/60 s and carries the newest sample sent by then.
+        private const float GameDt = 1f / 60f;
+        private const float DegreesPerSample = 2f;
+
+        private static float Head(int sample) => sample * DegreesPerSample;
+
+        private sealed class Feed
+        {
+            private readonly PoseInterpolator _interp = new PoseInterpolator();
+            private int _sample = -1;
+            private float _t;
+            public long Ticks = 1;
+
+            /// Draws one frame `dt` after the last; returns the drawn yaw and the newest sample's.
+            public (float drawn, float head) Frame(float dt)
+            {
+                _t += dt;
+                int newest = (int)System.Math.Floor(_t * 30f + 1e-4f);
+                bool fresh = newest != _sample;
+                _sample = newest;
+                if (fresh) Ticks++;
+                return (_interp.Update(MakePose(Head(newest), 0f, 0f, Ticks), fresh, dt).Yaw, Head(newest));
+            }
+        }
+
+        [Fact]
+        public void AfterAGameFreeze_TheViewLandsOnTheNewestSampleAndDoesNotSwingPastIt()
+        {
+            var feed = new Feed();
+            for (int i = 0; i < 60; i++) feed.Frame(GameDt);
+
+            var (drawn, head) = feed.Frame(0.5f);
+            Assert.Equal(head, drawn, precision: 3);
+
+            for (int i = 0; i < 30; i++)
+            {
+                (drawn, head) = feed.Frame(GameDt);
+                Assert.True(drawn <= head + 0.01f, $"frame {i} after the freeze drew {drawn}, past the newest sample {head}");
+            }
+        }
+
+        [Fact]
+        public void WhenTheFreezesSampleComesAFrameLate_ThatFrameDrawsIt()
+        {
+            var interp = new PoseInterpolator();
+            long ticks = 1;
+            float yaw = 0f;
+            for (int i = 0; i < 60; i++)
+            {
+                bool fresh = i % 2 == 0;
+                if (fresh) { yaw = DegreesPerSample * (i / 2); ticks++; }
+                interp.Update(MakePose(yaw, 0f, 0f, ticks), fresh, GameDt);
+            }
+
+            interp.Update(MakePose(yaw, 0f, 0f, ticks), false, 0.5f);
+            yaw += 30f;
+            ticks++;
+            Assert.Equal(yaw, interp.Update(MakePose(yaw, 0f, 0f, ticks), true, GameDt).Yaw, precision: 3);
+        }
+
+        [Fact]
+        public void AfterAGameFreeze_TheViewIsBackToItsUsualLagWithin200Ms()
+        {
+            var feed = new Feed();
+            float usual = 0f;
+            for (int i = 0; i < 60; i++)
+            {
+                var (d, h) = feed.Frame(GameDt);
+                if (i >= 30) usual = System.Math.Max(usual, h - d);
+            }
+
+            feed.Frame(0.5f);
+            for (int i = 0; i < 12; i++) feed.Frame(GameDt);
+            for (int i = 0; i < 30; i++)
+            {
+                var (d, h) = feed.Frame(GameDt);
+                Assert.True(h - d <= usual + 0.1f, $"{(12 + i) * 1000 / 60} ms after the freeze the view trails by {h - d}, usually at most {usual}");
+            }
+        }
+
+        [Fact]
+        public void ATrackerThatSlowsTo10Hz_IsStillFilledInWithoutFlatSpots()
+        {
+            var interp = new PoseInterpolator();
+            long ticks = 1;
+            float yaw = 0f;
+            float last = 0f;
+            const int FramesPerSample = 6;
+            for (int i = 0; i < 2 * 60; i++)
+            {
+                bool fresh = i % 2 == 0;
+                if (fresh) { yaw += 1f; ticks++; }
+                last = interp.Update(MakePose(yaw, 0f, 0f, ticks), fresh, GameDt).Yaw;
+            }
+            for (int i = 0; i < 2 * 60; i++)
+            {
+                bool fresh = i % FramesPerSample == 0;
+                if (fresh) { yaw += 3f; ticks++; }
+                float drawn = interp.Update(MakePose(yaw, 0f, 0f, ticks), fresh, GameDt).Yaw;
+                if (i >= 60) Assert.True(drawn - last > 0.1f, $"frame {i} at 10 Hz moved {drawn - last}: a flat spot");
+                last = drawn;
+            }
+        }
+    }
+}

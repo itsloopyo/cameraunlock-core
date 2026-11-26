@@ -1,0 +1,7 @@
+# ConfigFormat under a later [CameraUnlock] header of the same section.
+status	Readable
+format	2
+stamp	true
+key	General	A	1	3	-
+key	CameraUnlock	ConfigFormat	2	5	-
+diagnostic	ConfigFormatNewer	5

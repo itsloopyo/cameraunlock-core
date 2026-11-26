@@ -1,0 +1,847 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Effects;
+using CameraUnlock.Core.Math;
+using CameraUnlock.Core.Protocol;
+
+namespace CameraUnlock.Core.Config
+{
+    /// <summary>
+    /// Default implementation of IHeadTrackingConfig that can be loaded from an INI file
+    /// or configured programmatically.
+    /// <para>
+    /// Key matching runs through <see cref="ConfigKeySchema"/>, which is generated from
+    /// data/config-schema.json together with the C++ table, so both halves of the library
+    /// accept exactly the same spellings. Matching is section-less: a key is lowercased and
+    /// stripped of '_' and '-', so the section a key sits under decides file layout and
+    /// documentation, not parsing.
+    /// </para>
+    /// </summary>
+    public class HeadTrackingConfigData : IHeadTrackingConfig
+    {
+        /// <summary>
+        /// Largest accepted sensitivity, either sign. TrackingProcessor multiplies a
+        /// quaternion decomposition - never more than 180 degrees - by this, so the bound
+        /// keeps that product finite with room to spare while sitting orders of magnitude
+        /// past any usable setting. The documented tuning range is 0.1 to 3.0.
+        /// </summary>
+        /// <remarks>
+        /// The same number as config::kMaxSensitivity in the C++ half
+        /// (cpp/include/cameraunlock/config/value_guards.h). The two must agree: one ini
+        /// file is read by both, so a value one half accepts and the other refuses means
+        /// the same config behaves differently in a Unity mod and a C++ mod.
+        /// </remarks>
+        public const float MaxSensitivity = 100.0f;
+
+        /// <summary>
+        /// Largest accepted travel limit or tracker-pivot distance, in metres. A cockpit
+        /// head has centimetres of travel, so this is generous headroom that still catches
+        /// a mistyped 10000 for 0.10. Matches config::kMaxPositionLimit in the C++ half.
+        /// </summary>
+        public const float MaxDistanceMetres = 10.0f;
+
+        /// <inheritdoc />
+        public int UdpPort { get; set; } = OpenTrackReceiver.DefaultPort;
+
+        /// <inheritdoc />
+        public bool EnableOnStartup { get; set; } = true;
+
+        /// <inheritdoc />
+        public SensitivitySettings Sensitivity { get; set; } = SensitivitySettings.Default;
+
+        /// <inheritdoc />
+        public string RecenterKeyName { get; set; } = "Home";
+
+        /// <inheritdoc />
+        public string ToggleKeyName { get; set; } = "End";
+
+        /// <summary>
+        /// Key name for toggling world-space vs camera-local yaw (e.g., "PageDown").
+        /// Framework-specific code parses this into the appropriate key code type.
+        /// </summary>
+        public string YawModeKeyName { get; set; } = "PageDown";
+
+        /// <summary>Key name for toggling positional (6DOF) tracking (e.g., "PageUp").</summary>
+        public string PositionToggleKeyName { get; set; } = "PageUp";
+
+        /// <summary>Key name for toggling the decoupled aim reticle (e.g., "Insert").</summary>
+        public string ReticleToggleKeyName { get; set; } = "Insert";
+
+        /// <summary>
+        /// Key name for cycling the tracking mode. Empty by default: a mod that has no mode
+        /// cycle leaves it unbound rather than advertising a key that does nothing.
+        /// </summary>
+        public string CycleTrackingModeKeyName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The key list that toggles <see cref="TrueFreeLook"/>. Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public string TrueFreeLookKeyName { get; set; } = "Insert, Ctrl+Shift+U";
+
+        /// <summary>
+        /// Yaw mode at startup. true = horizon-locked yaw (rotates around world up
+        /// regardless of pitch). false = camera-local yaw (rotates around the camera's
+        /// current up axis, producing leaning/rolling at extreme pitches).
+        /// </summary>
+        public bool WorldSpaceYaw { get; set; } = true;
+
+        /// <summary>
+        /// Deprecated, kept so existing callers compile: aim is always decoupled.
+        /// <see cref="ApplyValues"/> still parses AimDecoupling into it, but it is not a setting,
+        /// <see cref="HeadTrackingConfigTable"/> has no row for it, and a mod never reads it to
+        /// couple the aim to the head.
+        /// </summary>
+        public bool AimDecouplingEnabled { get; set; } = true;
+
+        /// <inheritdoc />
+        public bool ShowDecoupledReticle { get; set; } = true;
+
+        /// <inheritdoc />
+        public float[] ReticleColorRgba { get; set; } = new float[] { 1f, 1f, 1f, 1f };
+
+        /// <inheritdoc />
+        public float LocalSmoothing { get; set; } = SmoothingUtils.DefaultLocalSmoothing;
+
+        /// <inheritdoc />
+        public float RemoteSmoothing { get; set; } = SmoothingUtils.DefaultRemoteSmoothing;
+
+        /// <summary>
+        /// Whether rotational (yaw, pitch, roll) tracking is applied. With
+        /// <see cref="PositionEnabled"/> it records the tracking mode.
+        /// </summary>
+        public bool RotationEnabled { get; set; } = true;
+
+        /// <summary>Whether positional (6DOF) tracking is applied.</summary>
+        public bool PositionEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Deprecated, kept so existing callers compile: the tracking mode
+        /// (<see cref="RotationEnabled"/> with <see cref="PositionEnabled"/>) is the only way
+        /// position is switched off. <see cref="ApplyValues"/> still parses PositionAllowed into
+        /// it, but it is not a setting, <see cref="HeadTrackingConfigTable"/> has no row for it,
+        /// and a mod never reads it.
+        /// </summary>
+        [Obsolete("Not a setting: the tracking mode (RotationEnabled with PositionEnabled) is the only way positional tracking is switched off. Read PositionEnabled instead.")]
+        public bool PositionAllowed { get; set; } = true;
+
+        /// <summary>
+        /// The lean while aiming down sights: false keeps the eye on the sight line (sights
+        /// locked), true leaves the lean in full (true free look). Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public bool TrueFreeLook { get; set; } = false;
+
+        /// <summary>
+        /// With <see cref="TrueFreeLook"/>, the aim mode (<see cref="CameraUnlock.Core.Ads.AimModes"/>):
+        /// true draws the aim marker in free look, and means nothing while TrueFreeLook is false.
+        /// Read only through <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does
+        /// not read it.
+        /// </summary>
+        public bool FreeLookMarker { get; set; } = false;
+
+        /// <summary>
+        /// The fourth aim mode (<see cref="CameraUnlock.Core.Ads.AimModes"/>): true eases yaw,
+        /// pitch and the lean out while the sights are up, whatever the two above hold. Read
+        /// only through <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not
+        /// read it.
+        /// </summary>
+        public bool StockSights { get; set; } = false;
+
+        /// <summary>
+        /// How long, in milliseconds, the newest packet counts as current. Core only parses
+        /// it; the mod's per-frame gate stops following the tracker past it. At least 1.
+        /// </summary>
+        public int DataFreshnessMs { get; set; } = 500;
+
+        /// <summary>
+        /// Positional sensitivity, limits and inversion. The smoothing pair on this struct is
+        /// recomposed from <see cref="LocalSmoothing"/> and <see cref="RemoteSmoothing"/> at
+        /// the end of <see cref="ApplyValues"/>, so position and rotation cannot end up on
+        /// different smoothing without a second set of keys nobody asked for.
+        /// </summary>
+        public PositionSettings Position { get; set; } = PositionSettings.Default;
+
+        /// <summary>
+        /// Metres from the neck pivot forward to the point the tracker watches. Feeds
+        /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotForward"/>.
+        /// Deprecated, kept so existing callers compile: the tracker is authoritative, so the
+        /// neck pivot is not a setting and <see cref="HeadTrackingConfigTable"/> has no row for
+        /// it. <see cref="ApplyValues"/> still parses it. 0 is compensation off.
+        /// </summary>
+        [Obsolete("Not a setting: the tracker is authoritative over the neck pivot. A game that keeps a pivot sets PositionProcessor.TrackerPivotForward in code.")]
+        public float TrackerPivotForward { get; set; } = 0.0f;
+
+        /// <summary>
+        /// Metres from the neck pivot up to the point the tracker watches. Feeds
+        /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotUp"/>.
+        /// Deprecated with <see cref="TrackerPivotForward"/>: not a setting, and no table row.
+        /// </summary>
+        [Obsolete("Not a setting: the tracker is authoritative over the neck pivot. A game that keeps a pivot sets PositionProcessor.TrackerPivotUp in code.")]
+        public float TrackerPivotUp { get; set; } = 0.0f;
+
+        /// <summary>
+        /// A carried light that follows the head rather than the aim. Inert in a mod for a
+        /// game with no carried light; see <see cref="HeadFollowLightSettings"/>.
+        /// </summary>
+        public HeadFollowLightSettings Light { get; set; } = new HeadFollowLightSettings();
+
+        /// <summary>
+        /// Whether the mod sweeps the level between the clean eye and the lean target and
+        /// cuts the lean to what the room leaves. Off by default: a mod turns it on once its
+        /// trace has been confirmed against real geometry in game.
+        /// </summary>
+        public bool CollisionEnabled { get; set; } = false;
+
+        /// <summary>
+        /// How far off a blocking surface the eye is held, in the engine's own world units
+        /// (0.10 in a metres engine, 10 in a centimetres one). Must exceed the camera's near
+        /// clip distance or the wall is culled before the eye reaches it.
+        /// </summary>
+        public float CollisionMargin { get; set; } = 0.10f;
+
+        /// <summary>
+        /// The trace channel the sweep runs on, for engines whose query takes one. Passed
+        /// through unchecked because its meaning is the engine's.
+        /// </summary>
+        public int CollisionChannel { get; set; } = 0;
+
+        /// <summary>
+        /// How quickly the lean reopens once an obstruction clears, 0-1 like every other
+        /// smoothing value. Tightening is never smoothed.
+        /// </summary>
+        public float CollisionReleaseSmoothing { get; set; } = 0.9f;
+
+        /// <summary>
+        /// How much the Accela filter smooths, 0 to 1. Core binds it and does not apply it: the
+        /// launcher's own backends do. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public float Accela { get; set; } = 0.75f;
+
+        /// <summary>
+        /// The players whose tracker the Accela filter smooths, as the canonical text of
+        /// <see cref="PlayerListCodec"/>: <c>2, 3</c>, or empty for none. Core binds it and does
+        /// not apply it. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public string AccelaPlayers { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The key list that switches the view between first person and the game's own camera, in
+        /// a mod that has a first-person view. Core binds it and does not poll it. Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public string FirstPersonKeyName { get; set; } = "ScrollLock, Ctrl+Shift+B";
+
+        /// <summary>
+        /// The field of view the game is drawn at, in vertical degrees; 0 leaves the game's own.
+        /// Zoomed views keep their ratio to it. Core binds it and does not apply it: each mod
+        /// converts it to its engine's axis. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public float GameFov { get; set; }
+
+        /// <summary>
+        /// true (the default) lifts the game's own frame-rate limit, in a mod that can, with game time, movement,
+        /// physics and timers kept at their normal speed; false leaves the game's frame rate as it is.
+        /// Core binds it and does not apply it: each mod that can unlock its game's frame rate reads
+        /// it. Read only through <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/>
+        /// does not read it.
+        /// </summary>
+        public bool FrameRateUnlock { get; set; } = true;
+
+        /// <summary>
+        /// true (the default) smooths the jagged edges of the game's 3D with an FXAA pass, in a mod that can draw
+        /// one into the game's frame; false leaves the picture as the game draws it. Core binds it
+        /// and does not apply it: each mod that can draw the pass reads it. Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public bool Fxaa { get; set; } = true;
+
+        /// <summary>
+        /// true keeps head tracking on while the game plays a cutscene, in a mod that can tell its
+        /// cutscenes apart from its other gated states; false holds the pose off in cutscenes as in
+        /// menus and loading. Core binds it and does not apply it: each mod that can tell a cutscene
+        /// apart reads it. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public bool CutsceneTracking { get; set; }
+
+        /// <summary>
+        /// Creates a new config with default values.
+        /// </summary>
+        public HeadTrackingConfigData()
+        {
+        }
+
+        /// <summary>
+        /// Loads configuration from an INI file. Returns defaults for missing values.
+        /// <para>
+        /// Deprecated, kept for the mods that call it until a major version: a game reads its config
+        /// through <see cref="ConfigOwner{TConfig}"/> with <see cref="HeadTrackingConfigTable"/>.
+        /// </para>
+        /// </summary>
+        /// <param name="filePath">Path to the config file.</param>
+        /// <param name="log">Optional logging action.</param>
+        /// <returns>Loaded configuration.</returns>
+#if NULLABLE_ENABLED
+        public static HeadTrackingConfigData LoadFromFile(string filePath, Action<string>? log = null)
+#else
+        public static HeadTrackingConfigData LoadFromFile(string filePath, Action<string> log = null)
+#endif
+        {
+            var config = new HeadTrackingConfigData();
+
+            try
+            {
+                var values = ConfigParsingUtils.ParseIniFile(filePath);
+                if (values.Count == 0)
+                {
+                    log?.Invoke("No config file found, using defaults");
+                    return config;
+                }
+
+                config.ApplyValues(values, log);
+                log?.Invoke("Config loaded successfully");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke(string.Format("Config load error (using defaults): {0}", ex.Message));
+            }
+
+            return config;
+        }
+
+        /// <summary>
+        /// Applies values from a dictionary to this config.
+        /// <para>
+        /// Deprecated, kept for the mods that call it until a major version: a game reads its config
+        /// through <see cref="ConfigOwner{TConfig}"/> with <see cref="HeadTrackingConfigTable"/>.
+        /// </para>
+        /// </summary>
+#if NULLABLE_ENABLED
+        public void ApplyValues(Dictionary<string, string> values, Action<string>? log = null)
+#else
+        public void ApplyValues(Dictionary<string, string> values, Action<string> log = null)
+#endif
+        {
+            float yawSens = Sensitivity.Yaw;
+            float pitchSens = Sensitivity.Pitch;
+            float rollSens = Sensitivity.Roll;
+            bool invertYaw = Sensitivity.InvertYaw;
+            bool invertPitch = Sensitivity.InvertPitch;
+            bool invertRoll = Sensitivity.InvertRoll;
+
+            float posSensX = Position.SensitivityX;
+            float posSensY = Position.SensitivityY;
+            float posSensZ = Position.SensitivityZ;
+            float limitX = Position.LimitX;
+            float limitY = Position.LimitY;
+            float limitYDown = Position.LimitYDown;
+            bool sawLimitY = false;
+            bool sawLimitYDown = false;
+            string limitYSpelling = string.Empty;
+            bool verticalLimitsWereSymmetric = Position.LimitY == Position.LimitYDown;
+            float limitZ = Position.LimitZ;
+            float limitZBack = Position.LimitZBack;
+            bool invertPosX = Position.InvertX;
+            bool invertPosY = Position.InvertY;
+            bool invertPosZ = Position.InvertZ;
+
+            var firstSpellingOf = new Dictionary<string, string>();
+
+            foreach (var kvp in values)
+            {
+                string key = ConfigKeySchema.Resolve(kvp.Key);
+                if (key == null) continue;
+                // Added to the schema after this reader was frozen: it skips them as it did when
+                // they resolved to nothing, duplicate-spelling warning included.
+                if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey
+                    || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights
+                    || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers
+                    || key == ConfigKeySchema.Keys.FirstPersonKey || key == ConfigKeySchema.Keys.GameFov
+                    || key == ConfigKeySchema.Keys.FrameRateUnlock || key == ConfigKeySchema.Keys.Fxaa
+                    || key == ConfigKeySchema.Keys.CutsceneTracking) continue;
+
+                string firstSpelling;
+                if (firstSpellingOf.TryGetValue(key, out firstSpelling))
+                {
+                    WarnDuplicateConcept(log, firstSpelling, kvp.Key);
+                }
+                else
+                {
+                    firstSpellingOf[key] = kvp.Key;
+                }
+
+                // Ahead of the switch, so a retired concept needs no case of its own and any
+                // number of them behave alike. The advice is generated from the schema.
+                if (ConfigKeySchema.IsRetired(key))
+                {
+                    WarnRetiredKey(log, kvp.Key, key);
+                    continue;
+                }
+
+                string value = kvp.Value;
+
+                int intVal;
+                float floatVal;
+                bool boolVal;
+
+                switch (key)
+                {
+                    case ConfigKeySchema.Keys.UdpPort:
+                        // Range-checked here rather than left to the socket. An
+                        // out-of-range port reached UdpClient's constructor and threw
+                        // ArgumentOutOfRangeException at plugin Awake(), killing the mod
+                        // with a socket stack trace that names no config key.
+                        //
+                        // The bound is the actual protocol range, NOT the BepInEx
+                        // binding's 1024 floor: Windows imposes no privileged-port
+                        // restriction on a UDP bind, so a user running with udpport
+                        // below 1024 has a working configuration today and rejecting it
+                        // would break them.
+                        if (ConfigParsingUtils.TryParseInt(value, out intVal))
+                        {
+                            if (intVal >= 1 && intVal <= 65535)
+                            {
+                                UdpPort = intVal;
+                            }
+                            else
+                            {
+                                WarnOutOfRange(log, kvp.Key, value, "1-65535",
+                                    UdpPort.ToString(CultureInfo.InvariantCulture));
+                            }
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.EnableOnStartup:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            EnableOnStartup = boolVal;
+                        break;
+
+                    // A window of 0 or less never counts a packet as current, so tracking
+                    // would never apply.
+                    case ConfigKeySchema.Keys.DataFreshnessMs:
+                        if (ConfigParsingUtils.TryParseInt(value, out intVal))
+                        {
+                            if (intVal >= 1)
+                            {
+                                DataFreshnessMs = intVal;
+                            }
+                            else
+                            {
+                                WarnOutOfRange(log, kvp.Key, value, "1 or more",
+                                    DataFreshnessMs.ToString(CultureInfo.InvariantCulture));
+                            }
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.YawSensitivity:
+                        if (TryParseMagnitude(log, kvp.Key, value, yawSens, MaxSensitivity, out floatVal))
+                            yawSens = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PitchSensitivity:
+                        if (TryParseMagnitude(log, kvp.Key, value, pitchSens, MaxSensitivity, out floatVal))
+                            pitchSens = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.RollSensitivity:
+                        if (TryParseMagnitude(log, kvp.Key, value, rollSens, MaxSensitivity, out floatVal))
+                            rollSens = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertYaw:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertYaw = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPitch:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPitch = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertRoll:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertRoll = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.RecenterKey:
+                        RecenterKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.ToggleKey:
+                        ToggleKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.YawModeKey:
+                        YawModeKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionToggleKey:
+                        PositionToggleKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.ReticleToggleKey:
+                        ReticleToggleKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.CycleTrackingModeKey:
+                        CycleTrackingModeKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.WorldSpaceYaw:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            WorldSpaceYaw = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.AimDecoupling:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            AimDecouplingEnabled = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.ShowReticle:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            ShowDecoupledReticle = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.ReticleColor:
+                        float[] color;
+                        if (ConfigParsingUtils.TryParseColor(value, out color))
+                            ReticleColorRgba = color;
+                        break;
+
+                    case ConfigKeySchema.Keys.LocalSmoothing:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            LocalSmoothing = MathUtils.Clamp01(floatVal);
+                        }
+                        else
+                        {
+                            LocalSmoothing = SmoothingUtils.DefaultLocalSmoothing;
+                            WarnUnusable(log, "LocalSmoothing", value, LocalSmoothing);
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.RemoteSmoothing:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            RemoteSmoothing = MathUtils.Clamp01(floatVal);
+                        }
+                        else
+                        {
+                            RemoteSmoothing = SmoothingUtils.DefaultRemoteSmoothing;
+                            WarnUnusable(log, "RemoteSmoothing", value, RemoteSmoothing);
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.RotationEnabled:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            RotationEnabled = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionEnabled:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            PositionEnabled = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionAllowed:
+#pragma warning disable 618
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            PositionAllowed = boolVal;
+#pragma warning restore 618
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionSensitivityX:
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensX, MaxSensitivity, out floatVal))
+                            posSensX = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionSensitivityY:
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensY, MaxSensitivity, out floatVal))
+                            posSensY = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionSensitivityZ:
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensZ, MaxSensitivity, out floatVal))
+                            posSensZ = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitX:
+                        if (TryParseMagnitude(log, kvp.Key, value, limitX, MaxDistanceMetres, out floatVal))
+                            limitX = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitY:
+                        if (TryParseMagnitude(log, kvp.Key, value, limitY, MaxDistanceMetres, out floatVal))
+                        {
+                            limitY = floatVal;
+                            sawLimitY = true;
+                            limitYSpelling = kvp.Key;
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitYDown:
+                        if (TryParseMagnitude(log, kvp.Key, value, limitYDown, MaxDistanceMetres, out floatVal))
+                        {
+                            limitYDown = floatVal;
+                            sawLimitYDown = true;
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitZ:
+                        if (TryParseMagnitude(log, kvp.Key, value, limitZ, MaxDistanceMetres, out floatVal))
+                            limitZ = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitZBack:
+                        if (TryParseMagnitude(log, kvp.Key, value, limitZBack, MaxDistanceMetres, out floatVal))
+                            limitZBack = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPositionX:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPosX = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPositionY:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPosY = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPositionZ:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPosZ = boolVal;
+                        break;
+
+#pragma warning disable 618
+                    case ConfigKeySchema.Keys.TrackerPivotForward:
+                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotForward, MaxDistanceMetres, out floatVal))
+                            TrackerPivotForward = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.TrackerPivotUp:
+                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotUp, MaxDistanceMetres, out floatVal))
+                            TrackerPivotUp = floatVal;
+                        break;
+#pragma warning restore 618
+
+                    case ConfigKeySchema.Keys.LightMultiplier:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            if (floatVal >= 0f && floatVal <= HeadFollowLightSettings.MaxMultiplier)
+                            {
+                                Light.Multiplier = floatVal;
+                            }
+                            else
+                            {
+                                WarnOutOfRange(log, kvp.Key, value,
+                                    "0-" + HeadFollowLightSettings.MaxMultiplier.ToString(CultureInfo.InvariantCulture),
+                                    Light.Multiplier.ToString(CultureInfo.InvariantCulture));
+                            }
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.CollisionEnabled:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            CollisionEnabled = boolVal;
+                        break;
+
+                    // No upper bound: the unit is the engine's, so a ceiling that suits
+                    // metres would refuse an ordinary centimetre margin. Negative would
+                    // hold the eye past the surface instead of short of it.
+                    case ConfigKeySchema.Keys.CollisionMargin:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            if (floatVal >= 0f)
+                            {
+                                CollisionMargin = floatVal;
+                            }
+                            else
+                            {
+                                log?.Invoke(string.Format(
+                                    "Config key '{0}' has a negative value '{1}' - using {2}",
+                                    kvp.Key, value, CollisionMargin.ToString(CultureInfo.InvariantCulture)));
+                            }
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.CollisionChannel:
+                        if (ConfigParsingUtils.TryParseInt(value, out intVal))
+                            CollisionChannel = intVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.CollisionReleaseSmoothing:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            if (floatVal >= 0f && floatVal <= 1f)
+                            {
+                                CollisionReleaseSmoothing = floatVal;
+                            }
+                            else
+                            {
+                                WarnOutOfRange(log, kvp.Key, value, "0-1",
+                                    CollisionReleaseSmoothing.ToString(CultureInfo.InvariantCulture));
+                            }
+                        }
+                        break;
+
+                }
+            }
+
+            // A file that names one vertical limit means one vertical limit. The clamp is
+            // [-LimitYDown, +LimitY], so leaving the down side at its default silently caps a
+            // raised LimitY at 0.20m downward - the exact bug ~47 mod repos carry today, each
+            // of which hand-mirrors the key or does not. Decided after the loop, so dictionary
+            // order cannot change the outcome, and an explicit LimitYDown in the same
+            // dictionary always wins.
+            //
+            // The mirror only fires when the vertical limits were already symmetric. A caller
+            // that built PositionSettings with limitYDown != limitY picked that asymmetry to
+            // keep the camera out of the player body, and mirroring would throw it away
+            // without the file ever naming the down side.
+            if (sawLimitY && !sawLimitYDown)
+            {
+                if (verticalLimitsWereSymmetric)
+                {
+                    limitYDown = limitY;
+                }
+                else
+                {
+                    log?.Invoke(string.Format(
+                        "Config key '{0}' set the upward limit to {1}; the downward limit stays at {2} because this config was built with an asymmetric vertical limit. Name LimitYDown to change it.",
+                        limitYSpelling,
+                        limitY.ToString(CultureInfo.InvariantCulture),
+                        limitYDown.ToString(CultureInfo.InvariantCulture)));
+                }
+            }
+
+            Sensitivity = new SensitivitySettings(yawSens, pitchSens, rollSens, invertYaw, invertPitch, invertRoll);
+            Position = new PositionSettings(
+                posSensX, posSensY, posSensZ,
+                limitX, limitY, limitYDown, limitZ, limitZBack,
+                LocalSmoothing, RemoteSmoothing,
+                invertPosX, invertPosY, invertPosZ);
+        }
+
+        // Limits, sensitivities and tracker-pivot distances are magnitudes. A negative one
+        // is not a smaller value, it is a broken one: ClampToLimits calls
+        // Clamp(y, -LimitYDown, LimitY), so a negative LimitY puts min above max and every
+        // input on that axis comes back pinned to the bound, whatever the head does. Axis
+        // direction has its own keys (InvertYaw/InvertPositionY/...), so nothing legitimate
+        // is expressed by a minus sign here.
+        //
+        // Zero passes on purpose. A zero limit clamps the axis to [0, 0], which is a real
+        // request to lock that axis, and a zero sensitivity is a real request to disable it.
+        // Rejected values are reported and the previous value stands - clamping a negative
+        // to zero would silently lock an axis the user meant to widen.
+#if NULLABLE_ENABLED
+        private static bool TryParseMagnitude(Action<string>? log, string key, string value, float current, float max, out float result)
+#else
+        private static bool TryParseMagnitude(Action<string> log, string key, string value, float current, float max, out float result)
+#endif
+        {
+            if (!ConfigParsingUtils.TryParseFloat(value, out result))
+            {
+                result = current;
+                return false;
+            }
+
+            if (result < 0f)
+            {
+                log?.Invoke(string.Format(
+                    "Config key '{0}' has a negative value '{1}' - limits, sensitivities and tracker pivot distances must be zero or greater. Rejected, keeping {2}.",
+                    key, value, current.ToString(CultureInfo.InvariantCulture)));
+                result = current;
+                return false;
+            }
+
+            // The upper bound is not a taste judgement, it is the point past which the
+            // value stops being a number the pipeline can carry. A sensitivity multiplies
+            // a decomposition that is never more than 180 degrees, so a large enough one
+            // overflows that product to Infinity and every frame after it is NaN. A
+            // distance in metres is bounded by the room. Both sit orders of magnitude past
+            // any usable setting, so only a typo lands here.
+            if (result > max)
+            {
+                log?.Invoke(string.Format(
+                    "Config key '{0}' has an out-of-range value '{1}' - the maximum is {2}. Rejected, keeping {3}.",
+                    key, value, max.ToString(CultureInfo.InvariantCulture),
+                    current.ToString(CultureInfo.InvariantCulture)));
+                result = current;
+                return false;
+            }
+
+            return true;
+        }
+
+#if NULLABLE_ENABLED
+        private static void WarnDuplicateConcept(Action<string>? log, string firstSpelling, string secondSpelling)
+#else
+        private static void WarnDuplicateConcept(Action<string> log, string firstSpelling, string secondSpelling)
+#endif
+        {
+            log?.Invoke(string.Format(
+                "Config keys '{0}' and '{1}' are two spellings of the same setting. Only one takes effect and which one is not defined - remove one.",
+                firstSpelling, secondSpelling));
+        }
+
+#if NULLABLE_ENABLED
+        private static void WarnOutOfRange(Action<string>? log, string key, string value, string expected, string current)
+#else
+        private static void WarnOutOfRange(Action<string> log, string key, string value, string expected, string current)
+#endif
+        {
+            log?.Invoke(string.Format(
+                "Config key '{0}' has an out-of-range value '{1}' (expected {2}) - using {3}",
+                key, value, expected, current));
+        }
+
+#if NULLABLE_ENABLED
+        private static void WarnUnusable(Action<string>? log, string key, string value, float fallback)
+#else
+        private static void WarnUnusable(Action<string> log, string key, string value, float fallback)
+#endif
+        {
+            log?.Invoke(string.Format(
+                "Config key '{0}' has an unusable value '{1}' (not a finite number) - using {2}",
+                key, value, fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        // Warned once per process per key rather than once per load: mods reload config on
+        // a hotkey or a file watcher, and repeating this every reload buries it.
+        private static readonly HashSet<string> _warnedRetiredKeys = new HashSet<string>();
+
+#if NULLABLE_ENABLED
+        private static void WarnRetiredKey(Action<string>? log, string asWritten, string canonical)
+#else
+        private static void WarnRetiredKey(Action<string> log, string asWritten, string canonical)
+#endif
+        {
+            // Latched only once the warning is actually emitted, so a caller with no sink
+            // cannot burn the one chance a later caller had of seeing it.
+            if (log == null) return;
+            if (!_warnedRetiredKeys.Add(canonical)) return;
+
+            // A retired value is deliberately never migrated: each one was retired because
+            // what it meant changed, so carrying the number across would hand the player a
+            // setting they never chose. The advice names what to set instead.
+            log(string.Format(
+                "Config key '{0}' has been retired and is IGNORED. {1}",
+                asWritten, ConfigKeySchema.RetiredAdvice(canonical)));
+        }
+
+        /// <summary>
+        /// Gets the default config file path next to the specified assembly.
+        /// </summary>
+        public static string GetDefaultConfigPath(System.Reflection.Assembly assembly, string fileName = "HeadTracking.cfg")
+        {
+            string dir = ConfigParsingUtils.GetAssemblyDirectory(assembly);
+            return Path.Combine(dir, fileName);
+        }
+    }
+}

@@ -1,0 +1,3 @@
+# UTF-16 BE with its mark: the reader cannot read it.
+set	General	A	2
+refused	Utf16			-

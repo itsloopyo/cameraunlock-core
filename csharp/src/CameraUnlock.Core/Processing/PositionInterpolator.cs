@@ -1,0 +1,173 @@
+using CameraUnlock.Core.Data;
+
+namespace CameraUnlock.Core.Processing
+{
+    /// <summary>
+    /// Fills in frames between low-rate position samples using linear interpolation.
+    /// Mirrors PoseInterpolator pattern, operating on PositionData (X/Y/Z) instead of TrackingPose (Yaw/Pitch/Roll).
+    /// </summary>
+    public sealed class PositionInterpolator
+    {
+        /// <summary>
+        /// Maximum extrapolation past the target, as a fraction of the estimated
+        /// sample interval. Mirrors PoseInterpolator.MaxExtrapolationFraction.
+        /// </summary>
+        public float MaxExtrapolationFraction { get; set; } = 0.5f;
+
+        /// <summary>
+        /// Mirrors PoseInterpolator.ExtrapolationHoldSeconds.
+        /// </summary>
+        public const float ExtrapolationHoldSeconds = PoseInterpolator.ExtrapolationHoldSeconds;
+
+        /// <summary>
+        /// Mirrors PoseInterpolator.ExtrapolationDecaySeconds.
+        /// </summary>
+        public const float ExtrapolationDecaySeconds = PoseInterpolator.ExtrapolationDecaySeconds;
+
+        /// <summary>
+        /// Segment position to sample at, given progress and how long the next
+        /// sample has been outstanding. Mirrors PoseInterpolator.SegmentPosition -
+        /// see there for why the extrapolation expires on a wall clock rather
+        /// than parking on the overshoot, and why a dropped packet must not
+        /// trigger it.
+        /// </summary>
+        public float SegmentPosition(float progress, float timeSinceLastSample)
+        {
+            return PoseInterpolator.SegmentPosition(progress, timeSinceLastSample, MaxExtrapolationFraction);
+        }
+
+        private const float IntervalBlend = PoseInterpolator.IntervalBlend;
+        private const float DefaultSampleInterval = PoseInterpolator.DefaultSampleInterval;
+        private const float MinSampleInterval = PoseInterpolator.MinSampleInterval;
+        private const float MaxSampleInterval = PoseInterpolator.MaxSampleInterval;
+        private const float MaxIntervalGrowth = PoseInterpolator.MaxIntervalGrowth;
+
+        private float _fromX, _fromY, _fromZ;
+        private float _toX, _toY, _toZ;
+        private long _lastTimestampTicks;
+
+        private float _progress;
+        private float _sampleInterval = DefaultSampleInterval;
+        private float _timeSinceLastNewSample;
+
+        private bool _hasFirstSample;
+        private bool _hasSecondSample;
+        private bool _longFrame;
+
+        /// <summary>
+        /// Update with the latest raw position and frame delta time.
+        /// Returns a smoothly interpolated position.
+        /// </summary>
+        public PositionData Update(PositionData rawPosition, float deltaTime)
+        {
+            return Update(rawPosition, rawPosition.TimestampTicks != _lastTimestampTicks, deltaTime);
+        }
+
+        /// <summary>
+        /// Update with an explicit new-sample flag. See
+        /// <see cref="PoseInterpolator.Update(Data.TrackingPose, bool, float)"/> for why the
+        /// timestamp alone is not enough. Matches PositionInterpolator::Update in C++.
+        /// </summary>
+        public PositionData Update(PositionData rawPosition, bool isNewSample, float deltaTime)
+        {
+            if (!rawPosition.IsValid)
+            {
+                return rawPosition;
+            }
+
+            _timeSinceLastNewSample += deltaTime;
+            if (deltaTime > _sampleInterval * (1f + MaxExtrapolationFraction)) _longFrame = true;
+
+            if (isNewSample)
+            {
+                if (!_hasFirstSample)
+                {
+                    _fromX = rawPosition.X;
+                    _fromY = rawPosition.Y;
+                    _fromZ = rawPosition.Z;
+                    _toX = rawPosition.X;
+                    _toY = rawPosition.Y;
+                    _toZ = rawPosition.Z;
+                    _lastTimestampTicks = rawPosition.TimestampTicks;
+                    _progress = 1f;
+                    _timeSinceLastNewSample = 0f;
+                    _hasFirstSample = true;
+                    _longFrame = false;
+                    return rawPosition;
+                }
+
+                // See PoseInterpolator for why this is NOT gated on <= MaxSampleInterval.
+                if (_timeSinceLastNewSample > MinSampleInterval)
+                {
+                    if (!_hasSecondSample)
+                    {
+                        _sampleInterval = _timeSinceLastNewSample;
+                        _hasSecondSample = true;
+                    }
+                    else
+                    {
+                        float gap = System.Math.Min(_timeSinceLastNewSample, _sampleInterval * MaxIntervalGrowth);
+                        _sampleInterval += (gap - _sampleInterval) * IntervalBlend;
+                    }
+
+                    if (_sampleInterval < MinSampleInterval) _sampleInterval = MinSampleInterval;
+                    if (_sampleInterval > MaxSampleInterval) _sampleInterval = MaxSampleInterval;
+                }
+
+                float t = SegmentPosition(_progress, _timeSinceLastNewSample);
+                _fromX = _fromX + (_toX - _fromX) * t;
+                _fromY = _fromY + (_toY - _fromY) * t;
+                _fromZ = _fromZ + (_toZ - _fromZ) * t;
+
+                _toX = rawPosition.X;
+                _toY = rawPosition.Y;
+                _toZ = rawPosition.Z;
+                _lastTimestampTicks = rawPosition.TimestampTicks;
+
+                _progress = 0f;
+                _timeSinceLastNewSample = 0f;
+
+                // See PoseInterpolator: after a frame past the extrapolation cap, start from the sample.
+                if (_longFrame)
+                {
+                    _fromX = _toX;
+                    _fromY = _toY;
+                    _fromZ = _toZ;
+                    _longFrame = false;
+                }
+            }
+
+            _progress += deltaTime / _sampleInterval;
+
+            float pt = SegmentPosition(_progress, _timeSinceLastNewSample);
+
+            float outX = _fromX + (_toX - _fromX) * pt;
+            float outY = _fromY + (_toY - _fromY) * pt;
+            float outZ = _fromZ + (_toZ - _fromZ) * pt;
+
+            return new PositionData(outX, outY, outZ, rawPosition.TimestampTicks);
+        }
+
+        /// <summary>
+        /// Resets all interpolation state.
+        /// </summary>
+        public void Reset()
+        {
+            _fromX = 0f;
+            _fromY = 0f;
+            _fromZ = 0f;
+
+            _toX = 0f;
+            _toY = 0f;
+            _toZ = 0f;
+
+            _lastTimestampTicks = 0;
+            _progress = 0f;
+            _sampleInterval = DefaultSampleInterval;
+            _timeSinceLastNewSample = 0f;
+            _hasFirstSample = false;
+            _hasSecondSample = false;
+            _longFrame = false;
+        }
+    }
+}

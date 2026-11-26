@@ -1,0 +1,7 @@
+# Repeated headers of one name, in any case, are one section spelled as its first header.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	Position	B	2	4	-
+key	General	C	3	6	-

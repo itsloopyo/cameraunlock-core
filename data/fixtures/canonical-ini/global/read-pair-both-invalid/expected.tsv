@@ -1,0 +1,4 @@
+# Both rows refused by the codec: one line, with both reasons.
+value	RotationEnabled	refused	2	General	RotationEnabled	2	RotationEnabled: expected true or false; PositionEnabled: expected true or false, and the two are read together as the tracking mode
+value	PositionEnabled	refused	4	Position	PositionEnabled	no way	RotationEnabled: expected true or false; PositionEnabled: expected true or false, and the two are read together as the tracking mode
+pair	Defaults.ini: lines 2 and 4: [General] RotationEnabled=2 and [Position] PositionEnabled=no way are not read (RotationEnabled: expected true or false; PositionEnabled: expected true or false, and the two are read together as the tracking mode), so the built-in RotationEnabled=true and PositionEnabled=true are used.

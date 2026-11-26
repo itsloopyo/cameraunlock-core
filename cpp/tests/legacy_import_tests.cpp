@@ -1,0 +1,496 @@
+// The legacy import support: ImportResult's factories, the dropped-value lines, N1 and N3
+// (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), N4 (LegacyClampToRange), pose shaping (LegacyPoseShaping), the
+// position switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot), the rows left to
+// Defaults.ini (LegacyFollowsDefaultsIni) and a LegacyImport over a Config.
+
+#include <cameraunlock/config/legacy_import.h>
+#include <cameraunlock/config/value_guards.h>
+#include <cameraunlock/input/key_bindings.h>
+
+#include <climits>
+#include <cmath>
+#include <cstring>
+#include <exception>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+
+using namespace cameraunlock::config;
+using cameraunlock::input::FormatKeyBindings;
+using cameraunlock::input::FormatVirtualKey;
+using cameraunlock::input::KeyBinding;
+using cameraunlock::input::KeyModifiers;
+using cameraunlock::input::ParseKeyBindings;
+
+int g_failures = 0;
+
+void Check(bool cond, const std::string& name) {
+    if (cond) {
+        std::cout << "  [PASS] " << name << "\n";
+    } else {
+        std::cout << "  [FAIL] " << name << "\n";
+        ++g_failures;
+    }
+}
+
+template <class F>
+std::string Thrown(F&& f) {
+    try {
+        f();
+    } catch (const std::invalid_argument& e) {
+        return e.what();
+    }
+    return "(nothing thrown)";
+}
+
+bool SameDrop(const DroppedValue& d, DropRule rule, const char* section, const char* key, const char* value) {
+    return d.rule == rule && d.section == section && d.key == key && d.value == value;
+}
+
+template <class F>
+bool SameBits(F a, F b) {
+    return std::memcmp(&a, &b, sizeof(F)) == 0;
+}
+
+void TestImportResult() {
+    const ImportResult imported = ImportResult::Imported({{DropRule::Reticle, "Reticle", "ShowReticle", "false"}});
+    Check(imported.status == ImportStatus::Imported && imported.reason.empty() && imported.dropped.size() == 1,
+          "Imported keeps its dropped values and has no reason");
+    const ImportResult absent = ImportResult::Absent({});
+    Check(absent.status == ImportStatus::Absent && absent.reason.empty() && absent.dropped.empty(), "Absent");
+    const ImportResult refused = ImportResult::Refused("FieldOfView=30 is outside 60 to 120");
+    Check(refused.status == ImportStatus::Refused && refused.reason == "FieldOfView=30 is outside 60 to 120" &&
+              refused.dropped.empty(),
+          "Refused keeps its reason");
+    const ImportResult undecodable = ImportResult::Undecodable("the file is not UTF-8");
+    Check(undecodable.status == ImportStatus::Undecodable && undecodable.reason == "the file is not UTF-8",
+          "Undecodable keeps its reason");
+    Check(Thrown([] { ImportResult::Refused(""); }) == "a refused or undecodable import needs a reason",
+          "Refused with no reason throws");
+    Check(Thrown([] { ImportResult::Undecodable(""); }) == "a refused or undecodable import needs a reason",
+          "Undecodable with no reason throws");
+    Check(static_cast<int>(ImportStatus::Imported) == 0 && static_cast<int>(ImportStatus::Refused) == 1 &&
+              static_cast<int>(ImportStatus::Undecodable) == 2 && static_cast<int>(ImportStatus::Absent) == 3,
+          "ImportStatus numbers match the C# enum");
+    Check(static_cast<int>(DropRule::NonFiniteNumber) == 1 && static_cast<int>(DropRule::PoseShaping) == 2 &&
+              static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4 &&
+              static_cast<int>(DropRule::KeyCodeOutOfRange) == 5 && static_cast<int>(DropRule::ModifierKey) == 6 &&
+              static_cast<int>(DropRule::CoupledAim) == 7 && static_cast<int>(DropRule::PositionSwitchOff) == 8 &&
+              static_cast<int>(DropRule::TrackerPivot) == 9 && static_cast<int>(DropRule::NumberOutOfRange) == 10,
+          "DropRule numbers match the C# enum");
+}
+
+void TestDescribe() {
+    Check(DescribeDroppedValue({DropRule::NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan"}) ==
+              "not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is used",
+          "N2 line");
+    Check(DescribeDroppedValue({DropRule::PoseShaping, "Sensitivity", "YawSensitivity", "1.5"}) ==
+              "not carried: [Sensitivity] YawSensitivity=1.5, sensitivity, scales, deadzones, response curves and "
+              "axis inversion are set in the tracker now, not in this mod",
+          "pose-shaping line");
+    Check(DescribeDroppedValue({DropRule::Reticle, "Reticle", "ShowReticle", "false"}) ==
+              "not carried: [Reticle] ShowReticle=false, this mod no longer draws or toggles a reticle",
+          "reticle line");
+    Check(DescribeDroppedValue({DropRule::FollowsDefault, "Position", "CollisionEnabled", "false"}) ==
+              "not carried: [Position] CollisionEnabled=false, this setting now follows the mod's default",
+          "follows-default line");
+    Check(DescribeDroppedValue({DropRule::KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230"}) ==
+              "not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
+          "N1 line");
+    Check(DescribeDroppedValue({DropRule::ModifierKey, "Hotkeys", "YawModeKey", "0x11"}) ==
+              "not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt key, which goes down before the key of "
+              "any chord made with it, so it is unbound",
+          "N3 line");
+    Check(DescribeDroppedValue({DropRule::CoupledAim, "General", "AimDecoupling", "false"}) ==
+              "not carried: [General] AimDecoupling=false, aim is always decoupled now, so your aim stays with the "
+              "mouse or controller while your head moves the view",
+          "coupled-aim line");
+    Check(DescribeDroppedValue({DropRule::PositionSwitchOff, "Position", "Enabled", "false"}) ==
+              "not carried: [Position] Enabled=false, positional tracking is switched off by the tracking mode now, so "
+              "the mod starts in rotation only and the mode hotkey can turn position back on",
+          "position-switch line");
+    Check(DescribeDroppedValue({DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.1"}) ==
+              "not carried: [Position] TrackerPivotForward=0.1, the neck pivot is not a setting now, so a distance you "
+              "set is not carried over",
+          "tracker-pivot line");
+    Check(DescribeDroppedValue({DropRule::NumberOutOfRange, "Position", "LimitZ", "25.0"}) ==
+              "not carried: [Position] LimitZ=25.0, it is outside the range this setting takes, so the nearest end "
+              "of the range is used",
+          "N4 line");
+    Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(11), "A", "B", "C"}); }) ==
+              "drop rule 11 is not a DropRule",
+          "a rule outside DropRule throws");
+}
+
+void TestN1() {
+    Check(LegacyVirtualKeyToBindings(0x23) == "End", "0x23 is End");
+    Check(LegacyVirtualKeyToBindings(0x87) == "F24", "0x87 is F24");
+    Check(LegacyVirtualKeyToBindings(0xBA) == "0xBA", "0xBA has no name, so hex");
+    bool every = true;
+    for (long long code = 0x01; code <= 0xFE; ++code) {
+        if (!IsBindableVirtualKey(static_cast<int>(code))) continue;
+        const std::string text = LegacyVirtualKeyToBindings(code);
+        const auto read = ParseKeyBindings(text);
+        every = every && text == FormatVirtualKey(static_cast<int>(code)) && read.ok() && read.bindings.size() == 1 &&
+                read.bindings[0].vk == code && read.bindings[0].modifiers == KeyModifiers::kNone;
+    }
+    Check(every, "every code from 0x01 to 0xFE but a Ctrl, Shift or Alt key reads back as that one key");
+    bool none = true;
+    for (const long long code : {0LL, 0xFFLL, 0x100LL, 0x187LL, 0x230LL, -1LL, -0x79LL, 0x1000000FFLL,
+                                 static_cast<long long>(LLONG_MAX), static_cast<long long>(LLONG_MIN)}) {
+        none = none && LegacyVirtualKeyToBindings(code).empty();
+    }
+    Check(none, "codes outside 0x01-0xFE are unbound, 0xFF, 0x230, -1 and the long long limits among them");
+
+    std::vector<DroppedValue> dropped;
+    Check(LegacyVirtualKeyToBindings(0x23, "Hotkeys", "ToggleKey", dropped) == "End" && dropped.empty(),
+          "an in-range code records nothing");
+    Check(LegacyVirtualKeyToBindings(0xFE, "Hotkeys", "ToggleKey", dropped) == "0xFE" && dropped.empty(),
+          "0xFE, the top of the range, records nothing");
+    Check(LegacyVirtualKeyToBindings(0, "Hotkeys", "YawModeKey", dropped).empty() && dropped.empty(),
+          "code 0, a legacy file's way of saying unbound, records nothing");
+    Check(LegacyVirtualKeyToBindings(0xFF, "Hotkeys", "PositionToggleKey", dropped).empty(),
+          "0xFF, which GetAsyncKeyState can report, is unbound");
+    LegacyVirtualKeyToBindings(0x230, "Hotkeys", "ToggleKey", dropped);
+    LegacyVirtualKeyToBindings(-1, "General", "CycleKey", dropped);
+    LegacyVirtualKeyToBindings(LLONG_MIN, "General", "Min", dropped);
+    Check(dropped.size() == 4 && SameDrop(dropped[0], DropRule::KeyCodeOutOfRange, "Hotkeys", "PositionToggleKey", "0xFF") &&
+              SameDrop(dropped[1], DropRule::KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230") &&
+              SameDrop(dropped[2], DropRule::KeyCodeOutOfRange, "General", "CycleKey", "-1") &&
+              SameDrop(dropped[3], DropRule::KeyCodeOutOfRange, "General", "Min", "-9223372036854775808"),
+          "out-of-range codes record the drop in hex, or in decimal when negative");
+
+    Check(FormatKeyBindings({KeyBinding{KeyModifiers::kNone, 0x23}, KeyBinding{KeyModifiers::kCtrl | KeyModifiers::kShift, 'Y'}}) ==
+              "End, Ctrl+Shift+Y",
+          "a chord switch folds into the list through FormatKeyBindings");
+}
+
+void TestN3() {
+    const long long modifiers[] = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5};
+    bool unbound = true;
+    for (const long long code : modifiers) unbound = unbound && LegacyVirtualKeyToBindings(code).empty();
+    Check(unbound, "each Ctrl, Shift and Alt key, 0x10-0x12 and 0xA0-0xA5, is unbound");
+    int kept = 0;
+    for (long long code = 0x01; code <= 0xFE; ++code) kept += LegacyVirtualKeyToBindings(code).empty() ? 0 : 1;
+    Check(kept == 0xFE - 9, "they are the only codes from 0x01 to 0xFE that are unbound");
+
+    std::vector<DroppedValue> dropped;
+    Check(LegacyVirtualKeyToBindings(0x11, "Hotkeys", "YawModeKey", dropped).empty(), "0x11, Ctrl, is unbound");
+    LegacyVirtualKeyToBindings(0x10, "Hotkeys", "ToggleKey", dropped);
+    LegacyVirtualKeyToBindings(0xA0, "General", "CycleKey", dropped);
+    LegacyVirtualKeyToBindings(0xA5, "General", "PositionKey", dropped);
+    Check(dropped.size() == 4 && SameDrop(dropped[0], DropRule::ModifierKey, "Hotkeys", "YawModeKey", "0x11") &&
+              SameDrop(dropped[1], DropRule::ModifierKey, "Hotkeys", "ToggleKey", "0x10") &&
+              SameDrop(dropped[2], DropRule::ModifierKey, "General", "CycleKey", "0xA0") &&
+              SameDrop(dropped[3], DropRule::ModifierKey, "General", "PositionKey", "0xA5"),
+          "each records the drop as ModifierKey, the code in hex");
+
+    const std::string code = LegacyVirtualKeyToBindings(0xA2, "Hotkeys", "YawModeKey", dropped);
+    const std::string chord = FormatKeyBindings({KeyBinding{KeyModifiers::kCtrl | KeyModifiers::kShift, 'H'}});
+    Check((code.empty() ? chord : code + ", " + chord) == "Ctrl+Shift+H",
+          "a map that appends the action's chord keeps the chord alone");
+}
+
+void TestN2() {
+    std::vector<DroppedValue> dropped;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    Check(LegacyFiniteOrDefault(0.3f, 0.15f, "Smoothing", "RemoteSmoothing", dropped) == 0.3f && dropped.empty(),
+          "a finite float is kept and records nothing");
+    Check(SameBits(LegacyFiniteOrDefault(-0.0f, 0.15f, "Smoothing", "LocalSmoothing", dropped), -0.0f) && dropped.empty(),
+          "-0.0 is finite and kept bit for bit");
+    Check(LegacyFiniteOrDefault(std::numeric_limits<float>::max(), 0.15f, "A", "B", dropped) ==
+                  std::numeric_limits<float>::max() &&
+              dropped.empty(),
+          "the largest float is finite");
+    Check(LegacyFiniteOrDefault(nan, 0.15f, "Smoothing", "RemoteSmoothing", dropped) == 0.15f, "nan gives the default");
+    Check(LegacyFiniteOrDefault(inf, 0.2f, "Position", "PositionLimitY", dropped) == 0.2f, "inf gives the default");
+    Check(LegacyFiniteOrDefault(-inf, 1.0f, "Sensitivity", "YawSensitivity", dropped) == 1.0f, "-inf gives the default");
+    Check(LegacyFiniteOrDefault(std::numeric_limits<double>::infinity(), 0.5, "Camera", "Scale", dropped) == 0.5,
+          "a double works the same");
+    Check(dropped.size() == 4 && SameDrop(dropped[0], DropRule::NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan") &&
+              SameDrop(dropped[1], DropRule::NonFiniteNumber, "Position", "PositionLimitY", "inf") &&
+              SameDrop(dropped[2], DropRule::NonFiniteNumber, "Sensitivity", "YawSensitivity", "-inf") &&
+              SameDrop(dropped[3], DropRule::NonFiniteNumber, "Camera", "Scale", "inf"),
+          "each non-finite value records the drop");
+    Check(Thrown([&] { LegacyFiniteOrDefault(1.0f, nan, "Smoothing", "RemoteSmoothing", dropped); }) ==
+              "[Smoothing] RemoteSmoothing: the row default is not finite",
+          "a non-finite default throws");
+}
+
+void TestN4() {
+    using Concept = schema::Concept;
+    std::vector<DroppedValue> dropped;
+    Check(LegacyClampToRange(0.5f, 0.0f, 1.0f, "Smoothing", "RemoteSmoothing", dropped) == 0.5f &&
+              LegacyClampToRange(0.0f, 0.0f, 1.0f, "Smoothing", "LocalSmoothing", dropped) == 0.0f &&
+              LegacyClampToRange(10.0, 0.0, 10.0, "Position", "LimitX", dropped) == 10.0 &&
+              LegacyClampToRange(4242, 1, 65535, "Network", "UdpPort", dropped) == 4242 && dropped.empty(),
+          "a value in the range, either end included, is kept and records nothing");
+    Check(LegacyClampToRange(25.0f, 0.0f, 10.0f, "Position", "LimitZ", dropped) == 10.0f, "above the range gives the high end");
+    Check(LegacyClampToRange(-0.5, 0.0, 1.0, "Smoothing", "RemoteSmoothing", dropped) == 0.0, "below it gives the low end");
+    Check(LegacyClampToRange(70000LL, 1LL, 65535LL, "Network", "UdpPort", dropped) == 65535LL, "an integer works the same");
+    Check(LegacyClampToRange<Concept::PositionLimitY>(12.5f, "Position", "LimitY", dropped) == 10.0f &&
+              LegacyClampToRange<Concept::LocalSmoothing>(-1.0, "Smoothing", "LocalSmoothing", dropped) == 0.0 &&
+              LegacyClampToRange<Concept::UdpPort>(0, "Network", "UdpPort", dropped) == 1 &&
+              LegacyClampToRange<Concept::UdpPort>(99999LL, "Network", "UDPPort", dropped) == 65535LL &&
+              LegacyClampToRange<Concept::LightMultiplier>(3.0f, "Light", "Multiplier", dropped) == 3.0f,
+          "the concept overload takes the schema's range");
+    Check(dropped.size() == 7 && SameDrop(dropped[0], DropRule::NumberOutOfRange, "Position", "LimitZ", "25.0") &&
+              SameDrop(dropped[1], DropRule::NumberOutOfRange, "Smoothing", "RemoteSmoothing", "-0.5") &&
+              SameDrop(dropped[2], DropRule::NumberOutOfRange, "Network", "UdpPort", "70000") &&
+              SameDrop(dropped[3], DropRule::NumberOutOfRange, "Position", "LimitY", "12.5") &&
+              SameDrop(dropped[4], DropRule::NumberOutOfRange, "Smoothing", "LocalSmoothing", "-1.0") &&
+              SameDrop(dropped[5], DropRule::NumberOutOfRange, "Network", "UdpPort", "0") &&
+              SameDrop(dropped[6], DropRule::NumberOutOfRange, "Network", "UDPPort", "99999"),
+          "each clamp records the value read");
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    Check(Thrown([&] { LegacyClampToRange(nan, 0.0f, 1.0f, "Smoothing", "LocalSmoothing", dropped); }) ==
+              "[Smoothing] LocalSmoothing: the value is not finite, which N2 imports",
+          "a value that is not finite throws: N2 comes first");
+    Check(Thrown([&] { LegacyClampToRange(inf, 0.0f, 1.0f, "Smoothing", "LocalSmoothing", dropped); }) ==
+              "[Smoothing] LocalSmoothing: the value is not finite, which N2 imports",
+          "and inf");
+    Check(Thrown([&] { LegacyClampToRange(0.5f, 0.0f, inf, "A", "B", dropped); }) ==
+              "[A] B: a bound of the range is not finite",
+          "a bound that is not finite throws");
+    Check(Thrown([&] { LegacyClampToRange(5, 10, 1, "A", "B", dropped); }) ==
+              "[A] B: the range's low end is above its high end",
+          "a low end above the high end throws");
+    Check(dropped.size() == 7, "and records nothing");
+
+    LegacyFollowsDefaultsIni follows;
+    const float read = 25.0f;
+    const float shipped = 10.0f;
+    Check(LegacyClampToRange(read, 0.0f, 10.0f, "Position", "LimitZ", dropped) == shipped,
+          "a clamp can land on the shipped default");
+    follows.Setting(Concept::PositionLimitZ, read, shipped);
+    Check(follows.Concepts().empty(), "the value read, which the player set, keeps the row off Defaults.ini");
+}
+
+std::string PoseLine(const PoseShapingValue& p) {
+    return "[" + p.section + "] " + p.key + "=" + p.value + " shipped " + p.shipped + (p.folded ? " folded" : "");
+}
+
+void TestPoseShaping() {
+    std::vector<PoseShapingValue> pose;
+    std::vector<DroppedValue> dropped;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    LegacyPoseShaping(true, true, "Tracking", "InvertRoll", pose, dropped);
+    LegacyPoseShaping(0.5f, 0.5f, "Tracking", "RollSensitivity", pose, dropped);
+    LegacyPoseShaping(-0.0f, 0.0f, "Tracking", "Deadzone", pose, dropped);
+    Check(pose.size() == 3 && dropped.empty() && PoseLine(pose[0]) == "[Tracking] InvertRoll=true shipped true folded" &&
+              PoseLine(pose[1]) == "[Tracking] RollSensitivity=0.5 shipped 0.5 folded" &&
+              PoseLine(pose[2]) == "[Tracking] Deadzone=-0.0 shipped 0.0 folded",
+          "a value equal to the shipped one, compared as a number, is folded and nothing is dropped");
+
+    pose.clear();
+    LegacyPoseShaping(false, true, "Tracking", "InvertRoll", pose, dropped);
+    LegacyPoseShaping(2.0f, 1.0f, "Position", "SensitivityX", pose, dropped);
+    LegacyPoseShaping(0.15, 0.0, "Rotation", "YawDeadzone", pose, dropped);
+    LegacyPoseShaping(nan, 1.0f, "Sensitivity", "YawSensitivity", pose, dropped);
+    LegacyPoseShaping(-std::numeric_limits<double>::infinity(), 1.0, "Sensitivity", "PitchSensitivity", pose, dropped);
+    Check(pose.size() == 5 && PoseLine(pose[0]) == "[Tracking] InvertRoll=false shipped true" &&
+              PoseLine(pose[1]) == "[Position] SensitivityX=2.0 shipped 1.0" &&
+              PoseLine(pose[2]) == "[Rotation] YawDeadzone=0.15 shipped 0.0" &&
+              PoseLine(pose[3]) == "[Sensitivity] YawSensitivity=nan shipped 1.0" &&
+              PoseLine(pose[4]) == "[Sensitivity] PitchSensitivity=-inf shipped 1.0",
+          "a value the player changed is listed with its shipped value, not folded");
+    Check(dropped.size() == 5 && SameDrop(dropped[0], DropRule::PoseShaping, "Tracking", "InvertRoll", "false") &&
+              SameDrop(dropped[1], DropRule::PoseShaping, "Position", "SensitivityX", "2.0") &&
+              SameDrop(dropped[2], DropRule::PoseShaping, "Rotation", "YawDeadzone", "0.15") &&
+              SameDrop(dropped[3], DropRule::PoseShaping, "Sensitivity", "YawSensitivity", "nan") &&
+              SameDrop(dropped[4], DropRule::PoseShaping, "Sensitivity", "PitchSensitivity", "-inf"),
+          "and dropped as pose shaping, in the canonical codecs' spelling");
+    Check(Thrown([&] { LegacyPoseShaping(1.0f, nan, "Tracking", "RollSensitivity", pose, dropped); }) ==
+              "[Tracking] RollSensitivity: the shipped value is not finite",
+          "a shipped value that is not finite throws");
+    Check(pose.size() == 5 && dropped.size() == 5, "and records nothing");
+
+    const ImportResult imported = ImportResult::Imported(dropped, pose);
+    const ImportResult absent = ImportResult::Absent({}, {pose[0]});
+    Check(imported.pose_shaping.size() == 5 && absent.pose_shaping.size() == 1 &&
+              ImportResult::Imported({}).pose_shaping.empty() && ImportResult::Refused("r").pose_shaping.empty() &&
+              ImportResult::Undecodable("u").pose_shaping.empty(),
+          "Imported and Absent carry the pose-shaping values; the other statuses carry none");
+}
+
+void TestPositionSwitch() {
+    for (bool rotation : {true, false}) {
+        bool rotation_enabled = rotation;
+        bool position_enabled = true;
+        std::vector<DroppedValue> dropped;
+        LegacyPositionSwitch(false, "Position", "Enabled", rotation_enabled, position_enabled, dropped);
+        Check(rotation_enabled && !position_enabled && dropped.size() == 1 &&
+                  SameDrop(dropped[0], DropRule::PositionSwitchOff, "Position", "Enabled", "false"),
+              std::string("a switch that was off writes rotation only over rotation_enabled=") +
+                  (rotation ? "true" : "false") + " and is recorded");
+    }
+    bool rotation_enabled = false;
+    bool position_enabled = true;
+    std::vector<DroppedValue> dropped;
+    LegacyPositionSwitch(true, "Position", "Enabled", rotation_enabled, position_enabled, dropped);
+    Check(!rotation_enabled && position_enabled && dropped.empty(), "a switch that was on changes nothing");
+}
+
+void TestTrackerPivot() {
+    std::vector<DroppedValue> dropped;
+    LegacyTrackerPivot(0.0f, 0.0f, "Position", "TrackerPivotForward", dropped);
+    LegacyTrackerPivot(-0.0f, 0.0f, "Position", "TrackerPivotUp", dropped);
+    LegacyTrackerPivot(0.08f, 0.08f, "Position", "TrackerPivotForward", dropped);
+    Check(dropped.empty(), "a pivot equal to the shipped one, compared as a number, is not recorded");
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    LegacyTrackerPivot(0.1f, 0.0f, "Position", "TrackerPivotForward", dropped);
+    LegacyTrackerPivot(0.0f, 0.08f, "Position", "TrackerPivotForward", dropped);
+    LegacyTrackerPivot(nan, 0.08f, "Position", "PivotUp", dropped);
+    Check(dropped.size() == 3 && SameDrop(dropped[0], DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.1") &&
+              SameDrop(dropped[1], DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.0") &&
+              SameDrop(dropped[2], DropRule::TrackerPivot, "Position", "PivotUp", "nan"),
+          "a pivot the player changed from the shipped one is recorded, in the canonical codecs' spelling");
+    Check(Thrown([&] { LegacyTrackerPivot(0.1f, nan, "Position", "TrackerPivotForward", dropped); }) ==
+              "[Position] TrackerPivotForward: the shipped value is not finite",
+          "a shipped pivot that is not finite throws");
+    Check(dropped.size() == 3, "and records nothing");
+}
+
+void TestFollowsDefaultsIni() {
+    using Concept = schema::Concept;
+    LegacyFollowsDefaultsIni follows;
+    follows.Setting(Concept::UdpPort, 4242, 4242);
+    follows.Setting(Concept::WorldSpaceYaw, false, true);
+    follows.Setting(Concept::RemoteSmoothing, -0.0f, 0.0f);
+    follows.Setting(Concept::LocalSmoothing, std::numeric_limits<float>::quiet_NaN(), 0.0f);
+    follows.Setting(Concept::ToggleKey, 0x23LL, 0x23LL);
+    follows.Setting(Concept::YawModeKey, false);
+    follows.Setting(Concept::LightMultiplier, true);
+    follows.NotInLegacy(Concept::TrueFreeLook);
+    Check(follows.Concepts() == std::vector<Concept>{Concept::UdpPort, Concept::RemoteSmoothing, Concept::LocalSmoothing,
+                                                      Concept::ToggleKey, Concept::LightMultiplier, Concept::TrueFreeLook},
+          "a setting equal to the shipped one, compared with ==, one read as a number that is not finite (N2) and "
+          "one the legacy build lacked are left to Defaults.ini, in the order given");
+    LegacyFollowsDefaultsIni non_finite;
+    non_finite.Setting(Concept::PositionLimitX, std::numeric_limits<float>::infinity(), 0.3f);
+    non_finite.Setting(Concept::PositionLimitY, -std::numeric_limits<double>::infinity(), 0.2);
+    non_finite.Setting(Concept::PositionLimitZ, std::numeric_limits<float>::quiet_NaN(), {0.4f, 0.1f});
+    Check(non_finite.Concepts() ==
+              std::vector<Concept>{Concept::PositionLimitX, Concept::PositionLimitY, Concept::PositionLimitZ},
+          "inf, -inf and nan leave the row to Defaults.ini, against one shipped value or several");
+
+    LegacyFollowsDefaultsIni by_build;
+    by_build.Setting(Concept::PositionLimitZ, 0.1f, {0.4f, 0.1f});
+    by_build.Setting(Concept::PositionLimitZBack, 0.25f, std::vector<float>{0.1f, 0.4f});
+    by_build.Setting(Concept::WorldSpaceYaw, false, {true, false});
+    by_build.Setting(Concept::UdpPort, 4242, {4242});
+    Check(by_build.Concepts() == std::vector<Concept>{Concept::PositionLimitZ, Concept::WorldSpaceYaw, Concept::UdpPort},
+          "a setting equal to the value any of several builds shipped is left to Defaults.ini, one equal to none "
+          "is not");
+    LegacyFollowsDefaultsIni no_build;
+    Check(Thrown([&] { no_build.Setting(Concept::LocalSmoothing, 0.0f, std::vector<float>{}); }) ==
+              "LocalSmoothing: no shipped value is given",
+          "an empty list of shipped values is refused");
+    Check(Thrown([&] {
+              no_build.Setting(Concept::LocalSmoothing, 0.0f, {0.0f, std::numeric_limits<float>::quiet_NaN()});
+          }) == "LocalSmoothing: the shipped value is not finite",
+          "a shipped value in the list that is not finite is refused, even after one that matches");
+    no_build.Setting(Concept::LocalSmoothing, true);
+    Check(no_build.Concepts() == std::vector<Concept>{Concept::LocalSmoothing}, "a refused list adds nothing");
+
+    LegacyFollowsDefaultsIni unchanged_mode;
+    unchanged_mode.TrackingMode(1, 1);
+    Check(unchanged_mode.Concepts() == std::vector<Concept>{Concept::RotationEnabled, Concept::PositionEnabled},
+          "a tracking mode equal to the shipped one leaves both rows to Defaults.ini");
+    LegacyFollowsDefaultsIni changed_mode;
+    changed_mode.TrackingMode(false);
+    Check(changed_mode.Concepts().empty(), "a changed tracking mode leaves neither row");
+
+    LegacyFollowsDefaultsIni refused;
+    const float inf = std::numeric_limits<float>::infinity();
+    Check(Thrown([&] { refused.Setting(Concept::PositionEnabled, true, true); }) ==
+              "PositionEnabled is half of the tracking mode, which TrackingMode takes as one unit",
+          "PositionEnabled is refused outside TrackingMode");
+    Check(Thrown([&] { refused.NotInLegacy(Concept::RotationEnabled); }) ==
+              "RotationEnabled is half of the tracking mode, which TrackingMode takes as one unit",
+          "and RotationEnabled");
+    Check(Thrown([&] { refused.Setting(Concept::CollisionMargin, 0.1f, 0.1f); }) ==
+              "CollisionMargin is not a global concept, so no row of it follows Defaults.ini",
+          "a concept that is not global is refused");
+    Check(Thrown([&] { refused.Setting(Concept::LocalSmoothing, 0.0, static_cast<double>(inf)); }) ==
+              "LocalSmoothing: the shipped value is not finite",
+          "a shipped value that is not finite is refused");
+    refused.Setting(Concept::UdpPort, 1, 2);
+    Check(Thrown([&] { refused.NotInLegacy(Concept::UdpPort); }) == "UdpPort was given before",
+          "a concept given twice is refused");
+    refused.TrackingMode(true);
+    Check(Thrown([&] { refused.TrackingMode(1, 1); }) == "the tracking mode was given before",
+          "the tracking mode given twice is refused");
+    Check(refused.Concepts() == std::vector<Concept>{Concept::RotationEnabled, Concept::PositionEnabled},
+          "a refused call adds nothing");
+}
+
+struct FrozenConfig {
+    long long toggle_key = 0x23;
+    float remote_smoothing = 0.15f;
+};
+
+struct RuntimeConfig {
+    std::string toggle_key = "End";
+    float remote_smoothing = 0.15f;
+};
+
+void TestLegacyImport() {
+    LegacyImport<RuntimeConfig> import;
+    Check(!import.run, "a default LegacyImport has no import");
+    import.keys = {{"General", "ToggleKey"}, {"Smoothing", "RemoteSmoothing"}, {"", "Verbose"}};
+    import.run = [](const LegacyInput& input, RuntimeConfig& out) {
+        if (input.ansi_lossy) return ImportResult::Absent({});
+        FrozenConfig legacy;
+        legacy.toggle_key = 0xFF;
+        legacy.remote_smoothing = std::numeric_limits<float>::quiet_NaN();
+        std::vector<DroppedValue> dropped;
+        out.toggle_key = LegacyVirtualKeyToBindings(legacy.toggle_key, "General", "ToggleKey", dropped);
+        out.remote_smoothing =
+            LegacyFiniteOrDefault(legacy.remote_smoothing, RuntimeConfig{}.remote_smoothing, "Smoothing", "RemoteSmoothing", dropped);
+        return ImportResult::Imported(std::move(dropped));
+    };
+    RuntimeConfig config;
+    const ImportResult result = import.run(LegacyInput{L"C:\\Games\\HeadTracking.ini", "C:\\Games\\HeadTracking.ini", false}, config);
+    Check(result.status == ImportStatus::Imported && config.toggle_key.empty() && config.remote_smoothing == 0.15f &&
+              result.dropped.size() == 2 &&
+              SameDrop(result.dropped[0], DropRule::KeyCodeOutOfRange, "General", "ToggleKey", "0xFF") &&
+              SameDrop(result.dropped[1], DropRule::NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan"),
+          "an import maps the frozen Config through N1 and N2 and returns what it dropped");
+    Check(import.keys.size() == 3 && import.keys[2].section.empty(), "keys hold a section-less entry");
+    RuntimeConfig untouched;
+    Check(import.run(LegacyInput{L"C:\\Spiele\\\x00DC\\HeadTracking.ini", "C:\\Spiele\\?\\HeadTracking.ini", true}, untouched)
+                  .status == ImportStatus::Absent,
+          "the import sees the driver's path views");
+}
+
+}  // namespace
+
+int RunLegacyImportTests() {
+    g_failures = 0;
+    std::cout << "\nLegacy import tests\n";
+    try {
+        TestImportResult();
+        TestDescribe();
+        TestN1();
+        TestN3();
+        TestN2();
+        TestN4();
+        TestPoseShaping();
+        TestPositionSwitch();
+        TestTrackerPivot();
+        TestFollowsDefaultsIni();
+        TestLegacyImport();
+    } catch (const std::exception& e) {
+        std::cout << "  [FAIL] threw: " << e.what() << "\n";
+        ++g_failures;
+    }
+    return g_failures;
+}

@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "_comment": "What isolated input (docs/isolated-input.md) can drive today. IsolatedGameTest.psm1 reads a game's import table against input_paths and a mod's kind against mod_hosts. An entry that is not supported is work to do in core before that game is tested, never a reason to test with the real keyboard and mouse: its `build` says what to add, and the entry is changed to supported, with the game it was proven in, in the same core commit.",
+  "input_paths": {
+    "raw-input": {
+      "what": "RegisterRawInputDevices and WM_INPUT, read back through GetRawInputData. A key is also posted as WM_KEYDOWN and WM_KEYUP, which is where an engine that takes raw input for the mouse alone (Unreal Engine 4) reads its keys",
+      "imports": ["GetRawInputData", "RegisterRawInputDevices"],
+      "status": "supported",
+      "proven_in": ["starfield", "deep-rock-galactic", "untitled-goose-game", "deus-ex-mankind-divided", "a-plague-tale-innocence"]
+    },
+    "raw-input-buffered": {
+      "what": "raw input read in batches through GetRawInputBuffer instead of one WM_INPUT at a time",
+      "imports": ["GetRawInputBuffer"],
+      "status": "unsupported",
+      "build": "Detour GetRawInputBuffer in cameraunlock/dev/isolated_input.h and append the synthetic events queued since the last call to what it returns, in place of posting WM_INPUT."
+    },
+    "async-key-state": {
+      "what": "keys polled with GetAsyncKeyState",
+      "imports": ["GetAsyncKeyState"],
+      "status": "supported",
+      "proven_in": ["starfield", "ready-or-not", "resident-evil-requiem", "a-plague-tale-innocence"]
+    },
+    "key-state": {
+      "what": "keys polled with GetKeyState or GetKeyboardState, which read the thread's message-synchronised state",
+      "imports": ["GetKeyState", "GetKeyboardState"],
+      "status": "supported",
+      "proven_in": ["untitled-goose-game"]
+    },
+    "directinput": {
+      "what": "DirectInput 8 devices",
+      "dlls": ["dinput8.dll"],
+      "status": "supported",
+      "proven_in": ["fallout-new-vegas", "far-cry-6", "fear", "resident-evil-requiem", "stalker-call-of-prypiat-enhanced-edition"]
+    },
+    "directinput7": {
+      "what": "DirectInput 7 and earlier devices from dinput.dll, made through DirectInputCreateA, DirectInputCreateW or DirectInputCreateEx, read with GetDeviceState or in 16-byte buffered records with GetDeviceData",
+      "dlls": ["dinput.dll"],
+      "status": "supported",
+      "proven_in": ["arx-fatalis"]
+    },
+    "cursor-position": {
+      "what": "where the mouse cursor is, read with GetCursorPos or from WM_MOUSEMOVE, as a menu with a pointer does. The `cursor` command places it.",
+      "imports": ["GetCursorPos"],
+      "status": "supported",
+      "proven_in": ["dishonored", "far-cry-6", "ready-or-not"]
+    },
+    "cursor-shown": {
+      "what": "whether the cursor shows, as the game sets it with ShowCursor and SetCursor and a mod reads it back with GetCursorInfo to tell a menu from play. GetCursorInfo answers the game's own setting, never the cursor of the window in front",
+      "imports": ["ShowCursor", "SetCursor"],
+      "status": "supported",
+      "proven_in": ["minecraft-bedrock"]
+    },
+    "gameinput": {
+      "what": "the GDK's GameInput API, from the inbox GameInput.dll or the Microsoft.GameInput NuGet package's GameInputRedist.dll. API version 2 is answered from the script: keyboard, mouse and gamepad, and no other controller. Every other version is given no readings, so the real devices never reach it, and the script does not drive it either. A game that loads it at run time through the NuGet package's loader, as Minecraft Bedrock does, imports neither DLL, so only the dev build's log shows it",
+      "dlls": ["gameinput.dll", "gameinputredist.dll"],
+      "status": "supported",
+      "proven_in": ["minecraft-bedrock"]
+    },
+    "sdl": {
+      "what": "SDL's event queue, through what SDL itself reads. SDL2 on Windows takes relative mouse movement and mouse buttons from raw input and keys and typed text from window messages, which the raw-input path sends, so nothing is pushed into SDL. The WM_MOUSELEAVE Windows sends for the real cursor is withheld, so SDL keeps its mouse focus and a game that turns on relative mouse mode only with that focus still does. Check SDL's own import table with Get-GameInputPaths on the SDL DLL the game loads. Proven with SDL2; a game on SDL3 is proven again before it counts",
+      "dlls": ["sdl2.dll", "sdl3.dll"],
+      "status": "supported",
+      "proven_in": ["red-eclipse", "amnesia-rebirth"]
+    },
+    "xinput": {
+      "what": "XInput controllers, read with XInputGetState and described by XInputGetCapabilities. The `pad` command plugs one in and holds its buttons, sticks and triggers.",
+      "dlls": ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll", "xinput1_2.dll", "xinput1_1.dll"],
+      "status": "supported",
+      "proven_in": ["the-ascent"]
+    },
+    "glfw": {
+      "what": "GLFW key, button and cursor state, as a game on GLFW polls it. An import table shows it only for a binary that links GLFW. Project Zomboid, an LWJGL game, keeps glfw.dll inside projectzomboid.jar, the same bytes are found unpacked in an lwjgl_<user> folder under the temp folder, and neither the game's exe nor lwjgl.dll imports it: run Get-GameInputPaths on the unpacked glfw.dll to see what GLFW itself reads",
+      "imports": ["glfwGetKey", "glfwGetMouseButton", "glfwGetCursorPos"],
+      "dlls": ["glfw.dll"],
+      "status": "unsupported",
+      "build": "Try what is there first. The glfw.dll Project Zomboid ships (LWJGL 3.4.1-snapshot) imports GetRawInputData, RegisterRawInputDevices, GetKeyState and GetCursorPos, all paths isolated input already answers, and whether its posted messages drive a GLFW window has not been tried in any game: run Test-IsolatedInputProof. Where they do not, detour glfwGetKey, glfwGetMouseButton and glfwGetCursorPos in cameraunlock/dev/isolated_input.h, found in the loaded glfw.dll by export name, answer them from the synthetic state, and call the key, button and cursor callbacks the game registered. Project Zomboid's dev probe answers the game's own org.lwjglx key and button polls from Java instead, which is that game's and covers no other."
+    }
+  },
+  "mod_hosts": {
+    "native": {
+      "what": "a C++ mod: ASI, proxy DLL, REFramework plugin, RED4ext plugin, a native half beside a script mod",
+      "status": "supported",
+      "how": "Define CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION in one dev-only source file and call cameraunlock::dev::StartIsolatedInput (docs/isolated-input.md)."
+    },
+    "managed": {
+      "what": "a C# mod: BepInEx, MelonLoader, a Cecil-patched assembly, OWML",
+      "status": "supported",
+      "how": "Call CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked from the plugin's dev build and start the session with Start-IsolatedGame -ModHost managed (docs/isolated-input.md, A C# mod).",
+      "proven_in": ["untitled-goose-game"]
+    },
+    "jvm": {
+      "what": "a Java agent mod in a game that runs on a JVM",
+      "status": "supported",
+      "how": "The dev agent loads the host DLL of the managed entry through java.lang.foreign (SymbolLookup.libraryLookup) and calls CameraUnlockStartIsolatedInput with the command file's path as UTF-16, when both are in the folder it is given. Start the session with Start-IsolatedGame -ModHost managed, which copies the DLL there. Project Zomboid's own runtime is Java 25.",
+      "proven_in": ["project-zomboid"]
+    },
+    "script": {
+      "what": "a mod with no native code of its own, such as a Lua mod under a script extender",
+      "status": "unsupported",
+      "build": "Use the host DLL of the managed entry (cpp/tools/isolated_input_host). It starts from an export, CameraUnlockStartIsolatedInput, and does nothing when it is loaded, so a loader that only loads a DLL does not start it: add a start for a mod with nothing to call the export (a DllMain that starts a thread when the command file is beside the DLL), and load it through the game's ASI or plugin loader for the test session."
+    }
+  }
+}

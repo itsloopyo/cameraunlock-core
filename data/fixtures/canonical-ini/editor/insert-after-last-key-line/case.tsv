@@ -1,0 +1,3 @@
+# Lines that are not key lines, one with no '=' and one with nothing before its '=', do
+# not move the insertion point past the last key line.
+set_or_insert	General	B	2

@@ -1,0 +1,2 @@
+# The only terminator is LF, so LF is dominant.
+set_or_insert	General	A	1

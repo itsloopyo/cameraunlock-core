@@ -1,0 +1,266 @@
+#pragma once
+
+#include <functional>
+#include <atomic>
+#include <cstddef>
+#include <thread>
+#include <chrono>
+#include <mutex>
+#include <vector>
+
+namespace cameraunlock::input {
+
+// Callback type for hotkey events
+using HotkeyCallback = std::function<void()>;
+
+// Thread-based hotkey polling system for Windows
+// Polls keyboard state at regular intervals and fires callbacks on key press
+class HotkeyPoller {
+public:
+    HotkeyPoller() = default;
+    ~HotkeyPoller();
+
+    // Non-copyable
+    HotkeyPoller(const HotkeyPoller&) = delete;
+    HotkeyPoller& operator=(const HotkeyPoller&) = delete;
+
+    // Move-only. A running poller keeps polling after a move: the thread is
+    // bound to the source's this-pointer, so it is stopped there and a fresh
+    // one is started here. Key edge states reset in the process, so a key held
+    // down across the move fires again on its next press, not immediately.
+    //
+    // Deliberately NOT noexcept. Restarting the thread constructs a
+    // std::thread, which throws std::system_error when the process cannot spawn
+    // one, and throwing out of a noexcept function calls std::terminate - the
+    // game dies outright with no diagnostic. Moving a poller is not on any hot
+    // path, so propagating is strictly better than terminating. Both stay
+    // usable for std::vector: move_if_noexcept picks the move anyway, because
+    // the type is non-copyable.
+    HotkeyPoller(HotkeyPoller&& other);
+    HotkeyPoller& operator=(HotkeyPoller&& other);
+
+    // Set the toggle key and callback
+    // vkCode: Windows virtual key code (e.g., VK_F10 = 0x79)
+    void SetToggleKey(int vkCode, HotkeyCallback callback);
+
+    // Set the recenter key and callback
+    void SetRecenterKey(int vkCode, HotkeyCallback callback);
+
+    // Add a generic hotkey with callback
+    // Returns an ID that can be used to remove the hotkey
+    int AddHotkey(int vkCode, HotkeyCallback callback);
+
+    // Add a hotkey that tells a tap from a hold. onTap runs when the key is let go
+    // less than holdMs after it went down. onHold runs once, at the poll that finds
+    // the key still down holdMs after it went down, and nothing then runs when it is
+    // let go. onDown, when given, runs as the key goes down, before either: for a
+    // caller that has to read something at that moment, as a chord's modifiers.
+    //
+    // The foreground rule is the one every hotkey has: nothing runs unless this
+    // process is in the foreground at that moment, and a press that began while it
+    // was not runs none of the three.
+    // Returns an ID that can be used to remove the hotkey
+    //
+    // A poll that comes more than kMaxHoldPollGapMs after the one before it cannot
+    // tell a key held through the gap from one let go and pressed again inside it,
+    // so a key it finds still down is timed as a press begun at that poll. A caller
+    // that polls from its own loop less often than that never sees a hold.
+    int AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
+                      HotkeyCallback onDown = nullptr);
+
+    // Add a hotkey that tells one to onTaps.size() taps and a hold apart.
+    //
+    // A run of presses, each going down within tapGapMs of the one before it being let
+    // go, is that many taps. A run of fewer than onTaps.size() runs onTaps[n - 1] once
+    // tapGapMs have passed since its last press was let go with no next press: it is late
+    // by that much. A press that makes the run onTaps.size() long runs the last of them
+    // as it goes down, and that press runs nothing else, however long it is held and when
+    // it is let go. A first press still down after holdMs runs onHold once, and nothing
+    // when it is let go. A later press counts as it goes down, whatever it is held for,
+    // and the time to the next one runs from when it is let go. The press after a run
+    // or a hold is a first press again.
+    //
+    // `accepts`, when given, is asked as each press goes down, and a press it refuses
+    // takes no part: it is no tap, no hold and no next press, and a run waiting for its
+    // time goes on waiting as if the press had not been made. It is called with the
+    // poller's lock held, so it must not call the poller.
+    //
+    // The foreground rule: a press that began while this process was not in the
+    // foreground takes no part either, a first press let go there is no tap, and a run
+    // whose time runs out there is dropped, not run late. After a poll gap of more than
+    // kMaxHoldPollGapMs a waiting run is dropped and a key still down is a first press
+    // begun at that poll.
+    // Returns an ID that can be used to remove the hotkey
+    //
+    // Throws std::invalid_argument for fewer than two taps or an empty action: one tap
+    // and a hold is AddHoldHotkey.
+    int AddTapHotkey(int vkCode, int holdMs, int tapGapMs, std::vector<HotkeyCallback> onTaps, HotkeyCallback onHold,
+                     std::function<bool()> accepts = nullptr);
+
+    // The longest time between two polls across which a key seen down at both is
+    // taken to have stayed down. Six of the default 16 ms polls: a thread held up
+    // for less is late, and held up for longer it can miss a quick second press.
+    static constexpr int kMaxHoldPollGapMs = 100;
+
+    // Every AddHotkey, AddHoldHotkey and AddTapHotkey key that is down now runs nothing
+    // for this press, however it ends, and a tap waiting for its double tap time is
+    // forgotten. The next press is a press like any other. For a caller that throws
+    // away what was pressed while it was not acting on keys: a key that went down
+    // then would otherwise run its tap or its hold when it ends, later, and an
+    // AddHotkey key that went down since the last poll would run at the next. And for
+    // one that has just added a key that is down now, which would otherwise run at the
+    // next poll for a press made before it was added.
+    void DisarmPresses();
+    // The same with the key states handed in, as PollAt has them.
+    using KeyState = bool (*)(int vkCode);
+    void DisarmPressesWith(KeyState isDown);
+
+    void RemoveHotkey(int id);
+
+    // Start the polling thread
+    // pollIntervalMs: polling interval in milliseconds (default 16ms = ~60Hz)
+    bool Start(int pollIntervalMs = 16);
+
+    void Stop();
+
+    bool IsRunning() const { return m_running.load(); }
+
+    // Update hotkeys at runtime (thread-safe)
+    void SetToggleKeyCode(int vkCode);
+    void SetRecenterKeyCode(int vkCode);
+
+    int GetToggleKeyCode() const { return m_toggleKey.load(); }
+    int GetRecenterKeyCode() const { return m_recenterKey.load(); }
+
+    // For game-loop based polling (alternative to background thread)
+    // Call this once per frame instead of using Start()
+    void Poll();
+
+    // One poll with the clock, the foreground answer and the key states handed in.
+    // Poll() is this with the system's. A test drives a press down and up at the
+    // times it chooses through it, with no keyboard and no waiting.
+    void PollAt(std::chrono::steady_clock::time_point now, bool foreground, KeyState isDown);
+
+private:
+    void PollLoop();
+    // Edge-detects and appends the callback to fire rather than invoking it, so Poll()
+    // can release its locks before running user code. See the note in Poll().
+    void CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                    bool allowFire, KeyState isDown, std::vector<HotkeyCallback>& toFire);
+
+    std::thread m_thread;
+    std::atomic<bool> m_stopFlag{false};
+    std::atomic<bool> m_running{false};
+    std::atomic<int> m_pollInterval{16};
+
+    // Built-in toggle/recenter keys
+    std::atomic<int> m_toggleKey{0};
+    std::atomic<int> m_recenterKey{0};
+    std::atomic<bool> m_toggleKeyDown{false};
+    std::atomic<bool> m_recenterKeyDown{false};
+    HotkeyCallback m_toggleCallback;
+    HotkeyCallback m_recenterCallback;
+    std::mutex m_callbackMutex;
+
+    // Generic hotkeys
+    struct HotkeyEntry {
+        int id;
+        int vkCode;
+        bool keyDown;
+        HotkeyCallback callback;
+    };
+    std::vector<HotkeyEntry> m_hotkeys;
+
+    struct HoldHotkeyEntry {
+        int id;
+        int vkCode;
+        std::chrono::milliseconds hold;
+        HotkeyCallback onTap;
+        HotkeyCallback onHold;
+        HotkeyCallback onDown;
+        bool keyDown = false;
+        // Whether this press began in the foreground, and so may run anything at all.
+        bool armed = false;
+        // Set once the press has been down for `hold`, so its release is not a tap.
+        bool held = false;
+        std::chrono::steady_clock::time_point downAt;
+    };
+    std::vector<HoldHotkeyEntry> m_holdHotkeys;
+
+    struct TapHotkeyEntry {
+        int id;
+        int vkCode;
+        std::chrono::milliseconds hold;
+        std::chrono::milliseconds tapGap;
+        std::vector<HotkeyCallback> onTaps;
+        HotkeyCallback onHold;
+        std::function<bool()> accepts;
+        bool keyDown = false;
+        // What the press now down is. One that takes no part is kIgnored, as is no press. kLast
+        // made the run as long as it goes and has run its action.
+        enum class Press { kIgnored, kFirst, kLater, kLast };
+        Press press = Press::kIgnored;
+        // Set once a first press has been down for `hold`, so its release is not a tap.
+        bool held = false;
+        std::chrono::steady_clock::time_point downAt;
+        // The presses counted in the run so far.
+        std::size_t taps = 0;
+        // A run whose last press was let go at releasedAt, which runs once `tapGap` has passed with no next press.
+        bool waiting = false;
+        std::chrono::steady_clock::time_point releasedAt;
+    };
+    std::vector<TapHotkeyEntry> m_tapHotkeys;
+    // When PollAt last ran, once it has.
+    bool m_polled = false;
+    std::chrono::steady_clock::time_point m_polledAt;
+    // Guards the three lists and the ID counter.
+    std::mutex m_hotkeyMutex;
+    int m_nextHotkeyId = 1;
+};
+
+// Common virtual key codes for convenience
+namespace VK {
+    constexpr int F1 = 0x70;
+    constexpr int F2 = 0x71;
+    constexpr int F3 = 0x72;
+    constexpr int F4 = 0x73;
+    constexpr int F5 = 0x74;
+    constexpr int F6 = 0x75;
+    constexpr int F7 = 0x76;
+    constexpr int F8 = 0x77;
+    constexpr int F9 = 0x78;
+    constexpr int F10 = 0x79;
+    constexpr int F11 = 0x7A;
+    constexpr int F12 = 0x7B;
+    constexpr int Escape = 0x1B;
+    constexpr int Space = 0x20;
+    constexpr int PageUp = 0x21;
+    constexpr int PageDown = 0x22;
+    constexpr int Home = 0x24;
+    constexpr int End = 0x23;
+    constexpr int Insert = 0x2D;
+    constexpr int Delete = 0x2E;
+    constexpr int NumPad0 = 0x60;
+    constexpr int NumPad1 = 0x61;
+    constexpr int NumPad2 = 0x62;
+    constexpr int NumPad3 = 0x63;
+    constexpr int NumPad4 = 0x64;
+    constexpr int NumPad5 = 0x65;
+    constexpr int NumPad6 = 0x66;
+    constexpr int NumPad7 = 0x67;
+    constexpr int NumPad8 = 0x68;
+    constexpr int NumPad9 = 0x69;
+}
+
+// Convert virtual key code to human-readable string
+const char* VirtualKeyToString(int vkCode);
+
+// Whether a virtual key code is one of the keys this library's binding
+// convention uses: function keys, numpad, the nav cluster, Escape, Space,
+// letters and digits. An ALLOW list, and a narrower question than
+// config::IsBindableVirtualKey, which asks only whether GetAsyncKeyState can
+// ever report the key. Every code this admits passes that one too; the reverse
+// does not hold, and the two are meant to disagree.
+bool IsValidHotkeyCode(int vkCode);
+
+} // namespace cameraunlock::input

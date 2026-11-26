@@ -1,0 +1,9 @@
+# Each refused value reads inside its range as a float and above it as a double. A game binds the
+# row to either, so the value is refused for every game, with the double codec's reason. A value at
+# the top of its range reads the same both ways and is accepted.
+value	LocalSmoothing	refused	4	Smoothing	LocalSmoothing	1.00000001	expected a number from 0.0 to 1.0
+value	RemoteSmoothing	accepted	5	1
+value	PositionLimitX	accepted	7	10
+value	PositionLimitZ	refused	8	Position	PositionLimitZ	10.0000001	expected a number from 0.0 to 10.0
+line	LocalSmoothing	Defaults.ini: line 4: [Smoothing] LocalSmoothing=1.00000001 is not read (expected a number from 0.0 to 1.0), so the built-in 0.0 is used.
+line	PositionLimitZ	Defaults.ini: line 8: [Position] PositionLimitZ=10.0000001 is not read (expected a number from 0.0 to 10.0), so the built-in 0.4 is used.

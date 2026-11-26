@@ -1,0 +1,375 @@
+#pragma once
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <cstdint>
+#include "cameraunlock/data/tracking_pose.h"
+#include "cameraunlock/protocol/pose_jump_gate.h"
+#include "cameraunlock/protocol/socket_types.h"
+#include "cameraunlock/protocol/udp_socket.h"
+
+namespace cameraunlock {
+/// Routes receiver diagnostics to cameraunlock::logging by default.
+std::function<void(const std::string&)> DefaultLogSink();
+}  // namespace cameraunlock
+
+namespace cameraunlock {
+
+class UdpReceiver;
+
+namespace detail {
+
+/// Not API: the test seam. Hands a receiver that is not started one datagram as if it had
+/// arrived from `sender` at `arrivedUs`, on the caller's thread, so a test can run the
+/// receive path without a socket or a clock.
+struct UdpReceiverTestAccess {
+    static void Deliver(UdpReceiver& receiver, const void* datagram, int length, const sockaddr_in& sender,
+                        int64_t arrivedUs);
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+    /// Sets how long the supervisor of a receiver that is not started waits between looks, so
+    /// a test can make the wait longer than any Stop() could take and see Stop() wake it.
+    static void SetSupervisorTick(UdpReceiver& receiver, std::chrono::milliseconds tick);
+#endif
+};
+
+}  // namespace detail
+
+/// One published pose with everything that was published with it, read as a whole by
+/// UdpReceiver::GetSnapshot(). The members belong to one datagram: no reader sees the
+/// rotation of one pose beside the position, the sequence number or the centre count of
+/// another.
+struct PoseSnapshot {
+    /// 1 for the first pose published since Start(), one more for each after it. 0 while
+    /// no pose has been published, and then nothing else here means anything.
+    uint64_t sequence = 0;
+    /// CENTER presses the followed tracker has announced in the trailer, in the poses up
+    /// to and including this one. A reader that keeps the count from the snapshot it took
+    /// before knows whether a press came with this pose or with one it did not see in
+    /// between. Nothing in core acts on a press.
+    uint64_t centers = 0;
+    /// When the datagram arrived, on the steady clock, in microseconds.
+    int64_t received_us = 0;
+    /// Degrees, as the tracker sent them: Recenter()'s offset is not taken off.
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+    float roll = 0.0f;
+    /// Metres, as the tracker sent them.
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
+/// UDP receiver for OpenTrack protocol.
+/// Thread-safe with lock-free reads on the game thread.
+class UdpReceiver {
+public:
+    /// Default OpenTrack UDP port.
+    static constexpr uint16_t kDefaultPort = 4242;
+
+    /// Connection timeout in milliseconds.
+    /// Lower than PollingUdpReceiver (500 vs 1000) because the threaded receiver
+    /// checks more frequently and can detect disconnects sooner.
+    static constexpr int kConnectionTimeoutMs = 500;
+
+    // Separate from the connection-liveness timeout above. Re-arming trailer
+    // first-sighting is a wire-contract rule fixed at ~5s of packet silence (see
+    // OpenTrackReceiver.cs, which implements 50 x 100ms). A press no longer recenters,
+    // but it still lets its pose past the pose gate, and a 500ms re-arm would read a
+    // burst's tail after a Wi-Fi stall as a second press.
+    static constexpr int kRecenterRearmMs = 5000;
+    /// How long the chosen tracker may go quiet before another sender is
+    /// allowed to take over. Long enough that ordinary jitter or a dropped
+    /// packet never hands control to a second app mid-session.
+    static constexpr int kSourceHandoverMs = 2000;
+
+    /// The gate's threshold, PoseJumpGate::kConfirmJumpDegrees.
+    static constexpr float kConfirmJumpDegrees = PoseJumpGate::kConfirmJumpDegrees;
+
+    /// Interval between bind retries after a failed bind.
+    /// Short on purpose: this is the only path that reclaims the port, so it
+    /// covers both a slow-exiting previous game instance (sub-second) and a
+    /// tracker app the user quits mid-session, which should be picked up
+    /// promptly rather than feeling broken.
+    static constexpr int kRetryIntervalMs = 500;
+
+    /// Interval between "still waiting" retry log messages.
+    static constexpr int kRetryLogIntervalMs = 30000;
+
+    UdpReceiver() = default;
+    ~UdpReceiver();
+
+    // Non-copyable
+    UdpReceiver(const UdpReceiver&) = delete;
+    UdpReceiver& operator=(const UdpReceiver&) = delete;
+
+    /// Starts the UDP receiver on the specified port and a supervisor thread
+    /// that keeps it listening for as long as the receiver lives. If the bind
+    /// fails - the port is already in use being the usual reason - Start
+    /// returns false, logs what the OS said, and the supervisor retries every
+    /// kRetryIntervalMs until it succeeds, with no further action from the
+    /// caller; once it binds, the receive thread starts and IsRunning becomes
+    /// true. The supervisor also re-establishes the socket if the receive
+    /// thread dies on a socket error.
+    /// @return True if bound and the receive thread started immediately.
+    bool Start(uint16_t port = kDefaultPort);
+
+    /// Listen on 127.0.0.1 alone from the next Start(), where only this machine can send
+    /// to the port, or on every interface again. For a test, which has no business being
+    /// reachable from the network or raising a firewall prompt.
+    void SetLoopbackOnly(bool loopbackOnly) { m_loopbackOnly = loopbackOnly; }
+
+    /// Stops the UDP receiver. Joins the supervisor and receive threads,
+    /// closes the socket, and clears tracking state.
+    void Stop();
+
+    /// Optional logging callback for bind failures and retry messages.
+    /// Must be thread-safe: invoked from Start (caller thread) and from the
+    /// background retry thread.
+    /// Diagnostic sink. Defaults to the shared file log rather than to nothing:
+    /// forgetting this call used to silently discard the bind result and the
+    /// latched first-packet line, which are the two the "no head tracking"
+    /// reports turn on. Mods with their own logger override it here; mods that
+    /// never open a core log get a no-op.
+    void SetLog(std::function<void(const std::string&)> log) { m_log = std::move(log); }
+
+    /// True if the receive thread is running.
+    bool IsRunning() const { return m_running.load(std::memory_order_acquire); }
+
+    /// True if the supervisor is retrying the bind (the last attempt failed).
+    bool IsRetrying() const { return m_retrying.load(std::memory_order_acquire); }
+
+    /// True if data has been received recently.
+    bool IsReceiving() const;
+
+    /// True if the data source is from a remote address.
+    bool IsRemoteConnection() const { return m_isRemoteConnection.load(std::memory_order_relaxed); }
+
+    /// True if the most recent bind attempt failed. Cleared once retry succeeds.
+    bool IsFailed() const { return m_failed.load(std::memory_order_acquire); }
+
+    /// Why Start() answered false, and empty when it answered true: what the OS said about
+    /// the socket, or about the event the receive thread waits on. Never empty after a
+    /// false. For a host that gives the port up where a mod waits for it: a launcher that
+    /// leaves head tracking to the program already listening calls Stop() and says why.
+    /// Start() writes it before the supervisor exists and the retries leave it alone, so
+    /// it is read on the thread that called Start().
+    const std::string& GetStartFailure() const { return m_startFailure; }
+
+    /// True when that Start() failed because another socket holds the port.
+    bool StartFoundPortInUse() const { return m_startFoundPortInUse; }
+
+    /// Timestamp of the last received packet (microseconds on the steady clock).
+    /// Compare across frames to detect new samples for interpolation. It moves after
+    /// the pose and position of its packet are in place, so a GetRotation() or
+    /// GetPosition() made after this read is that packet's or a newer one's.
+    int64_t GetLastReceiveTimestamp() const { return m_lastReceiveTimestamp.load(std::memory_order_acquire); }
+
+    /// Gets the current rotation values with offset applied.
+    /// @return True if data is available.
+    bool GetRotation(float& yaw, float& pitch, float& roll) const;
+
+    /// Gets the current position values with offset applied.
+    /// @return True if position data is available.
+    bool GetPosition(float& x, float& y, float& z) const;
+
+    /// Sets the current rotation and position as the new center point.
+    void Recenter();
+
+    /// Clears the centering offset, so raw tracker values pass through untouched.
+    /// PollingUdpReceiver and the C# OpenTrackReceiver have always had this; its
+    /// absence here was a public-API asymmetry between two receivers of one protocol.
+    void ResetOffset();
+
+    /// Always false. The HCAM trailer is still parsed, but it no longer raises a
+    /// recenter request: Headcam zeroes its own output on CENTER and the pipeline's
+    /// centre is identity, so the zeroed stream is already correct. Kept on the API
+    /// because mods call it; they simply never see a press.
+    bool TryConsumeRecenterRequest() {
+        return m_recenterRequested.exchange(false, std::memory_order_acq_rel);
+    }
+
+    /// Packets ignored because the tracker had stopped tracking and was
+    /// repeating one pose. Non-zero means head tracking survived a dropout that
+    /// would otherwise have swung the view to centre and back.
+    uint64_t GetFrozenPacketCount() const {
+        return m_frozenPackets.load(std::memory_order_relaxed);
+    }
+
+    /// Step to a different tracker app when the wrong one won the startup race.
+    /// Safe to call from any thread; it takes effect on the next packet.
+    void CycleSource() {
+        m_cycleRequestedAtUs.store(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
+        m_cycleRequested.store(true, std::memory_order_release);
+    }
+
+    /// Packets dropped because they came from a second tracker source. Non-zero
+    /// means two apps are sending to this port and one of them is being ignored.
+    uint64_t GetRejectedPacketCount() const {
+        return m_rejectedPackets.load(std::memory_order_relaxed);
+    }
+
+    /// Datagrams taken off the socket since Start(), whatever their length or content,
+    /// one that was too long for the buffer included. With GetPublishedPoseCount() it
+    /// tells a sender in the wrong format from no sender at all. A datagram is counted
+    /// after it has been dealt with: whatever it changed is in place when the count moves.
+    uint64_t GetDatagramCount() const { return m_datagrams.load(std::memory_order_acquire); }
+
+    /// Of those, the ones published as the pose: parsed, from the source followed, and
+    /// let through by the gate. GetLastReceiveTimestamp() moves with each, and the pose
+    /// is in place when the count moves.
+    uint64_t GetPublishedPoseCount() const { return m_publishedPoses.load(std::memory_order_acquire); }
+
+    /// The newest published pose, its sequence number and the centre presses announced so
+    /// far, copied under one lock the receive thread also takes for the whole of each
+    /// publish. So the copy is one datagram's: see PoseSnapshot. GetRotation() and
+    /// GetPosition() are separate lock-free reads and can straddle two datagrams; a host
+    /// that needs the six values, or a pose and its centre mark, to belong together reads
+    /// this. A host whose output is relative (head movement turned into mouse movement)
+    /// compares `centers` across snapshots to drop the step a press makes in the pose.
+    PoseSnapshot GetSnapshot() const {
+        std::lock_guard<std::mutex> lock(m_snapshotMutex);
+        return m_snapshot;
+    }
+
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+    // The WebAssembly build has no threads. Its host receives on the socket this receiver
+    // opened and hands each recvfrom's result to Received, or the reason it stopped waiting to
+    // ReceiveLoopFailed, and calls SupervisorStep about every 16 ms while Start holds.
+    void Received(const char* buffer, int bytes, int error, const sockaddr_in& sender);
+    void ReceiveLoopFailed(const std::string& what);
+    void SupervisorStep(int64_t nowUs);
+    bool IsSupervising() const { return m_supervising.load(std::memory_order_acquire); }
+#endif
+
+private:
+    friend struct detail::UdpReceiverTestAccess;
+
+    void HandleDatagram(const char* buffer, int bytesReceived, const sockaddr_in& senderAddr, int64_t arrivedUs);
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+    void ReceiverThread();
+    void SupervisorThread();
+    /// What one recvfrom gave: `bytes` from `sender`, or SOCKET_ERROR and the socket's `error`.
+    void Received(const char* buffer, int bytes, int error, const sockaddr_in& sender);
+    /// The receive loop gives up: `what` is logged once and the supervisor reopens the socket.
+    void ReceiveLoopFailed(const std::string& what);
+    /// One look by the supervisor: a retry of the bind while it fails, a reopen after the
+    /// receive loop gave up.
+    void SupervisorStep(int64_t nowUs);
+#endif
+    /// False with the reason in `failure`, which is then never empty.
+    bool BindAndReceive(std::string& failure);
+    void StopReceiverThread();
+
+    // Thread-safe tracking data
+    TrackingData m_trackingData;
+
+    UdpSocket m_socket;
+    std::thread m_thread;
+    std::thread m_supervisorThread;
+    std::atomic<bool> m_running{false};
+    std::atomic<bool> m_stopFlag{false};
+#if defined(_WIN32)
+    /// Wakes the receive thread out of its wait for a datagram. Created with
+    /// each receive thread and closed after it is joined.
+    WSAEVENT m_stopEvent{WSA_INVALID_EVENT};
+#endif
+    // The supervisor's clock and its last failure, kept from one step to the next.
+    int64_t m_retryingSinceUs{0};
+    int64_t m_lastAttemptUs{0};
+    int64_t m_lastWaitLogUs{0};
+    std::string m_supervisorFailure;
+    // The receive path's lines that are logged once, counted from each bind.
+    int64_t m_recvErrLogged{0};
+    int64_t m_waitErrLogged{0};
+    int64_t m_firstPacketLogged{0};
+    int64_t m_shortPacketLogged{0};
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+    /// Retries are timed off the clock, so this only bounds how long the supervisor
+    /// sleeps when nothing wakes it.
+    std::chrono::milliseconds m_supervisorTick{100};
+#endif
+    std::atomic<bool> m_supervising{false};
+    std::atomic<bool> m_retrying{false};
+    std::atomic<bool> m_failed{false};
+    /// Set by the receive thread when it gives up on a socket error, so the
+    /// supervisor re-establishes the socket instead of leaving the receiver
+    /// bound and permanently deaf.
+    std::atomic<bool> m_receiveFailed{false};
+    uint16_t m_port{kDefaultPort};
+    std::function<void(const std::string&)> m_log = DefaultLogSink();
+
+    // Offset for recentering
+    std::atomic<float> m_yawOffset{0.0f};
+    std::atomic<float> m_pitchOffset{0.0f};
+    std::atomic<float> m_rollOffset{0.0f};
+    std::atomic<float> m_posXOffset{0.0f};
+    std::atomic<float> m_posYOffset{0.0f};
+    std::atomic<float> m_posZOffset{0.0f};
+
+    // Position data (metres: OpenTrack's centimetres, converted on receipt)
+    std::atomic<float> m_posX{0.0f};
+    std::atomic<float> m_posY{0.0f};
+    std::atomic<float> m_posZ{0.0f};
+    std::atomic<bool> m_hasPosition{false};
+
+    // Remote recenter (Headcam trailer). The trailer only rides packets sent
+    // right after a CENTER press, so any sighting with a new counter is a
+    // press. Counter state is receive-thread-only; Stop() resets it after
+    // the join.
+    std::atomic<bool> m_recenterRequested{false};
+    uint8_t m_lastRecenterCounter{0};
+    bool m_hasRecenterCounter{false};
+
+    // Timestamp for connection detection
+    std::atomic<int64_t> m_lastReceiveTimestamp{0};
+    std::atomic<bool> m_isRemoteConnection{false};
+
+    // The first sender seen, and anything else that turns up.
+    //
+    // Two tracker apps pointed at this port both get through, and the head pose
+    // then alternates between them packet by packet - which looks exactly like
+    // the view flicking between two positions, in every camera mode, and is
+    // impossible to tell from a mod bug without knowing to look. Receive-thread
+    // only; the counter is atomic so the outside can report it.
+    uint64_t m_primarySource{0};
+    // The source cycled away from, so the next lock does not land back on it.
+    uint64_t m_avoidSource{0};
+    std::atomic<bool> m_cycleRequested{false};
+    std::atomic<int64_t> m_cycleRequestedAtUs{0};
+    int64_t m_primaryLastSeenUs{0};
+    std::atomic<uint64_t> m_rejectedPackets{0};
+    std::atomic<uint64_t> m_datagrams{0};
+    std::atomic<uint64_t> m_publishedPoses{0};
+    std::string m_startFailure;
+    bool m_startFoundPortInUse{false};
+    bool m_loopbackOnly{false};
+
+    /// Written by the receive thread, whole, under the mutex.
+    mutable std::mutex m_snapshotMutex;
+    PoseSnapshot m_snapshot;
+
+    /// Stop() wakes the supervisor out of its wait between ticks.
+    std::mutex m_supervisorMutex;
+    std::condition_variable m_supervisorWake;
+
+    /// The first datagram that does not parse is logged, once per receive thread.
+    bool m_parseFailLogged{false};
+
+    /// Dropout rejection. Receive-thread only; Stop() resets it after the join.
+    PoseJumpGate m_poseGate;
+    std::atomic<uint64_t> m_frozenPackets{0};
+
+    static constexpr int kMaxSeenSources = 8;
+    uint64_t m_seenSources[kMaxSeenSources]{};
+    int m_seenSourceCount{0};
+};
+
+}  // namespace cameraunlock

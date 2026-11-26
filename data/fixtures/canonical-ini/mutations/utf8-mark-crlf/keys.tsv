@@ -1,0 +1,6 @@
+key	General	ToggleKey	0x71	true
+chord	Hotkeys	ChordToggle	1	0
+chord	Hotkeys	ChordToggleKey	Y	
+key	Position	LimitY	0.1	false
+key	Position	LimitZ	0.3	false
+range	20

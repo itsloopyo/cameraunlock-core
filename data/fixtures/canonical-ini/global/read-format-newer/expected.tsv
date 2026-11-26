@@ -1,0 +1,3 @@
+# A newer ConfigFormat: read, with one line naming the value, worded as for a game file.
+format	Defaults.ini: line 2: ConfigFormat=2 was written by a newer version of the mod. This version reads format 1.
+value	UdpPort	accepted	4	5000

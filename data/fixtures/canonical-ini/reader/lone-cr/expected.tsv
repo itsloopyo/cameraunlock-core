@@ -1,0 +1,7 @@
+# A lone CR ends a line.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	1	2	-
+key	General	A	1	4	-
+key	General	B	2	5	-

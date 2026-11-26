@@ -1,0 +1,2 @@
+# One LF and one lone CR: the tie goes to LF.
+set_or_insert	General	C	3

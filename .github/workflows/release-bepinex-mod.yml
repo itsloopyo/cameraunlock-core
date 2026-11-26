@@ -1,0 +1,387 @@
+# ============================================================================
+# Release BepInEx Mod - the PREBUILT-ARTIFACT release path
+# ============================================================================
+# Superseded for every mod that can build on a CI runner: use
+# release-mod.yml, which drives the build through `pixi run package` the way
+# AGENTS.md requires. This file packages committed prebuilt DLLs instead, and
+# survives for the one case release-mod.yml cannot serve.
+#
+# That case is real, not hypothetical. Its only caller,
+# sons-of-the-forest-headtracking, resolves its compile references by copying
+# Il2CppInterop proxy assemblies out of the user's own game install
+# (scripts/setup-libs.ps1: "The game must have been launched at least once
+# with BepInEx installed"). A CI runner owns no copy of the game, so
+# `pixi run package` cannot succeed there and no amount of workflow
+# consolidation changes that - the repo's build dependencies are
+# game-dependent, which is the trap AGENTS.md names explicitly.
+#
+# So this is not kept for API-stability decoration. Deleting it or turning it
+# into a forwarder to release-mod.yml would break that repo's releases today.
+# The real fix is in the mod: make its references game-independent (vendored
+# interop assemblies or a checked-in stub source), at which point it moves to
+# release-mod.yml and this file has no callers left and can be retired.
+#
+# Do not add callers. A mod that CAN build on CI belongs on release-mod.yml.
+# ============================================================================
+
+name: Release BepInEx Mod
+
+on:
+  workflow_call:
+    inputs:
+      csproj-path:
+        description: "Path to .csproj file (version source)"
+        required: true
+        type: string
+      project-name:
+        description: "Display name for the GitHub release title"
+        required: true
+        type: string
+      build-output-dir:
+        description: "Directory containing compiled DLLs"
+        required: true
+        type: string
+      mod-name:
+        description: "Mod name (used in ZIP filename)"
+        required: true
+        type: string
+      mod-dlls:
+        description: "Space-separated list of DLL filenames to include"
+        required: true
+        type: string
+      artifact-paths:
+        description: "Space-separated list of paths for release note generation"
+        required: true
+        type: string
+      prebuilt-dir:
+        description: "Directory with prebuilt DLLs (empty = skip prebuilt step)"
+        required: false
+        type: string
+        default: ""
+      create-nexus-zip:
+        description: "Create a NexusMods-compatible ZIP with BepInEx/plugins/ structure"
+        required: false
+        type: string
+        default: "false"
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    # Never cancelled; see release-mod.yml. This path compiles nothing, so it has no
+    # test step: it packages committed prebuilt DLLs.
+    concurrency:
+      group: release-bepinex-mod-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Require release announcement prerequisites
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - every release must be announced to Discord, so this run is refused before the release is created. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run."
+            exit 1
+          }
+          $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+          $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+          $entry = @($mods) | Where-Object { $_.repo -eq "${{ github.repository }}" }
+          # The served catalog is ALREADY filtered to public entries - update-metadata.mjs
+          # writes the Pages copy as { ...catalog, mods: publicMods } - so there is no
+          # public/private test to make here; anything we find is public by construction.
+          #
+          # External is our own heuristic, not a field lopari consults: those installs route
+          # to a third-party mod manager and ship no *-installer.zip, and an installer zip is
+          # what update-metadata.mjs actually requires before it will stamp a pin.
+          #
+          # Known gap, deliberately left loud: lopari also skips any entry that is not yet
+          # `released` and has no dev-release, so a mod's FIRST stable release is never
+          # auto-pinned and the poll below runs its deadline out. That failure is correct -
+          # the Run in Lopari link really would be stale - and the timeout message says so.
+          if ($entry -and @($entry)[0].install_strategy -eq 'External') { $entry = $null }
+          if ($entry -and -not $env:LOPARI_APP_ACTIONS_TOKEN) {
+            Write-Host "::error::${{ github.repository }} is in the Lopari catalog but LOPARI_APP_ACTIONS_TOKEN is not set - the catalog pin can't be synced before the announcement, so the Run in Lopari link would serve the previous release. Set the fine-grained PAT (Actions:write on itsloopyo/lopari.app only) and re-run."
+            exit 1
+          }
+          Write-Host "Release announcement prerequisites present."
+
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          # The job's write token stays out of .git/config while the mod's package task runs.
+          persist-credentials: false
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        env:
+          # Read through the environment, never interpolated into the script body.
+          # ${{ }} is substituted textually before pwsh parses the run block, so a tag
+          # name containing a double quote closes the assignment and the remainder runs
+          # as code - in a job holding contents:write plus the Discord and Lopari
+          # secrets, reachable by anyone who can push a tag. The format check below
+          # cannot help: the injected code runs on the assignment line, before it.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:REF_NAME
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') {
+            Write-Host "::error::Tag format invalid. Use semantic versioning: v1.2.3"
+            exit 1
+          }
+          $version = $matches[1]
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Validate version matches csproj
+        shell: pwsh
+        env:
+          CSPROJ_PATH: ${{ inputs.csproj-path }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          Import-Module ./cameraunlock-core/powershell/ReleaseWorkflow.psm1 -Force
+          $csprojVersion = Get-CsprojVersion $env:CSPROJ_PATH
+          $tagVersion = $env:TAG_VERSION
+
+          Write-Host "csproj version: $csprojVersion"
+          Write-Host "Tag version: $tagVersion"
+
+          if ($csprojVersion -ne $tagVersion) {
+            Write-Host "::error::Version mismatch! Tag is v$tagVersion but csproj has $csprojVersion"
+            exit 1
+          }
+
+          Write-Host "Version matches!" -ForegroundColor Green
+
+      - name: Copy prebuilt DLLs
+        if: inputs.prebuilt-dir != ''
+        shell: pwsh
+        env:
+          BUILD_OUTPUT_DIR: ${{ inputs.build-output-dir }}
+          PREBUILT_DIR: ${{ inputs.prebuilt-dir }}
+        run: |
+          Write-Host "Using prebuilt DLLs..." -ForegroundColor Cyan
+
+          $buildOutput = $env:BUILD_OUTPUT_DIR
+          New-Item -ItemType Directory -Path $buildOutput -Force | Out-Null
+
+          Copy-Item "$env:PREBUILT_DIR/*.dll" $buildOutput -Force
+
+          Write-Host "Prebuilt DLLs copied to build output:" -ForegroundColor Green
+          Get-ChildItem $buildOutput -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
+
+      - name: Package release
+        id: package
+        shell: pwsh
+        env:
+          MOD_DLLS: ${{ inputs.mod-dlls }}
+          CREATE_NEXUS_ZIP: ${{ inputs.create-nexus-zip }}
+          MOD_NAME: ${{ inputs.mod-name }}
+          CSPROJ_PATH: ${{ inputs.csproj-path }}
+          BUILD_OUTPUT_DIR: ${{ inputs.build-output-dir }}
+        run: |
+          $dlls = $env:MOD_DLLS -split '\s+'
+          $createNexus = $env:CREATE_NEXUS_ZIP -eq "true"
+
+          $params = @{
+            ModName = $env:MOD_NAME
+            CsprojPath = $env:CSPROJ_PATH
+            BuildOutputDir = $env:BUILD_OUTPUT_DIR
+            ModDlls = $dlls
+          }
+          if ($createNexus) {
+            $params.CreateNexusZip = $true
+          }
+
+          # Copy-SharedBundle, which the script runs, refuses a
+          # config.canonical_since above the tag's version on a tag build.
+          # The script returns one object; read the paths by property name so a
+          # future stray write to the success stream cannot shift an index and
+          # silently make zip_path a garbage value.
+          $result = & cameraunlock-core/scripts/package-bepinex-mod.ps1 @params
+
+          $githubZip = $result.GithubZip
+          if (-not (Test-Path -LiteralPath $githubZip)) {
+            Write-Host "::error::package-bepinex-mod.ps1 did not report a readable installer ZIP (got '$githubZip')."
+            exit 1
+          }
+          echo "zip_path=$githubZip" >> $env:GITHUB_OUTPUT
+          Write-Host "GitHub package: $githubZip" -ForegroundColor Green
+
+          if ($createNexus) {
+            $nexusZip = $result.NexusZip
+            if (-not (Test-Path -LiteralPath $nexusZip)) {
+              Write-Host "::error::create-nexus-zip was requested but no NexusMods ZIP was produced (got '$nexusZip')."
+              exit 1
+            }
+            echo "nexus_zip_path=$nexusZip" >> $env:GITHUB_OUTPUT
+            Write-Host "NexusMods package: $nexusZip" -ForegroundColor Green
+          }
+
+      - name: Generate release notes
+        shell: pwsh
+        env:
+          ARTIFACT_PATHS: ${{ inputs.artifact-paths }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+        run: |
+          $artifactPaths = $env:ARTIFACT_PATHS -split '\s+'
+
+          & cameraunlock-core/scripts/generate-release-notes.ps1 `
+            -Version $env:TAG_VERSION `
+            -ArtifactPaths $artifactPaths `
+            -ProjectName $env:PROJECT_NAME
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          ZIP_PATH: ${{ steps.package.outputs.zip_path }}
+          NEXUS_ZIP_PATH: ${{ steps.package.outputs.nexus_zip_path }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+          $zipPath = $env:ZIP_PATH
+          $nexusZipPath = $env:NEXUS_ZIP_PATH
+
+          $assets = @($zipPath)
+          if ($nexusZipPath) {
+            $assets += $nexusZipPath
+          }
+
+          Write-Host "Creating GitHub Release for $tag..." -ForegroundColor Cyan
+
+          gh release create $tag `
+            --title "$env:PROJECT_NAME $tag" `
+            --notes-file "release-notes.txt" `
+            @assets
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to create GitHub release"
+            exit 1
+          }
+
+          Write-Host "Release created successfully!" -ForegroundColor Green
+          Write-Host "   View at: https://github.com/${{ github.repository }}/releases/tag/$tag" -ForegroundColor Cyan
+
+      - name: Sync Lopari catalog pin
+        shell: pwsh
+        env:
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+          # See the note in discord-announce-step.yml: a tag name is attacker-controlled
+          # text and must not be interpolated into a run block that holds a token.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $version = $env:REF_NAME -replace '^v', ''
+          function Get-PinnedVersion {
+            $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+            $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+            $entry = @($mods) | Where-Object { $_.repo -eq $repo }
+            if (-not $entry) { return $null }
+            # See the note on the prerequisites step above: the served catalog is already
+            # public-only, External is our stand-in for "ships no installer zip", and a
+            # first release genuinely has no pin to find until lopari stamps one.
+            if (@($entry)[0].install_strategy -eq 'External') { return $null }
+            return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
+          }
+          $state = Get-PinnedVersion
+          if (-not $state) {
+            Write-Host "::notice::$repo has no syncable Lopari catalog pin (no entry, or External install strategy) - the /run/ page serves its own install steps."
+            exit 0
+          }
+          if ($state.pinned -eq $version) {
+            Write-Host "Catalog already pins $version."
+            exit 0
+          }
+          function Request-Repin {
+            Invoke-RestMethod -Method Post `
+              -Uri 'https://api.github.com/repos/itsloopyo/lopari.app/actions/workflows/update-pins.yml/dispatches' `
+              -Headers @{ Authorization = "Bearer $env:LOPARI_APP_ACTIONS_TOKEN"; Accept = 'application/vnd.github+json' } `
+              -ContentType 'application/json' -Body '{"ref":"main"}'
+          }
+          Request-Repin
+          Write-Host "Requested lopari.app catalog re-pin; waiting for $version to go live..."
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          $tick = 0
+          while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 15
+            $tick++
+            try {
+              $state = Get-PinnedVersion
+            } catch {
+              # A transient fetch failure is part of what the poll absorbs;
+              # a persistent one runs into the deadline below.
+              continue
+            }
+            if ($state.pinned -eq $version) {
+              Write-Host "Catalog pin is live: $version."
+              exit 0
+            }
+            Write-Host "  still pinned at $($state.pinned)..."
+            # Two releases dispatching within a minute of each other put two pin
+            # runs on the same base commit; the loser's push is rejected and
+            # nothing retries it before the hourly schedule. Ask again.
+            if ($tick % 5 -eq 0) {
+              Write-Host "  re-requesting the catalog re-pin..."
+              Request-Repin
+            }
+          }
+          Write-Host "::error::Timed out waiting for lopari.app to pin $version (still $($state.pinned)). Check https://github.com/itsloopyo/lopari.app/actions, then re-run this job - the release exists; only the pin sync and announcement are pending."
+          exit 1
+
+      - name: Announce release to Discord
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          # Read through the environment, never interpolated into the script body.
+          # ${{ }} is substituted textually before pwsh parses the run block, so a tag
+          # name containing a double quote closes the assignment and the remainder runs
+          # as code - in a job that holds the release webhook and contents:write.
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
+            exit 1
+          }
+          $tag  = $env:REF_NAME
+          $repo = "${{ github.repository }}"
+          $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
+          $url  = "https://github.com/$repo/releases/tag/$tag"
+          $description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+          $notes = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }).body
+          if ($notes) {
+            $notes = ($notes -replace "`r`n", "`n").Trim()
+            # Discord refuses an embed whose description is over 4096 characters, and
+            # the refusal fails this step after the release is already public. The
+            # links come first so a cut never takes them.
+            $room = 4000 - $description.Length
+            if ($notes.Length -gt $room) {
+              $more = "`n[Full release notes]($url)"
+              $notes = $notes.Substring(0, $room - $more.Length)
+              $lastLine = $notes.LastIndexOf("`n")
+              if ($lastLine -gt 0) { $notes = $notes.Substring(0, $lastLine) }
+              $notes += $more
+            }
+            $description += "`n`n$notes"
+          }
+          $payload = @{
+            username = 'Mod Releases'
+            embeds   = @(@{
+              title       = "$name Head Tracking $tag"
+              url         = $url
+              description = $description
+              color       = 5814783
+            })
+          } | ConvertTo-Json -Depth 5
+          Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload
+          Write-Host "Announced $tag to Discord."

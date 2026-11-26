@@ -1,0 +1,2 @@
+# A key above every header belongs to no section and is never matched.
+set_or_insert	General	Mode	2

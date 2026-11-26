@@ -1,0 +1,149 @@
+using System;
+using Xunit;
+using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Processing;
+using CameraUnlock.Core.Protocol;
+
+namespace CameraUnlock.Core.Tests.Protocol
+{
+    /// <summary>
+    /// A double that is finite but too large for float narrows to infinity, which the
+    /// NaN/infinity checks on the double alone let straight through. These cover the
+    /// narrowed value being validated instead, and the pipeline damage a single such
+    /// packet used to do.
+    /// </summary>
+    public class OpenTrackPacketFloatRangeTests
+    {
+        private const double AboveFloatMax = 1e300;
+        private const double BelowFloatMin = -1e300;
+
+        private static byte[] MakePacket(
+            double x = 0, double y = 0, double z = 0,
+            double yaw = 0, double pitch = 0, double roll = 0)
+        {
+            byte[] data = new byte[OpenTrackPacket.MinPacketSize];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, data, OpenTrackPacket.XOffset, 8);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, data, OpenTrackPacket.YOffset, 8);
+            Buffer.BlockCopy(BitConverter.GetBytes(z), 0, data, OpenTrackPacket.ZOffset, 8);
+            Buffer.BlockCopy(BitConverter.GetBytes(yaw), 0, data, OpenTrackPacket.YawOffset, 8);
+            Buffer.BlockCopy(BitConverter.GetBytes(pitch), 0, data, OpenTrackPacket.PitchOffset, 8);
+            Buffer.BlockCopy(BitConverter.GetBytes(roll), 0, data, OpenTrackPacket.RollOffset, 8);
+            return data;
+        }
+
+        [Fact]
+        public void TryParse_YawAboveFloatRange_ReturnsFalse()
+        {
+            Assert.False(OpenTrackPacket.TryParse(MakePacket(yaw: AboveFloatMax), out _));
+        }
+
+        [Fact]
+        public void TryParse_PitchBelowFloatRange_ReturnsFalse()
+        {
+            Assert.False(OpenTrackPacket.TryParse(MakePacket(pitch: BelowFloatMin), out _));
+        }
+
+        [Fact]
+        public void TryParse_RollAboveFloatRange_ReturnsFalse()
+        {
+            Assert.False(OpenTrackPacket.TryParse(MakePacket(roll: AboveFloatMax), out _));
+        }
+
+        [Fact]
+        public void TryParsePosition_XAboveFloatRange_ReturnsFalse()
+        {
+            Assert.False(OpenTrackPacket.TryParsePosition(MakePacket(x: AboveFloatMax), out _));
+        }
+
+        [Fact]
+        public void TryParsePosition_YBelowFloatRange_ReturnsFalse()
+        {
+            Assert.False(OpenTrackPacket.TryParsePosition(MakePacket(y: BelowFloatMin), out _));
+        }
+
+        [Fact]
+        public void TryParsePosition_ZAboveFloatRange_ReturnsFalse()
+        {
+            Assert.False(OpenTrackPacket.TryParsePosition(MakePacket(z: AboveFloatMax), out _));
+        }
+
+        // The bounds, inclusive: one full turn and 100 m. A finite value past either used to
+        // parse, and two such poses made the interpolator's step between them infinite.
+        [Theory]
+        [InlineData(360.0, true)]
+        [InlineData(-360.0, true)]
+        [InlineData(360.5, false)]
+        [InlineData(-100000.0, false)]
+        [InlineData((double)float.MaxValue, false)]
+        public void TryParse_AngleAgainstTheBound(double angle, bool parses)
+        {
+            Assert.Equal(parses, OpenTrackPacket.TryParse(MakePacket(yaw: angle), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParse(MakePacket(pitch: angle), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParse(MakePacket(roll: angle), out _));
+        }
+
+        [Theory]
+        [InlineData(10000.0, true)]
+        [InlineData(-10000.0, true)]
+        [InlineData(10001.0, false)]
+        [InlineData((double)float.MaxValue, false)]
+        public void TryParsePosition_CentimetresAgainstTheBound(double centimetres, bool parses)
+        {
+            Assert.Equal(parses, OpenTrackPacket.TryParsePosition(MakePacket(x: centimetres), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParsePosition(MakePacket(y: centimetres), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParsePosition(MakePacket(z: centimetres), out _));
+        }
+
+        [Fact]
+        public void RejectedPacket_LeavesPositionSmoothingUsable()
+        {
+            // What the missing check cost: an infinite sample became the smoothed
+            // state, the next finite sample lerped Infinity towards a finite target
+            // and produced NaN, and NaN survived every lerp after it.
+            var processor = new PositionProcessor { TrackerPivotForward = 0f };
+            var identity = Quat4.Identity;
+
+            Assert.False(OpenTrackPacket.TryParsePosition(MakePacket(x: AboveFloatMax), out _));
+
+            Assert.True(OpenTrackPacket.TryParsePosition(MakePacket(x: 5.0), out PositionData good));
+            processor.Process(good, identity, 0.016f);
+            Vec3 result = processor.Process(good, identity, 0.016f);
+
+            Assert.False(float.IsNaN(result.X));
+            Assert.False(float.IsNaN(result.Y));
+            Assert.False(float.IsNaN(result.Z));
+        }
+
+        [Fact]
+        public void InfiniteSampleIsBoundedByTheClamp_NotPropagated()
+        {
+            // Fed directly, bypassing the parser. The pre-smoothing clamp bounds an
+            // infinite sample to the axis limit, so it no longer reaches the smoothing
+            // state and the next good sample is unaffected.
+            var processor = new PositionProcessor { TrackerPivotForward = 0f };
+            var identity = Quat4.Identity;
+
+            processor.Process(new PositionData(float.PositiveInfinity, 0f, 0f), identity, 0.016f);
+            Vec3 result = processor.Process(new PositionData(0.05f, 0f, 0f), identity, 0.016f);
+
+            Assert.False(float.IsNaN(result.X));
+            Assert.InRange(result.X, -PositionSettings.Default.LimitX, PositionSettings.Default.LimitX);
+        }
+
+        [Fact]
+        public void NaNSampleStillPoisonsSmoothing_DemonstratesWhyTheGuardExists()
+        {
+            // NaN is the case the clamp CANNOT catch: every comparison against NaN is
+            // false, so both bounds fall through and it reaches the smoothing state,
+            // where it is permanent. That is why the packet boundary, not the processor,
+            // is the place that rejects non-finite input.
+            var processor = new PositionProcessor { TrackerPivotForward = 0f };
+            var identity = Quat4.Identity;
+
+            processor.Process(new PositionData(float.NaN, 0f, 0f), identity, 0.016f);
+            Vec3 result = processor.Process(new PositionData(0.05f, 0f, 0f), identity, 0.016f);
+
+            Assert.True(float.IsNaN(result.X));
+        }
+    }
+}

@@ -1,0 +1,2 @@
+# A file ending in a lone CR is terminated, and its lone CRs are the dominant ending.
+set_or_insert	Position	PositionEnabled	true

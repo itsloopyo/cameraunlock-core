@@ -1,0 +1,5 @@
+# Bytes that are not UTF-8 (a code point past U+10FFFF, a stray continuation byte, an
+# overlong form, a surrogate and a truncated sequence) are ordinary bytes, copied through
+# untouched.
+set	General	A	2
+set_or_insert	General	C	3

@@ -1,0 +1,65 @@
+cameraunlock-core
+Copyright (c) 2026 itsloopyo. All rights reserved.
+
+This licence covers cameraunlock-core: its source code, scripts, templates,
+data and documentation, in its repository at
+https://github.com/itsloopyo/cameraunlock-core, and every build made
+from it, including the copies built into other software.
+
+What you may do
+
+1. Download, install and run official releases of itsloopyo's software that
+   include cameraunlock-core, such as Headstart and itsloopyo's head tracking
+   mods, free of charge. Official releases are the ones itsloopyo publishes on the
+   Releases page of each project's GitHub repository under
+   https://github.com/itsloopyo, on the mod sites itsloopyo publishes them to,
+   and the updates that software downloads through its own updater.
+
+2. Read and change the source code, and build and run it on computers you
+   control for your own use, including CI runs for your own fork, as long as
+   nobody else is given the builds and they are not published as artifacts or
+   releases.
+
+3. Publish your changes on GitHub, in a fork of this repository, to offer them
+   to itsloopyo as a pull request under the agreement in CONTRIBUTING.md at
+   https://github.com/itsloopyo/cameraunlock-core. A
+   fork may hold nothing else, and builds of it may not be distributed.
+
+What you may not do without itsloopyo's written permission
+
+- Distribute cameraunlock-core, a build of it, or a changed version of it, in
+  whole or in part, alone or inside other software.
+- Use any part of cameraunlock-core's source code in other software.
+
+GitHub's terms of service let GitHub users view and fork this repository on
+GitHub. That right goes no further: a fork may be built only as point 2 allows,
+and neither the fork nor builds of it may be distributed or used in other
+software, except as point 3 allows.
+
+If you break these terms, the permissions above end for you.
+
+What this licence does not cover
+
+- The third-party code in the repository's vendor folder, and the third-party
+  components listed in its legal/README.md (all but cameraunlock-core itself),
+  are under their own licences, given there. Nothing in this licence limits
+  your rights under them. Where a file of cameraunlock-core is ported from or
+  follows one of those projects, that project's part stays under its own
+  licence.
+
+- Files cameraunlock-core writes into itsloopyo's mod repositories (install
+  and uninstall scripts, build tasks, workflow settings and the like) are
+  under the licence of the repository they are written into.
+
+No warranty
+
+CAMERAUNLOCK-CORE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH CAMERAUNLOCK-CORE OR THE USE OR OTHER DEALINGS IN
+CAMERAUNLOCK-CORE.
+
+For any permission these terms do not give, get in touch: itsloopyo at
+outlook.com

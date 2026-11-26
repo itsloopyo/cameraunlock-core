@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+// Set (or audit) the DISCORD_RELEASE_WEBHOOK secret on every mod repo that
+// needs it. Discovers repos the same way sync-discord-announce.mjs does:
+// sibling checkouts of cameraunlock-core whose release workflow references
+// DISCORD_RELEASE_WEBHOOK, plus the callers of the reusable release workflows
+// (release-mod.yml and release-bepinex-mod.yml), which run the announce step
+// themselves and get the secret through `secrets: inherit` without naming it.
+//
+// By default only repos missing the secret are set, so re-running is cheap.
+//
+//   node set-discord-webhook-secret.mjs --check         # audit, change nothing
+//   node set-discord-webhook-secret.mjs                 # set where missing, from $DISCORD_RELEASE_WEBHOOK
+//   node set-discord-webhook-secret.mjs --force         # overwrite everywhere (rotation)
+//
+// --name switches which secret is managed across the same repo set (the
+// release pipeline's other secrets ride the same workflows), e.g.:
+//
+//   node set-discord-webhook-secret.mjs --name LOPARI_APP_ACTIONS_TOKEN --check
+//
+// The value comes from the env var named by --name, never from the command line,
+// where it would stay in the shell history and the process list. It is passed to
+// `gh secret set` via stdin.
+
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join, basename } from 'node:path';
+import { REPOS_ROOT } from './lib/repos.mjs';
+
+const siblingsRoot = REPOS_ROOT;
+const OWNER = 'itsloopyo';
+
+const argv = process.argv.slice(2);
+const checkOnly = argv.includes('--check');
+const force = argv.includes('--force');
+const flagValue = (flag) => {
+  const i = argv.indexOf(flag);
+  return i !== -1 ? argv[i + 1] : undefined;
+};
+const secretName = flagValue('--name') ?? 'DISCORD_RELEASE_WEBHOOK';
+if (!/^[A-Z][A-Z0-9_]*$/.test(secretName)) {
+  console.error(`Invalid secret name: ${secretName}`);
+  process.exit(1);
+}
+if (argv.includes('--value') || argv.includes('--url')) {
+  console.error(`--value and --url are not taken: a secret on the command line stays in the shell history. Set $${secretName} instead.`);
+  process.exit(2);
+}
+const secretValue = process.env[secretName];
+
+if (!checkOnly && !secretValue) {
+  console.error(`No value for ${secretName}: set $${secretName}, or use --check to audit.`);
+  process.exit(1);
+}
+
+function needsSecret(repoPath) {
+  const wfDir = join(repoPath, '.github', 'workflows');
+  if (!existsSync(wfDir)) return false;
+  return readdirSync(wfDir)
+    .filter((f) => /\.ya?ml$/i.test(f))
+    .some((f) => new RegExp(`${secretName}|release-(bepinex-)?mod\\.yml`).test(readFileSync(join(wfDir, f), 'utf8')));
+}
+
+const repos = readdirSync(siblingsRoot)
+  .filter((d) => /-head-?tracking$/.test(d))
+  .map((d) => join(siblingsRoot, d))
+  .filter((p) => {
+    try {
+      return statSync(p).isDirectory() && needsSecret(p);
+    } catch {
+      return false;
+    }
+  })
+  .map((p) => basename(p));
+
+console.log(`Repos needing the secret: ${repos.length}`);
+
+const missing = [];
+for (const repo of repos) {
+  const out = execFileSync('gh', ['secret', 'list', '--repo', `${OWNER}/${repo}`], { encoding: 'utf8' });
+  if (new RegExp(`^${secretName}\\b`, 'm').test(out)) {
+    console.log(`  set     ${repo}`);
+  } else {
+    console.log(`  MISSING ${repo}`);
+    missing.push(repo);
+  }
+}
+
+console.log(`\n${missing.length} of ${repos.length} missing ${secretName}`);
+
+if (checkOnly) process.exit(0);
+
+const targets = force ? repos : missing;
+if (!targets.length) {
+  console.log('Nothing to do.');
+  process.exit(0);
+}
+
+console.log('');
+for (const repo of targets) {
+  execFileSync('gh', ['secret', 'set', secretName, '--repo', `${OWNER}/${repo}`], {
+    input: secretValue,
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
+  console.log(`  set ${repo}`);
+}
+console.log(`\nDone: secret set on ${targets.length} repo(s).`);

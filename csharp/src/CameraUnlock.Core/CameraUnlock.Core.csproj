@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net35;net40;netstandard2.0;net472;net48</TargetFrameworks>
+    <AssemblyName>CameraUnlock.Core</AssemblyName>
+    <RootNamespace>CameraUnlock.Core</RootNamespace>
+    <Version>1.0.0</Version>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <OutputType>Library</OutputType>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+    <Authors>CameraUnlock Mods</Authors>
+    <Description>Core shared library for CameraUnlock head tracking mods</Description>
+  </PropertyGroup>
+
+  <!-- Modern C# for modern targets -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);NETSTANDARD2_0;NULLABLE_ENABLED</DefineConstants>
+  </PropertyGroup>
+
+  <!-- C# 7.3 for Unity 2018 Mono compatibility - NO nullable, NO modern features -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net472'">
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <DefineConstants>$(DefineConstants);NET472;UNITY_MONO</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Legacy targets -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net35'">
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <DefineConstants>$(DefineConstants);NET35</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net40'">
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <DefineConstants>$(DefineConstants);NET40</DefineConstants>
+  </PropertyGroup>
+
+  <!-- CheckedFileWriter's fault-injection overload is internal, not API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="CameraUnlock.Core.Tests" />
+    <InternalsVisibleTo Include="CameraUnlock.Core.FrameworkTests" />
+  </ItemGroup>
+
+  <!-- net48 for newer Unity games -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);NET48;NULLABLE_ENABLED</DefineConstants>
+  </PropertyGroup>
+
+</Project>

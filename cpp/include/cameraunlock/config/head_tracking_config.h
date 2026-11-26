@@ -1,0 +1,189 @@
+#pragma once
+
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "cameraunlock/camera/lean_clamp.h"
+#include "cameraunlock/config/config_key_schema.g.h"
+#include "cameraunlock/data/position_settings.h"
+#include "cameraunlock/effects/head_follow_light.h"
+
+namespace cameraunlock {
+
+/// The C++ twin of CameraUnlock.Core.Config.HeadTrackingConfigData.
+///
+/// Both halves resolve keys through the table generated from data/config-schema.json, so a
+/// spelling accepted by one is accepted by the other. Matching is SECTION-LESS and
+/// case-insensitive - a key is lowercased and stripped of '_' and '-' before lookup - which
+/// is why ApplyValues takes plain key/value pairs and ParseIniConfig throws section headers
+/// away. The canonical sections ([Network] [General] [Sensitivity] [Inversion] [Smoothing]
+/// [Position] [Hotkeys] [Reticle]) decide file layout and documentation, not parsing.
+///
+/// This is deliberately NOT built on IniReader. IniReader sits on GetPrivateProfileStringA,
+/// which can only answer "what is the value of key K in section S" - it cannot enumerate,
+/// so it cannot implement section-less matching, and its lookup would miss any spelling that
+/// differs from the probed one by a '_' or a '-'. ParseIniConfig reads the text directly and
+/// mirrors ConfigParsingUtils.ParseIniFile line for line. IniReader stays for the mods that
+/// already read their own game-specific keys through it.
+struct HeadTrackingConfig {
+    using LogFn = std::function<void(const std::string&)>;
+
+    int udp_port = 4242;
+    bool enable_on_startup = true;
+    /// How long, in milliseconds, the newest packet counts as current. Core only parses it;
+    /// the mod's per-frame gate stops following the tracker past it.
+    int data_freshness_ms = 500;
+
+    float yaw_sensitivity = 1.0f;
+    float pitch_sensitivity = 1.0f;
+    float roll_sensitivity = 1.0f;
+    bool invert_yaw = false;
+    bool invert_pitch = false;
+    bool invert_roll = false;
+
+    float local_smoothing = static_cast<float>(math::kDefaultLocalSmoothing);
+    float remote_smoothing = static_cast<float>(math::kDefaultRemoteSmoothing);
+
+    bool world_space_yaw = true;
+    /// Deprecated, kept so existing callers compile: aim is always decoupled. ApplyValues still
+    /// parses AimDecoupling into it, but it is not a setting, no table binds it, and a mod never
+    /// reads it to couple the aim to the head.
+    bool aim_decoupling_enabled = true;
+    bool show_decoupled_reticle = true;
+    float reticle_color_rgba[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+
+    bool rotation_enabled = true;
+    bool position_enabled = true;
+    /// Deprecated, kept so existing callers compile: the tracking mode (rotation_enabled with
+    /// position_enabled) is the only way position is switched off. ApplyValues still parses
+    /// PositionAllowed into it, but it is not a setting, no table binds it, and a mod never reads it.
+    [[deprecated("not a setting: the tracking mode (rotation_enabled with position_enabled) is the only way "
+                 "positional tracking is switched off; read position_enabled instead")]]
+    bool position_allowed = true;
+    PositionSettings position = PositionSettings::Default();
+    /// Deprecated, kept so existing callers compile: the tracker is authoritative, so the neck
+    /// pivot is not a setting and no table binds either field. ApplyValues still parses both, and
+    /// PositionProcessor keeps its pivot properties. 0 is compensation off.
+    [[deprecated("not a setting: the tracker is authoritative over the neck pivot; a game that keeps a pivot calls "
+                 "PositionProcessor::SetTrackerPivotForward in code")]]
+    float tracker_pivot_forward = 0.0f;
+    [[deprecated("not a setting: the tracker is authoritative over the neck pivot; a game that keeps a pivot calls "
+                 "PositionProcessor::SetTrackerPivotUp in code")]]
+    float tracker_pivot_up = 0.0f;
+
+    /// A carried light that follows the head rather than the aim. Inert in a mod
+    /// for a game with no carried light; see effects/head_follow_light.h.
+    effects::HeadFollowLightSettings light;
+
+    /// The lean collision clamp. CollisionMargin lands in lean_clamp.skin and
+    /// CollisionReleaseSmoothing in lean_clamp.release_smoothing, so a mod hands
+    /// lean_clamp straight to LeanClamp::SetSettings. Off by default: a mod turns
+    /// it on once its trace has been confirmed against real geometry in game.
+    bool collision_enabled = false;
+    camera::LeanClampSettings lean_clamp;
+    /// Passed through unchecked because its meaning is the engine's.
+    int collision_channel = 0;
+
+    std::string recenter_key_name = "Home";
+    std::string toggle_key_name = "End";
+    std::string yaw_mode_key_name = "PageDown";
+    std::string position_toggle_key_name = "PageUp";
+    std::string reticle_toggle_key_name = "Insert";
+    std::string cycle_tracking_mode_key_name;
+
+    /// The lean while aiming down sights: false keeps the eye on the sight line (sights
+    /// locked), true leaves the lean in full (true free look). Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool true_free_look = false;
+    /// The key list that toggles true_free_look. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    std::string true_free_look_key_name = "Insert, Ctrl+Shift+U";
+    /// With true_free_look, the aim mode (ads/aim_mode.h): true draws the aim marker in free
+    /// look, and means nothing while true_free_look is false. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool free_look_marker = false;
+    /// The fourth aim mode (ads/aim_mode.h): true eases yaw, pitch and the lean out while the
+    /// sights are up, whatever the two above hold. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool stock_sights = false;
+    /// How much the Accela filter smooths, 0 to 1. Core binds it and does not apply it: the
+    /// launcher's own backends do. Read only through config::HeadTrackingConfigTable;
+    /// ApplyValues does not read it.
+    float accela = 0.75f;
+    /// The players whose tracker the Accela filter smooths, as the canonical text of
+    /// config::PlayerListCodec: `2, 3`, or empty for none. Core binds it and does not apply it.
+    /// Read only through config::HeadTrackingConfigTable; ApplyValues does not read it.
+    std::string accela_players;
+    /// The key list that switches the view between first person and the game's own camera, in
+    /// a mod that has a first-person view. Core binds it and does not poll it. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    std::string first_person_key_name = "ScrollLock, Ctrl+Shift+B";
+    /// The field of view the game is drawn at, in vertical degrees; 0 leaves the game's own.
+    /// Zoomed views keep their ratio to it. Core binds it and does not apply it: each mod
+    /// converts it to its engine's axis. Read only through config::HeadTrackingConfigTable;
+    /// ApplyValues does not read it.
+    float game_fov = 0.0f;
+    /// true (the default) lifts the game's own frame-rate limit, in a mod that can, with game time, movement,
+    /// physics and timers kept at their normal speed; false leaves the game's frame rate as it is.
+    /// Core binds it and does not apply it: each mod that can unlock its game's frame rate reads
+    /// it. Read only through config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool frame_rate_unlock = true;
+    /// true (the default) smooths the jagged edges of the game's 3D with an FXAA pass, in a mod that can draw
+    /// one into the game's frame; false leaves the picture as the game draws it. Core binds it and
+    /// does not apply it: each mod that can draw the pass reads it. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool fxaa = true;
+    /// true keeps head tracking on while the game plays a cutscene, in a mod that can tell its
+    /// cutscenes apart from its other gated states; false holds the pose off in cutscenes as in
+    /// menus and loading. Core binds it and does not apply it: each mod that can tell a cutscene
+    /// apart reads it. Read only through config::HeadTrackingConfigTable; ApplyValues does not
+    /// read it.
+    bool cutscene_tracking = false;
+
+    /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
+    /// mod's own game-specific keys can share the file.
+    ///
+    /// Deprecated: a converted game reads its file through config::ConfigOwner with
+    /// config::HeadTrackingConfigTable. This stays, unchanged, for the mods that call it until
+    /// a major version.
+    ///
+    /// Every numeric key is range-checked here, and a value outside its range is REFUSED -
+    /// reported through @p log, with the field left holding what it had. A mod does not
+    /// need its own guard pass over the result, and the two that matter are not survivable
+    /// downstream: a negative position limit inverts the bounds of
+    /// math::Clamp(v, -limit, limit) and pins the camera at a fixed offset instead of
+    /// freeing it, and a sensitivity past config::kMaxSensitivity multiplies the
+    /// processor's decomposition out to an infinity that reaches the camera.
+    ///
+    /// This does NOT cover a mod that builds PositionSettings in code. The guards in
+    /// config/value_guards.h are the same bounds for that path.
+    void ApplyValues(const std::vector<std::pair<std::string, std::string>>& values,
+                     const LogFn& log = nullptr);
+
+    /// Reads an INI file and applies it. A missing file leaves every default in place.
+    ///
+    /// Deprecated: a converted game reads its file through config::ConfigOwner with
+    /// config::HeadTrackingConfigTable. This stays, unchanged, for the mods that call it until
+    /// a major version.
+    static HeadTrackingConfig LoadFromFile(const std::string& path, const LogFn& log = nullptr);
+};
+
+/// Parses an INI-style file into key/value pairs, discarding section headers. Mirrors
+/// ConfigParsingUtils.ParseIniFile: '#' and ';' start a comment, an inline comment is
+/// stripped only outside a quoted value, and a wholly quoted value has its quotes removed.
+///
+/// Deprecated: a converted game reads its file through config::ConfigOwner with
+/// config::HeadTrackingConfigTable, whose canonical reader is ParseCanonicalIni. This stays,
+/// unchanged, for the mods that call it until a major version.
+std::vector<std::pair<std::string, std::string>> ParseIniConfig(const std::string& path);
+
+/// Value parsers shared with the C# side. Each rejects input it cannot use rather than
+/// substituting a value, so a caller can tell "absent" from "unusable".
+bool TryParseConfigFloat(const std::string& value, float& out);
+bool TryParseConfigInt(const std::string& value, int& out);
+bool TryParseConfigBool(const std::string& value, bool& out);
+bool TryParseConfigColor(const std::string& value, float out_rgba[4]);
+
+}  // namespace cameraunlock

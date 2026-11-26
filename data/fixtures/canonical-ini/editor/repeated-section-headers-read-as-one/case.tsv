@@ -1,0 +1,5 @@
+# Headers that repeat a name are one section. Each key appears once across them, so each
+# edit finds its line under whichever header holds it.
+set	Network	P	2
+set	General	B	3
+set	general	A	4

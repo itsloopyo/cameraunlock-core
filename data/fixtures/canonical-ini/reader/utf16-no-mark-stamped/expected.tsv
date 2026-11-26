@@ -1,0 +1,4 @@
+# A stamp in UTF-16 without a mark is not found: only a mark makes the search decode.
+status	NulByte	1
+format	0
+stamp	false

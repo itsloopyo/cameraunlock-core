@@ -1,0 +1,9 @@
+# The key's spelling and the white space around '=' are kept. Everything after that, up to
+# the terminator, is the value and is replaced: there are no inline comments, and trailing
+# white space goes with the old value.
+set	General	EnableOnStartup	false
+set	General	WorldSpaceYaw	false
+set	General	Name	c
+set	General	Empty	x
+set	General	Blank	y
+set	General	Tabbed	2

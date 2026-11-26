@@ -1,0 +1,6 @@
+# CRLF line endings, with a final CRLF.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	1	2	-
+key	General	Enabled	true	5	-

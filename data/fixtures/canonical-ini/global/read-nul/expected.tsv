@@ -1,0 +1,2 @@
+# A NUL byte on line 4: nothing is read, not even the lines above it.
+unreadable	line 4 holds a NUL byte

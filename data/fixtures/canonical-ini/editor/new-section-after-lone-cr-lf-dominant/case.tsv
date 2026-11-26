@@ -1,0 +1,4 @@
+# The file ends in a lone CR but LF is its dominant ending. The blank line in front of
+# the new section gets CRLF, as an LF straight after that CR would make one CRLF of the
+# two and lose the blank line.
+set_or_insert	Position	PositionEnabled	true

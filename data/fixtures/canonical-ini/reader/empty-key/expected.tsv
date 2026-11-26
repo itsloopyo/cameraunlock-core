@@ -1,0 +1,8 @@
+# A key line with nothing before '=' is reported and skipped.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	5	-
+diagnostic	EmptyKey	2
+diagnostic	EmptyKey	3
+diagnostic	EmptyKey	4

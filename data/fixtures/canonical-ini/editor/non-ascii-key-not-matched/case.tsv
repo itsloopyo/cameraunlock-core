@@ -1,0 +1,2 @@
+# An edit's key is ASCII, so it never matches a key holding another byte.
+set_or_insert	General	Caf	2

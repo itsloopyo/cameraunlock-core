@@ -1,0 +1,3 @@
+# An empty file: sections created in batch order, CRLF, terminated.
+set_or_insert	General	RotationEnabled	true
+set_or_insert	Position	PositionEnabled	false

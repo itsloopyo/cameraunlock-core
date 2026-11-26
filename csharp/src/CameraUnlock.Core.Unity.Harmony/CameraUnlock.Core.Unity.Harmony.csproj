@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net35;net472;net48</TargetFrameworks>
+    <AssemblyName>CameraUnlock.Core.Unity.Harmony</AssemblyName>
+    <RootNamespace>CameraUnlock.Core.Unity.Harmony</RootNamespace>
+    <Version>1.0.0</Version>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <OutputType>Library</OutputType>
+    <Authors>CameraUnlock Mods</Authors>
+    <Description>Harmony IL patching utilities for CameraUnlock head tracking mods</Description>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net35'">
+    <DefineConstants>$(DefineConstants);NET35</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Reference CameraUnlock.Core.Unity -->
+  <ItemGroup>
+    <ProjectReference Include="..\CameraUnlock.Core.Unity\CameraUnlock.Core.Unity.csproj" />
+  </ItemGroup>
+
+  <!-- Harmony library -->
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.2.2" />
+  </ItemGroup>
+
+  <!-- With no UnityEnginePath supplied, build against the reference stubs this repo owns
+       rather than a sibling mod checkout's libs directory. A mod passes its own libs and
+       gets its game DLLs; the ItemGroup below fires then instead. -->
+  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
+    <UseCameraUnlockUnityStubs>true</UseCameraUnlockUnityStubs>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' == 'true'">
+    <ProjectReference Include="..\..\stubs\UnityEngine\Stubs.UnityEngine.csproj" Private="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' != 'true'">
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityEnginePath)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityEnginePath)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

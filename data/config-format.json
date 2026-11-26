@@ -1,0 +1,869 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "Which head-tracking repos migrate to the canonical config format, and where each one's",
+    "config lives. scripts/check-config-format.mjs (pixi run check-config-format, part of",
+    "pixi run check) validates the shape and pins `legacy`.",
+    "",
+    "`legacy`: every repo that published a pre-canonical build, a v* release or the rolling",
+    "dev pre-release on GitHub, keyed by its current name. Only these carry a frozen legacy",
+    "import. The set is frozen: the validator pins the SHA-256 of the sorted names, so adding",
+    "or removing one fails the check. `predecessors` names earlier repos of the same mod that",
+    "published releases, whose shipped files are differential-test inputs; `renamed_from` is",
+    "the repo's name before a GitHub rename, which local checkouts may still carry.",
+    "",
+    "`exempt`: repos that cannot move to a canonical reader, or have no config, with the reason.",
+    "A repo in neither `legacy` nor `exempt` must be canonical and carry no legacy import.",
+    "",
+    "`configs`: each migrating repo's config files. `committed` is the repo path of the rendered",
+    "file, null until the conversion commits one where the repo tracks none today. `installed`",
+    "is every path the file takes relative to the game folder, one per store layout, empty only",
+    "with a `no_installed_reason`, and every one is named CameraUnlock.ini. `legacy_source` is",
+    "a bare file name, with no folder: the file the repo's pre-canonical builds read, in the",
+    "folder of each installed path, or the folder no_installed_reason names. The mod imports",
+    "it once while CameraUnlock.ini is absent and never writes it. It is set exactly for a repo",
+    "in `legacy`, and null for every other repo, since no player holds an older file. `dialect` is",
+    "native (key names, or 0x hex for a key with no name) or unity (key names only), for the",
+    "hotkey lint. unity is also what tells the README config block that the repo's config owner",
+    "is core's C# one, the only owner that runs natively on Linux and macOS, so a C# repo is",
+    "unity and every other repo native. Game paths use backslashes, as install scripts and",
+    "PRESERVE_FILES write them; repo paths use forward slashes, as git writes them.",
+    "",
+    "`normalisations` and `approved_changes`: the only differences a differential test may",
+    "allow between the import and the migration, beside a moved default's no-file input.",
+    "`approved` is the date the owner approved one; a normalisation with `approved` null is",
+    "pending and no map may apply it. `drop_rule` names the DropRule the import records.",
+    "",
+    "`conversion_notes`: per repo in `configs`, facts the owner decided that its conversion and",
+    "differential test follow: `text` and the `approved` date. A setting whose default changed",
+    "between published builds takes one note (owner ruling of 2026-09-27): each range of versions",
+    "with the value it shipped, and the evidence in the file that tells which build wrote it, or that",
+    "there is none. The import compares with the default of the build that wrote the file, and with",
+    "the newest build's where the file does not show it (docs/canonical-config.md, The legacy import).",
+    "",
+    "`allow_legacy_symbols`: per repo, uses of a symbol the legacy-reader check bans that do not",
+    "read the mod's config: `symbol` as the check reports it (GetPrivateProfileStringA, IniReader,",
+    "ConfigFile.Bind), `file` the repo path and `reason`.",
+    "",
+    "`per_game`: per repo in `configs`, the global concept rows the game keeps for itself",
+    "instead of taking them from Defaults.ini: `row` the concept id, `reason` and the `approved`",
+    "date, which every entry needs. The game's table marks each such row PerGame(), and the",
+    "committed file holds its value there, where every other global concept row holds default;",
+    "the canonical config lint holds the file to that. A concept data/config-schema.json marks",
+    "`\"global\": false` (CollisionMargin, CollisionChannel) is never an entry: every game keeps",
+    "those already, as Engine rows. A hotkey a game takes for itself is a per_game",
+    "hotkey row. Which keys it moves to is fixed by one rule (docs/canonical-config.md, A key",
+    "the game takes): measured in the game, the modifier pair settled for the whole mod, each",
+    "letter taken from the spare list J, T, U, H, K, B, N in slot order. Its reason holds the",
+    "measurement and the list the committed file has, `approved` is the date of the measurement,",
+    "and an entry that follows the rule needs no other approval. An entry added",
+    "after the repo's first converted release changes what default means in files already on",
+    "players' disks, since those rows stop following Defaults.ini, so it is a breaking change for",
+    "that repo. scripts/check-config-descriptor.mjs requires a launcher-manifest.json config",
+    "descriptor's `per_game` to name exactly these rows, each with the value text the committed",
+    "file holds there."
+  ],
+  "legacy": {
+    "cyberpunk-2077-headtracking": {},
+    "abzu-headtracking": {},
+    "alien-isolation-headtracking": {},
+    "amnesia-the-dark-descent-headtracking": {},
+    "arx-fatalis-headtracking": {},
+    "assassins-creed-unity-headtracking": {},
+    "assetto-corsa-evo-headtracking": {},
+    "assetto-corsa-rally-headtracking": {},
+    "bioshock-infinite-headtracking": {},
+    "bioshock-remastered-headtracking": {},
+    "black-and-white-headtracking": {},
+    "black-mesa-headtracking": {},
+    "blue-prince-headtracking": {},
+    "control-ultimate-edition-headtracking": {},
+    "deus-ex-human-revolution-headtracking": {},
+    "dishonored-2-headtracking": {},
+    "dishonored-headtracking": {},
+    "dying-light-2-headtracking": {},
+    "dying-light-headtracking": {},
+    "easy-delivery-co-headtracking": {},
+    "eternal-afternoon-headtracking": {},
+    "fallout-4-headtracking": {},
+    "fallout-new-vegas-headtracking": {"predecessors": ["fallout-new-vegas-headtracking-delete"]},
+    "far-cry-6-headtracking": {},
+    "firewatch-headtracking": {},
+    "ghostrunner-headtracking": {},
+    "gone-home-headtracking": {},
+    "half-life-2-headtracking": {},
+    "high-on-life-headtracking": {},
+    "indiana-jones-and-the-great-circle-headtracking": {},
+    "kingdom-come-deliverance-2-headtracking": {},
+    "kingdom-come-deliverance-headtracking": {},
+    "metaphor-refantazio-headtracking": {},
+    "metro-exodus-enhanced-edition-headtracking": {},
+    "minecraft-bedrock-edition-headtracking": {},
+    "mirrors-edge-headtracking": {},
+    "no-mans-sky-headtracking": {},
+    "obra-dinn-headtracking": {"predecessors": ["obra-dinn-headtracking-old2"]},
+    "outer-worlds-spacers-choice-edition-headtracking": {},
+    "outlast-headtracking": {},
+    "pacific-drive-headtracking": {},
+    "pathologic-2-headtracking": {"renamed_from": "pathalogic-2-headtracking"},
+    "peak-headtracking": {"predecessors": ["peak-headtracking-old"]},
+    "pinball-fx-headtracking": {},
+    "portal-2-headtracking": {},
+    "portal-headtracking": {},
+    "portal-with-rtx-headtracking": {},
+    "prey-headtracking": {},
+    "quake-ii-rtx-headtracking": {},
+    "red-eclipse-headtracking": {},
+    "repo-headtracking": {},
+    "resident-evil-2-headtracking": {},
+    "resident-evil-3-headtracking": {},
+    "resident-evil-4-headtracking": {},
+    "resident-evil-7-headtracking": {},
+    "resident-evil-requiem-headtracking": {"predecessors": ["resident-evil-requiem-headtracking-dev"]},
+    "resident-evil-village-headtracking": {},
+    "roadcraft-headtracking": {},
+    "rv-there-yet-headtracking": {},
+    "shadows-of-doubt-headtracking": {},
+    "skyrim-special-edition-headtracking": {},
+    "snowrunner-headtracking": {},
+    "soma-headtracking": {},
+    "sons-of-the-forest-headtracking": {},
+    "spec-ops-the-line-headtracking": {},
+    "starfield-headtracking": {},
+    "still-wakes-the-deep-headtracking": {},
+    "stormworks-build-and-rescue-headtracking": {"renamed_from": "stormworks-headtracking"},
+    "subliminal-headtracking": {},
+    "subnautica-2-headtracking": {},
+    "subnautica-headtracking": {},
+    "superliminal-headtracking": {},
+    "the-painscreek-killings-headtracking": {},
+    "the-vanishing-of-ethan-carter-redux-headtracking": {},
+    "the-witness-headtracking": {},
+    "thief-headtracking": {},
+    "titanfall-2-headtracking": {},
+    "trepang2-headtracking": {},
+    "tt-isle-of-man-ride-on-the-edge-3-headtracking": {},
+    "valheim-headtracking": {},
+    "viewfinder-headtracking": {},
+    "voices-of-the-void-headtracking": {},
+    "what-remains-of-edith-finch-headtracking": {},
+    "wobbly-life-headtracking": {},
+    "wolfenstein-the-new-order-headtracking": {},
+    "wreckfest-2-headtracking": {},
+    "wreckfest-headtracking": {},
+    "yakuza-0-headtracking": {},
+    "yapyap-headtracking": {}
+  },
+  "exempt": {
+    "beamng-drive-headtracking": "Lua in BeamNG's LuaJIT, with file I/O bound to the game's virtual file system, and a JSON config.",
+    "fusion-360-headtracking": "Pure Python in Fusion's embedded interpreter, reading its config with configparser.",
+    "minecraft-java-edition-headtracking": "Java under Fabric with a .properties config, and it carries its own Java port of core.",
+    "ni-no-kuni-wrath-of-the-white-witch-headtracking": "No config: the mod reads nothing. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
+    "outer-wilds-headtracking": "OWML owns the parse and rewrites config.json whole from its menus, and the OWML that runs is the user's, so toggles stay session-only.",
+    "the-pathless-headtracking": "Pure Lua under UE4SS with a JSON config, and nothing to persist: its only runtime control is F10, the master toggle."
+  },
+  "configs": {
+    "cyberpunk-2077-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["bin\\x64\\plugins\\cyber_engine_tweaks\\mods\\HeadTracking\\CameraUnlock.ini"], "legacy_source": "config.json", "dialect": "native"}
+    ],
+    "a-plague-tale-innocence-headtracking": [
+      {"committed": "dist_assets/headtrack.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "abzu-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["AbzuGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "alien-isolation-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "AlienIsolationHeadTracking.ini", "dialect": "native"}
+    ],
+    "amnesia-rebirth-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "amnesia-the-dark-descent-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "arkham-city-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "arx-fatalis-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini", "EN\\CameraUnlock.ini"], "legacy_source": "ArxFatalisHeadTracking.ini", "dialect": "native"}
+    ],
+    "assassins-creed-origins-headtracking": [
+      {"committed": "AssassinsCreedOriginsHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "assassins-creed-unity-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "assetto-corsa-evo-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "assetto-corsa-rally-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["acr\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "battlefield-bad-company-2-headtracking": [
+      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "bioshock-infinite-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "bioshock-remastered-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Build\\Final\\CameraUnlock.ini"], "legacy_source": "bioshock_headtrack.ini", "dialect": "native"}
+    ],
+    "black-and-white-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "black-mesa-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "blue-prince-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.blueprince.headtracking.cfg", "dialect": "unity"}
+    ],
+    "bodycam-headtracking": [
+      {"committed": null, "installed": ["Bodycam\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "bully-scholarship-edition-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "burnout-paradise-the-ultimate-box-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "control-ultimate-edition-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "dead-rising-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dead-space-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "deep-rock-galactic-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["FSD\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "deus-ex-human-revolution-headtracking": [
+      {"committed": "DeusExHumanRevolutionHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "DeusExHumanRevolutionHeadTracking.ini", "dialect": "native"}
+    ],
+    "deus-ex-mankind-divided-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["retail\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dishonored-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "dishonored-definitive-edition-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dishonored-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "DishonoredHeadTracking.ini", "dialect": "native"}
+    ],
+    "dorfromantik-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "dragon-age-inquisition-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dying-light-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["ph\\work\\bin\\x64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "dying-light-headtracking": [
+      {"committed": "DyingLightHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "DyingLightHeadTracking.ini", "dialect": "native"}
+    ],
+    "easy-delivery-co-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.easydeliveryco.headtracking.cfg", "dialect": "unity"}
+    ],
+    "elite-dangerous-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Products\\elite-dangerous-odyssey-64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "eternal-afternoon-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Eternal Afternoon_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
+    ],
+    "fallout-4-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "fallout-new-vegas-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini", "Fallout New Vegas English\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "far-cry-5-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "far-cry-6-headtracking": [
+      {"committed": "config/FarCry6HeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": "FarCry6HeadTracking.ini", "dialect": "native"}
+    ],
+    "firewatch-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["UserData\\CameraUnlock.ini"], "legacy_source": "MelonPreferences.cfg", "dialect": "unity"}
+    ],
+    "ghostrunner-2-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Ghostrunner2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "ghostrunner-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Ghostrunner\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "gone-home-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["GoneHome_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
+    ],
+    "half-life-2-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "green-hell-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Mods\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "high-on-life-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["Oregon\\Binaries\\Win64\\CameraUnlock.ini", "Oregon\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "homeworld-remastered-collection-headtracking": [
+      {"committed": "HomeworldHeadTracking.ini", "installed": ["HomeworldRM\\bin\\Release\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "indiana-jones-and-the-great-circle-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "jump-space-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "kingdom-come-deliverance-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Bin\\Win64MasterMasterSteamPGO\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "kingdom-come-deliverance-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Bin\\Win64\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "la-noire-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "little-nightmares-enhanced-edition-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Atlas\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "mafia-ii-definitive-edition-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["pc\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "mass-effect-legendary-edition-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Game\\ME1\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"},
+      {"committed": "config/CameraUnlock.ini", "installed": ["Game\\ME2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"},
+      {"committed": "config/CameraUnlock.ini", "installed": ["Game\\ME3\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "metaphor-refantazio-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "MetaphorHeadTracking.ini", "dialect": "native"}
+    ],
+    "metro-2033-redux-headtracking": [
+      {"committed": "Metro2033ReduxHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "metro-exodus-enhanced-edition-headtracking": [
+      {"committed": "MetroExodusHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "MetroExodusHeadTracking.ini", "dialect": "native"}
+    ],
+    "minecraft-bedrock-edition-headtracking": [
+      {"committed": "config/MinecraftHeadTracking.ini", "installed": [], "legacy_source": "MinecraftHeadTracking.ini", "dialect": "native", "no_installed_reason": "The file sits beside MinecraftHeadTracking.dll, in Lopari's mod_home folder or wherever a manual install was extracted, never in the game folder."}
+    ],
+    "mirrors-edge-headtracking": [
+      {"committed": "assets/MirrorsEdgeHeadTracking.ini", "installed": ["Binaries\\CameraUnlock.ini"], "legacy_source": "MirrorsEdgeHeadTracking.ini", "dialect": "native"}
+    ],
+    "mixtape-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["NewMoon\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "mudrunner-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "no-mans-sky-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Binaries\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "obra-dinn-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.headtracking.obradinn.cfg", "dialect": "unity"}
+    ],
+    "outer-worlds-spacers-choice-edition-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["Indiana\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "outlast-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "pacific-drive-headtracking": [
+      {"committed": "PacificDriveHeadTracking.ini", "installed": ["PenDriverPro\\Binaries\\Win64\\CameraUnlock.ini", "PenDriverPro\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "PacificDriveHeadTracking.ini", "dialect": "native"}
+    ],
+    "pathologic-2-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.pathologic2.headtracking.cfg", "dialect": "unity"}
+    ],
+    "peak-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.peak.headtracking.cfg", "dialect": "unity"}
+    ],
+    "persona-5-royal-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "pinball-fx-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["PinballFX\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "pixeljunk-monsters-2-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "portal-2-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "portal-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "portal-with-rtx-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "prey-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Binaries\\Danielle\\x64\\Release\\CameraUnlock.ini", "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "project-zomboid-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "quake-ii-rtx-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "ready-or-not-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["ReadyOrNot\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "red-eclipse-headtracking": [
+      {"committed": "config/RedEclipseHeadTracking.ini", "installed": ["bin\\amd64\\CameraUnlock.ini"], "legacy_source": "RedEclipseHeadTracking.ini", "dialect": "native"}
+    ],
+    "repo-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.repo.headtracking.cfg", "dialect": "unity"}
+    ],
+    "resident-evil-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "resident-evil-3-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "resident-evil-4-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "resident-evil-7-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "resident-evil-requiem-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "resident-evil-village-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "roadcraft-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["root\\bin\\pc\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "routine-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Routine\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "rv-there-yet-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Ride\\Binaries\\Win64\\CameraUnlock.ini", "Ride\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "shadows-of-doubt-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.headtracking.shadowsofdoubt.cfg", "dialect": "unity"}
+    ],
+    "skyrim-special-edition-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "sleeping-dogs-headtracking": [
+      {"committed": "config/headtrack.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "sniper-elite-v2-remastered-headtracking": [
+      {"committed": "SniperEliteV2RemasteredHeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "snowrunner-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Sources\\Bin\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "soma-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "sonic-racing-crossworlds-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["UNION\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "sons-of-the-forest-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.sonsoftheforest.headtracking.cfg", "dialect": "unity"}
+    ],
+    "south-park-the-stick-of-truth-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "spec-ops-the-line-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "SpecOpsTheLineHeadTracking.ini", "dialect": "native"}
+    ],
+    "stalker-call-of-prypiat-enhanced-edition-headtracking": [
+      {"committed": "StalkerCallOfPrypiatHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "stalker-shadow-of-chornobyl-enhanced-edition-headtracking": [
+      {"committed": "StalkerShadowOfChornobylHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "starfield-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "the-ascent-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["TheAscent\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "still-wakes-the-deep-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Habitat\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "stormworks-build-and-rescue-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "StormworksHeadTracking.ini", "dialect": "native"}
+    ],
+    "subliminal-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["Subliminal\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "subnautica-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Subnautica2\\Binaries\\Win64\\CameraUnlock.ini", "Subnautica2\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "subnautica-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.subnautica.headtracking.cfg", "dialect": "unity"}
+    ],
+    "superliminal-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.superliminal.headtracking.cfg", "dialect": "unity"}
+    ],
+    "system-shock-2-25th-anniversary-remaster-headtracking": [
+      {"committed": "dist_assets/SystemShock2HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "system-shock-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["SystemShock\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "the-forest-headtracking": [
+      {"committed": "config/com.cameraunlock.theforest.headtracking.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "the-painscreek-killings-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Painscreek_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
+    ],
+    "the-vanishing-of-ethan-carter-redux-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["EthanCarter\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "the-witness-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "thief-headtracking": [
+      {"committed": "config/ThiefHeadTracking.ini", "installed": ["Binaries2\\Win64\\CameraUnlock.ini"], "legacy_source": "ThiefHeadTracking.ini", "dialect": "native"}
+    ],
+    "tiny-tinas-wonderlands-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["OakGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "titanfall-2-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "trepang2-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["CPPFPS\\Binaries\\Win64\\CameraUnlock.ini", "CPPFPS\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "tt-isle-of-man-ride-on-the-edge-3-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "untitled-goose-game-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "valheim-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.valheim.headtracking.cfg", "dialect": "unity"}
+    ],
+    "viewfinder-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.viewfinder.headtracking.cfg", "dialect": "unity"}
+    ],
+    "voices-of-the-void-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["VotV\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "what-remains-of-edith-finch-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["FinchGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "witcher-3-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["bin\\x64_dx12\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "wobbly-life-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.wobblylife.headtracking.cfg", "dialect": "unity"}
+    ],
+    "wolfenstein-the-new-order-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "wreckfest-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "wreckfest-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "yakuza-0-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["media\\CameraUnlock.ini"], "legacy_source": "Yakuza0HeadTracking.ini", "dialect": "native"}
+    ],
+    "yapyap-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.yapyap.headtracking.cfg", "dialect": "unity"}
+    ]
+  },
+  "normalisations": {
+    "N1": {
+      "rule": "A legacy hotkey code outside 0x01-0xFE imports as unbound, 0xFF included. Unguarded readers accept such codes: core's IniReader::ReadHex in fallout-4 and titanfall-2 reads -1, abc (0xABC), 1abc and 0x230, skyrim-special-edition reads hotkeys with strtol, and HotkeyPoller::AddHotkey stores any code. The canonical hotkey grammar holds 0x01-0xFE only. A legacy 0xFF hotkey could fire (see probe), so N1 unbinds it for a player who bound one. In a Unity mod (owner ruling of 2026-09-27) a legacy UnityEngine.KeyCode value that data/keys.json has no name for imports as unbound the same way and is logged as KeyCodeOutOfRange with the code in decimal (C# LegacyNormalisations.KeyCodeToBindings, which threw on such a code before; KeyBindings.HasName tests a code). keys.json names every KeyCode member but None, so such a code is one no KeyCode member holds; viewfinder, obra-dinn and peak raised the case.",
+      "approved": "2026-09-25",
+      "probe": "pixi run probe-n1 (cameraunlock_tests --probe-getasynckeystate), Windows 11 Pro 10.0.26200, interactive desktop, 2026-09-24: with F24 (0x87) held by SendInput, GetAsyncKeyState reported 0x87 down and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so no out-of-range code aliases a key in range. With VK 0xFF itself held, GetAsyncKeyState(0xFF) reported down. 0xFF is VK__none_, the code kbd.h gives to scan codes a layout leaves unmapped. A search of every tracked .ini and .cfg in the sibling repos found no key or toggle line holding 0xFF, 255, -1, 0 or 0x0.",
+      "drop_rule": "KeyCodeOutOfRange"
+    },
+    "N2": {
+      "rule": "A non-finite float imports as the row's default. IniReader::ReadDouble accepts nan, inf and 1e400, abzu reads its sensitivities and deadzone through it unguarded, and skyrim-special-edition's atof and std::clamp let NaN through, which gives a NaN view matrix every frame. Repos that already sanitise turn a non-finite value into their fallback on read and see no change. On a row that follows Defaults.ini the value follows Defaults.ini and is written default, not the built-in number (owner ruling of 2026-09-27): LegacyFollowsDefaultsIni's Setting(concept, value, shipped) leaves the row to Defaults.ini for a value read that is not finite, so a map gets it by passing the value as read. A PerGame row, or one of a concept that is not global, keeps the row's default.",
+      "approved": "2026-09-24",
+      "drop_rule": "NonFiniteNumber"
+    },
+    "N3": {
+      "rule": "A legacy hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound, and the drop is logged. That is 0x10-0x12 or 0xA0-0xA5 in a native mod (C++ LegacyVirtualKeyToBindings) and LeftShift, RightShift, LeftControl, RightControl, LeftAlt or RightAlt in a Unity mod (C# LegacyNormalisations.KeyCodeToBindings). Such a key goes down before the key of any chord made with it, so a binding on it fires on the way into every such chord, and the canonical hotkey grammar refuses it as a key. Where the import adds the action's Ctrl+Shift chord to the list, the player keeps the chord. Core's REFramework import (PluginConfigLegacyImport) applies neither N3 nor N1: it reads hotkeys through the frozen PluginConfig::Read, which replaces any code IsBindableVirtualKey refuses with the row's default, so an REFramework repo imports such a hotkey as its default, records no drop, and its README config block leaves out the N3 line.",
+      "approved": "2026-09-26",
+      "drop_rule": "ModifierKey"
+    },
+    "N4": {
+      "rule": "A finite legacy number outside the canonical row's range imports as the nearest end of the range, and the clamp is logged with the value read (C++ LegacyClampToRange, C# LegacyNormalisations.ClampToRange). Readers that check no range hand the map numbers no canonical file can hold, so the migration could not write the row: metaphor-refantazio's position limits, subnautica-2's position limits and black-and-white among them. N2 applies first, so the value is finite. The player set the value, so a clamped value that equals the row's shipped default is still carried as the player's, not left to Defaults.ini: the map hands LegacyFollowsDefaultsIni the value read. N4 has its own DropRule, as N1 to N3 do, so the log names the clamp and a differential test finds the difference it allows by rule.",
+      "approved": "2026-09-27",
+      "drop_rule": "NumberOutOfRange"
+    }
+  },
+  "approved_changes": {
+    "reticle": {
+      "decision": 2,
+      "text": "Mods do not draw their own reticles, so the canonical format and the preference set have no reticle toggle and no ShowReticle concept. A migration drops a legacy reticle toggle hotkey, ShowReticle and reticle colour, and the conversion documents the loss.",
+      "approved": "2026-09-24",
+      "drop_rule": "Reticle"
+    },
+    "pose_shaping": {
+      "decision": 3,
+      "text": "The tracker owns pose shaping, so sensitivity multipliers, deadzones, response curves and user-facing axis inversion leave every mod and the canonical format has no rows for them. A value a player set away from the shipped default is dropped. A shipped default that is not identity (abzu InvertRoll=true, [Position] InvertX=true, a roll multiplier other than 1) was correcting the mod's axis conversion, so the conversion folds it into the mod's boundary code and default behaviour does not change. Unit scales a player can edit (game units per metre of head movement: PositionScale, WorldScale, UnitsPerMeter and the other spellings of schema non_canonical_keys PositionScale) are covered too, by the owner's ruling of 2026-09-25 that axis signs and scales are correct in code: the conversion folds the shipped scale into the mod's code as a constant, and a scale a player changed is dropped like a sensitivity.",
+      "approved": "2026-09-24",
+      "drop_rule": "PoseShaping"
+    },
+    "follows_default": {
+      "decision": 4,
+      "text": "A feature shipped disabled pending verification (CollisionEnabled, for example) takes its intended default in the conversion and follows core's default from then on, instead of keeping the value a legacy file holds.",
+      "approved": "2026-09-24",
+      "drop_rule": "FollowsDefault"
+    },
+    "coupled_aim": {
+      "decision": 5,
+      "text": "Decoupled aim is the only supported behaviour (owner ruling of 2026-09-26): the aim stays with the mouse or controller while the head moves the view. No mod offers, reads or documents an aim decoupling switch, so the canonical format has no AimDecoupling row, and a conversion deletes the mod's coupled-aim code path with the setting. A legacy AimDecoupling (or any other spelling of the switch, EnableAimDecoupling in a BepInEx .cfg included) that is false is dropped and logged: that player now gets decoupled aim. A true value changes nothing and is not recorded.",
+      "approved": "2026-09-26",
+      "drop_rule": "CoupledAim"
+    },
+    "position_switch_off": {
+      "decision": 6,
+      "text": "The tracking mode (RotationEnabled with PositionEnabled) is the only way positional tracking is switched off (owner ruling of 2026-09-26), so the canonical format has no PositionAllowed row. The setting was added for the games whose old position switch also kept the mode hotkey off the position modes: amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence and the-painscreek-killings. A legacy position switch that is false imports as the rotation-only tracking mode (RotationEnabled true, PositionEnabled false), which keeps the player's view as it was, and is recorded (LegacyPositionSwitch, run after the map has written the tracking mode); nothing else carries it, so the mode hotkey can now switch positional tracking back on. A true value changes nothing and is not recorded. A converted mod reads the tracking mode's position channel wherever it read the switch.",
+      "approved": "2026-09-26",
+      "drop_rule": "PositionSwitchOff"
+    },
+    "tracker_pivot": {
+      "decision": 7,
+      "text": "The tracker is authoritative, like the rest of pose shaping (owner ruling of 2026-09-26), so the canonical format has no TrackerPivotForward or TrackerPivotUp row. Not every game shipped a pivot of 0: repo ships TrackerPivotForward=0.08 in its BepInEx config, and easy-delivery-co, obra-dinn and yapyap shipped 0.08 before they were converted. As with a pose-shaping default that is not identity, the pivot a game shipped was no player's choice, so the conversion keeps it in the mod's code through PositionProcessor's pivot properties and default behaviour does not change. The map compares the effective legacy pivot with the effective pivot the game shipped (LegacyTrackerPivot), both as the pipeline ran them: 0 where the game's own switch had compensation off or its code never read the key. A value the player changed is dropped and logged; one equal to the shipped value is not recorded.",
+      "approved": "2026-09-26",
+      "drop_rule": "TrackerPivot"
+    }
+  },
+  "conversion_notes": {
+    "cyberpunk-2077-headtracking": [{"text": "The owner approved retiring the CET JSON exemption: the RED4ext script channel connects Lua to the native ConfigOwner. Preserve existing panel controls, including saving smoothing, travel limits and chase-camera tracking through Writable rows. Import config.json once without modifying it. The downward limit shipped as 0.05; untouched values follow Defaults.ini. JSON has no version marker, so imports compare against the newest pre-canonical defaults.", "approved": "2026-09-29"}],
+    "firewatch-headtracking": [
+      {
+        "text": "The owner approved completing the canonical migration, including preserving MelonPreferences settings, on 2026-09-30. Firewatch moves from exempt into legacy: its importer reads MelonPreferences.cfg with the vendored MelonLoader 0.5.7 Tomlet parser without registering a category or writing the shared file. The frozen reader is v0.4.0's. Retained defaults are unchanged across published builds. v0.1.2 replaced Smoothing/PositionSmoothing with LocalSmoothing/RemoteSmoothing, v0.2.0 replaced InvertPositionZ with InvertTrackerZ, and v0.2.0 removed RecenterKey; the import keeps those existing removals, reporting the old keys as not carried.",
+        "approved": "2026-09-30"
+      }
+    ],
+    "gone-home-headtracking": [
+      {
+        "text": "WorldSpaceYaw: v1.0.0 to v1.2.0 wrote no WorldSpaceYaw key; v1.3.0 to v1.3.2 shipped false; v1.4.0 and later shipped true. Evidence: v1.3.x wrote the line '# false = camera-local yaw (default; matches dying-light-2/obra-dinn)' above the key at first run, no other build wrote it, and no build rewrites HeadTracking.cfg after its first start. The import compares WorldSpaceYaw with false in a file holding that line and with true in every other file, so a file without the line holding false carries false as the player's.",
+        "approved": "2026-09-27"
+      }
+    ],
+    "resident-evil-requiem-headtracking": [
+      {
+        "text": "Position sensitivity is 1.0. v0.4.0's installer ZIP and Nexus ZIP ship [Position] SensitivityX/Y/Z=1.0 in HeadTracking.ini; its launcher-manifest seed carried 2.0 from an older file, which was drift and was re-encoded from the shipped file on 2026-08-30 (ac80142). 1.0 is identity, so the conversion folds no position sensitivity into the mod's code, and a file Lopari seeded from v0.4.0 has its 2.0 dropped as PoseShaping, like any value set away from the shipped default. Those players' lean halves.",
+        "approved": "2026-09-25"
+      }
+    ],
+    "skyrim-special-edition-headtracking": [
+      {
+        "text": "[Position] LimitZ, LimitZBack and InvertZ: v0.1.0 to v0.3.0 shipped and wrote InvertZ true, LimitZ 0.40 and LimitZBack 0.10. The legacy processor applied InvertZ before its clamp, so with InvertZ true LimitZBack bounded the forward lean and LimitZ the backward one, and the import carries each limit to the row of the lean it bounded: PositionLimitZ from LimitZBack and PositionLimitZBack from LimitZ. With InvertZ false, or no InvertZ line, which the frozen reader reads as false, the limits are carried by name. Each row is compared for Defaults.ini with the shipped value of the legacy key it came from, so an untouched limit is written default.",
+        "approved": "2026-09-28"
+      }
+    ],
+    "subnautica-2-headtracking": [
+      {
+        "text": "[Position] LimitZ, LimitZBack and InvertZ: v0.1.0 to v0.6.0 shipped InvertZ true, LimitZ 0.10 and LimitZBack 0.40 (v0.1.0 to v0.3.0 did not read them); v0.6.1 and v0.6.2 shipped InvertZ false, LimitZ 0.40 and LimitZBack 0.10. The legacy processor applied InvertZ before its clamp, so the file's own InvertZ tells which key bounded which lean, and the import compares each canonical row with the limit of the lean it bounded, which every published build shipped at 0.40 forward and 0.10 backward. No list of shipped values is needed.",
+        "approved": "2026-09-27"
+      }
+    ]
+  },
+  "allow_legacy_symbols": {},
+  "per_game": {
+    "ready-or-not-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-21, in the Training range on foot with the MK18 out, through isolated input. The owner reports Page Up is used by the game (it also collapses the Mission Debrief panel at headquarters), so Page Up is dropped from the tracking mode list. Neither Ctrl nor Shift, alone or together, left anything changed after release, so the pair stays Ctrl+Shift. With the pair held a tap of G started a weapon animation, brought up the fire-mode readout and took the HUD's G count from 3 to 2, and a tap of B started a weapon animation; Y, H, U, J, T, K and N changed nothing beyond idle sway. End, Page Down and Insert changed nothing. So the tracking mode takes J, the first free spare letter, and the other actions keep the fleet lists. The committed file holds CycleTrackingModeKey=Ctrl+Shift+J.",
+        "approved": "2026-10-21"
+      }
+    ],
+    "bioshock-remastered-headtracking": [
+      {
+        "row": "PositionLimitYDown",
+        "reason": "Every build through v0.7.0 held the downward lean at 5 cm in code and had no setting for it. The owner ruled on 2026-10-07 that the game keeps that shipped limit when its position limits become config rows, so PositionLimitYDown=0.05 is the game's own default and never follows Defaults.ini. No released file holds the row: it first ships in the version that adds it.",
+        "approved": "2026-10-07"
+      }
+    ],
+    "titanfall-2-headtracking": [
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-04, in the campaign on foot with a weapon out (sp_hub_timeshift). The game binds left Ctrl to +toggle_duck: a press and release left the player crouched (eye height -1332.0 to -1353.9, still there three seconds after release, and back on the next press), so Ctrl misbehaves and the chord is on Shift+Alt. A Shift press, an Alt press and the pair together left the eye and the aim where they were (Shift is sprint, only while held). With Shift and Alt held a tap of U moved nothing and opened nothing, and a tap of Insert stepped the aim mode and the game did nothing, so the aim mode keeps Insert and U. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U. The mod's other three actions still hold the fleet lists and have not been derived by this rule: their chords carry Ctrl.",
+        "approved": "2026-10-04"
+      }
+    ],
+    "project-zomboid-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds CycleTrackingModeKey=PageUp.",
+        "approved": "2026-10-09"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds YawModeKey=PageDown.",
+        "approved": "2026-10-09"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds TrueFreeLookKey=Insert.",
+        "approved": "2026-10-09"
+      },
+      {
+        "row": "FirstPersonKey",
+        "reason": "Project Zomboid shipped its first person key on Delete, tapped once to four times for players 1 to 4 and held for every player, with Scroll Lock in its place while Project Viewpoint, another mod, runs, since Viewpoint opens its settings window on Delete. The owner ruled on 2026-11-16: \"use both - Delete + Scrlck (and whatever the chord was) and just disable del when viewpoint is detected - everybody's happy, nobody has to learn special new things\". So the row holds Delete before the fleet's list, the mod binds it with cameraunlock_config_concept_hotkey_taps, and leaves Delete out with cameraunlock_hotkeys_leave_out while Viewpoint runs. A player then reported Ctrl+Shift+B also opening the crafting window: the game's Core.isKey matches a binding on its key alone and checks only the modifiers the binding itself names, and B is Crafting UI. Measured in game on 2026-11-17 on foot in a save, through the game's own keyboard: Ctrl, Shift, Delete and Scroll Lock alone changed nothing, Ctrl+Shift+B opened the crafting window and Ctrl+Shift+K turned the FPS readout on (K is Display FPS). J, T, U, H and N are bound by default too, so the Controls rule leaves the action no letter and it keeps its nav keys alone, which the owner accepted on 2026-11-17 (\"Ctrl+Shift+K is fine if it's free\"; it was not). The committed file holds FirstPersonKey=Delete, ScrollLock.",
+        "approved": "2026-11-17"
+      }
+    ],
+    "red-eclipse-headtracking": [
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-04, in a match with the rifle out. The game binds Insert to addbot: one tap printed `set botoffset to 1 (was: 0)`, so Insert is dropped from the list. Left Ctrl is the game's `special` action, a dash: each press and release moved the player and left them there (eye 2096.59,1676.06 to 2100.15,1684.90 to 2104.59,1695.91 on two presses running, about 1.2 and 1.5 m), so Ctrl misbehaves and the chord is on Shift+Alt. A Shift press, an Alt press and the pair together left the eye where it was (Shift crouches only while held). With Shift and Alt held a tap of U stepped the aim mode once and the game did nothing: the eye did not move and no menu or prompt opened, so the aim mode keeps U. The committed file holds TrueFreeLookKey=Shift+Alt+U. The mod's other three actions still hold the fleet lists and have not been derived by this rule: End is bound to suicide, Home to spectate and Y to team chat in the game's own setup.cfg, and their chords carry Ctrl.",
+        "approved": "2026-10-04"
+      }
+    ],
+    "the-ascent-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. Y is free, so the toggle keeps its letter. The committed file holds ToggleKey=End, Shift+Alt+Y.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. G is taken, so the tracking mode takes J, the first spare letter. The committed file holds CycleTrackingModeKey=PageUp, Shift+Alt+J.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. H is free, so yaw mode keeps its letter. The committed file holds YawModeKey=PageDown, Shift+Alt+H.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "The fleet chords do not work in The Ascent: every press of left Ctrl toggles crouch, so the chords are on Shift+Alt (the ToggleKey row has the measurement). The aim mode is the fourth action. J went to the tracking mode and the game binds T, so it keeps U. Measured in game on 2026-10-04, on foot with a weapon drawn: a tap of Insert and a tap of Shift+Alt+U each stepped the aim mode once and left the character where it stood with no menu, journal or panel opened. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U.",
+        "approved": "2026-10-04"
+      }
+    ],
+    "green-hell-headtracking": [
+      {"row": "WorldSpaceYaw", "reason": "Preserve Green Hell's existing camera-local yaw default when adding canonical configuration.", "approved": "2026-09-30"},
+      {"row": "PositionLimitY", "reason": "Preserve Green Hell's existing 0.15 metre upward lean limit when adding canonical configuration.", "approved": "2026-09-30"},
+      {"row": "PositionLimitYDown", "reason": "Preserve Green Hell's existing 0.05 metre downward lean limit when adding canonical configuration.", "approved": "2026-09-30"}
+    ],
+    "arx-fatalis-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Arx Fatalis G drinks a mana potion, so Ctrl+Shift+G would drink one. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-27"
+      }
+    ],
+    "deep-rock-galactic-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-04, on foot with a weapon out, with Ctrl and Shift held: G throws a grenade and H runs the game's HUD toggle; J, T, U, K and B do nothing; Y and N run the game's answer to a join request, which did nothing with no request pending. Ctrl alone shows the laser pointer and Shift alone sprints, and both end when the key comes up, so the pair stays Ctrl+Shift. G is taken, so the tracking mode takes J, the first spare letter. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-04, on foot with a weapon out, with Ctrl and Shift held: G throws a grenade and H runs the game's HUD toggle; J, T, U, K and B do nothing; Y and N run the game's answer to a join request, which did nothing with no request pending. Ctrl alone shows the laser pointer and Shift alone sprints, and both end when the key comes up, so the pair stays Ctrl+Shift. H is taken and the tracking mode holds J, so yaw mode takes T, the next spare letter. The committed file holds YawModeKey=PageDown, Ctrl+Shift+T.",
+        "approved": "2026-10-04"
+      }
+    ],
+    "starfield-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds ToggleKey=End, Shift+Alt+Y.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds CycleTrackingModeKey=PageUp, Shift+Alt+T: G is taken, and T is the one free letter left in the cluster.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds YawModeKey=PageDown: H is taken and no letter of the cluster is left for a chord.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U.",
+        "approved": "2026-10-03"
+      }
+    ],
+    "deus-ex-mankind-divided-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. Y is taken, so the toggle has J, the first spare letter. The committed file holds ToggleKey=End, Shift+Alt+J.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. G is free and keeps its letter on the new pair. The committed file holds CycleTrackingModeKey=PageUp, Shift+Alt+G.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. H is taken and the toggle holds J, so yaw mode has T, the next spare letter. The committed file holds YawModeKey=PageDown, Shift+Alt+T.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. U is free and keeps its letter on the new pair. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U.",
+        "approved": "2026-10-04"
+      }
+    ],
+    "far-cry-6-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. Y is taken and J, the first spare letter, is taken too, so the toggle has the next one. The committed file holds ToggleKey=End, Ctrl+Shift+T.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. G is taken, J, U and H are taken and the toggle holds T, so the tracking mode has K. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+K.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. H is taken, the earlier actions hold T and K, and B is taken, so the yaw mode has N. The committed file holds YawModeKey=PageDown, Ctrl+Shift+N.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. U is taken and no letter of the spare list is left, so the aim mode has no chord. The committed file holds TrueFreeLookKey=Insert.",
+        "approved": "2026-10-03"
+      }
+    ],
+    "mudrunner-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "The fleet chord clashes with the game's own binding: MudRunner reads Y (text chat) without checking Ctrl or Shift, so Ctrl+Shift+Y also opens the chat. The old build used U, and MudRunner has no aim state, so it binds no TrueFreeLookKey and U is free. The committed file holds ToggleKey=End, Ctrl+Shift+U.",
+        "approved": "2026-09-27"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: MudRunner reads G (horn) without checking Ctrl or Shift, so Ctrl+Shift+G also sounds the horn. The old build used J. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-27"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: MudRunner reads H (headlights) without checking Ctrl or Shift, so Ctrl+Shift+H also switches the headlights. The old build used K. The committed file holds YawModeKey=PageDown, Ctrl+Shift+K.",
+        "approved": "2026-09-27"
+      }
+    ],
+    "subnautica-headtracking": [
+      {
+        "row": "WorldSpaceYaw",
+        "reason": "The mod defaults to camera-local yaw because swimming has no stable up, so Defaults.ini's WorldSpaceYaw must not reach it.",
+        "approved": "2026-09-25"
+      }
+    ],
+    "trepang2-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Trepang2 Ctrl+Shift+G throws a grenade. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-26"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Trepang2 Ctrl+Shift+H dual wields. The committed file holds YawModeKey=PageDown.",
+        "approved": "2026-09-26"
+      }
+    ]
+  }
+}

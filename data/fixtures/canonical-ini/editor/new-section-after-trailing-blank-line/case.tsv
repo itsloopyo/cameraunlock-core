@@ -1,0 +1,2 @@
+# A file already ending in a blank line gets no second one.
+set_or_insert	Position	PositionEnabled	true

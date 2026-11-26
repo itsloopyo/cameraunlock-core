@@ -1,0 +1,550 @@
+# ============================================================================
+# Release Mod - the fleet's one release workflow
+# ============================================================================
+# Called via `workflow_call` from every head-tracking mod's release.yml. The
+# caller owns three things: the tag trigger, the values below, and `secrets:
+# inherit`. Everything else - what gets built, how, and what is announced -
+# lives here so that a fix lands once instead of in fifty hand-maintained
+# copies that were already 190-of-250 lines identical when this was written.
+#
+# Keyed on VERSION SOURCE, not on toolchain. The only step that cares whether a
+# mod is BepInEx C#, an ASI built with CMake, a Rust cdylib or a Lua drop-in is
+# the tag-vs-file version check; everything downstream of it is loader-agnostic
+# because `pixi run package` is what produces the artifact in all of them.
+#
+# The build is deliberately one line. Per AGENTS.md, CI must go through the
+# same `pixi run` a developer runs, so there is no dotnet/msbuild/cmake/cargo
+# invocation anywhere in this file - if a mod needs a compiler set up, it asks
+# for it with `dotnet-version` / `setup-msbuild` and puts the build itself in
+# its own pixi task chain.
+#
+# Callers MUST pin this workflow to a commit SHA, not @main: the job holds
+# contents:write, DISCORD_RELEASE_WEBHOOK, LOPARI_APP_ACTIONS_TOKEN and
+# CAMERAUNLOCK_CATALOG_TOKEN, and at @main whatever lands on core's default branch runs
+# with all of them.
+# scripts/conformance.ps1's `workflow-ref` check fails a caller that does not.
+#
+# The three announcement steps (pre-flight, Lopari catalog pin, Discord) are the
+# canonical text from scripts/templates/*.yml and are reconciled in place by
+# scripts/sync-discord-announce.mjs, which now treats this file as one more
+# target. Do not hand-edit them here; edit the template and re-run that script.
+# ============================================================================
+
+name: Release Mod
+
+on:
+  workflow_call:
+    inputs:
+      project-name:
+        description: "Human-readable name for the release title and notes (e.g. 'Head Tracking for Valheim')"
+        required: true
+        type: string
+      version-source:
+        description: "Where this mod's authoritative version lives: csproj | cmake | cargo | pixi | manifest | regex"
+        required: true
+        type: string
+      version-path:
+        description: "Path to the file named by version-source (e.g. src/ValheimHeadTracking/ValheimHeadTracking.csproj)"
+        required: true
+        type: string
+      version-key:
+        description: "manifest only: dotted path to the version property (launcher-manifest.json nests it at mod_info.version)"
+        required: false
+        type: string
+        default: "version"
+      version-pattern:
+        description: "regex only: pattern capturing the version. Several capture groups are joined with '.', for headers that split MAJOR/MINOR/PATCH"
+        required: false
+        type: string
+        default: ""
+      artifact-paths:
+        description: "Whitespace-separated paths whose history feeds the generated release notes"
+        required: true
+        type: string
+      package-task:
+        description: "pixi task that builds and packages the release ZIP"
+        required: false
+        type: string
+        default: "package"
+      pixi-environment:
+        description: "pixi environment to run the package task in (empty = default environment)"
+        required: false
+        type: string
+        default: ""
+      dotnet-version:
+        description: "Set up this .NET SDK before packaging (empty = no .NET toolchain needed)"
+        required: false
+        type: string
+        default: ""
+      setup-msbuild:
+        description: "Add MSBuild to PATH before packaging"
+        required: false
+        type: boolean
+        default: false
+      wasm-toolchain:
+        description: "Cache cameraunlock-core's WebAssembly toolchain between runs, for a mod whose package builds core's jar (docs/core-jar.md)"
+        required: false
+        type: boolean
+        default: false
+      runs-on:
+        description: "Runner label for the release job"
+        required: false
+        type: string
+        default: "windows-latest"
+      timeout-minutes:
+        description: "Job timeout. The config differential test can take 30 minutes, the Lopari pin sync can wait 10 and a Headstart package's catalog pin 10, so leave headroom above them"
+        required: false
+        type: number
+        default: 60
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+    # A release is never cancelled: a second run for the same tag waits for this one.
+    # The group is not the caller's `${{ github.workflow }}-${{ github.ref }}`, because a
+    # caller that declared that group too would wait on itself for the whole timeout.
+    concurrency:
+      group: release-mod-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Require release announcement prerequisites
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - every release must be announced to Discord, so this run is refused before the release is created. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run."
+            exit 1
+          }
+          $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+          $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+          $entry = @($mods) | Where-Object { $_.repo -eq "${{ github.repository }}" }
+          # The served catalog is ALREADY filtered to public entries - update-metadata.mjs
+          # writes the Pages copy as { ...catalog, mods: publicMods } - so there is no
+          # public/private test to make here; anything we find is public by construction.
+          #
+          # External is our own heuristic, not a field lopari consults: those installs route
+          # to a third-party mod manager and ship no *-installer.zip, and an installer zip is
+          # what update-metadata.mjs actually requires before it will stamp a pin.
+          #
+          # Known gap, deliberately left loud: lopari also skips any entry that is not yet
+          # `released` and has no dev-release, so a mod's FIRST stable release is never
+          # auto-pinned and the poll below runs its deadline out. That failure is correct -
+          # the Run in Lopari link really would be stale - and the timeout message says so.
+          if ($entry -and @($entry)[0].install_strategy -eq 'External') { $entry = $null }
+          if ($entry -and -not $env:LOPARI_APP_ACTIONS_TOKEN) {
+            Write-Host "::error::${{ github.repository }} is in the Lopari catalog but LOPARI_APP_ACTIONS_TOKEN is not set - the catalog pin can't be synced before the announcement, so the Run in Lopari link would serve the previous release. Set the fine-grained PAT (Actions:write on itsloopyo/lopari.app only) and re-run."
+            exit 1
+          }
+          Write-Host "Release announcement prerequisites present."
+
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # Full history: generate-release-notes.ps1 reads the commit range
+          # since the previous tag, and a shallow clone has no previous tag.
+          fetch-depth: 0
+          submodules: recursive
+          # The job's write token stays out of .git/config while the mod's package task runs.
+          persist-credentials: false
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        env:
+          # Read through the environment, never interpolated into the script body.
+          # ${{ }} is substituted textually before pwsh parses the run block, so a tag
+          # name containing a double quote closes the assignment and the remainder runs
+          # as code - in a job holding contents:write plus the Discord and Lopari
+          # secrets, reachable by anyone who can push a tag. The format check below
+          # cannot help: the injected code runs on the assignment line, before it.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:REF_NAME
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') {
+            Write-Host "::error::Tag format invalid. Use semantic versioning: v1.2.3"
+            exit 1
+          }
+          $version = $matches[1]
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Validate version matches source
+        shell: pwsh
+        env:
+          VERSION_SOURCE: ${{ inputs.version-source }}
+          VERSION_PATH: ${{ inputs.version-path }}
+          VERSION_KEY: ${{ inputs.version-key }}
+          VERSION_PATTERN: ${{ inputs.version-pattern }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          Import-Module ./cameraunlock-core/powershell/ReleaseWorkflow.psm1 -Force
+          $fileVersion = Get-ProjectVersion -Source $env:VERSION_SOURCE -Path $env:VERSION_PATH -Key $env:VERSION_KEY -Pattern $env:VERSION_PATTERN
+
+          Write-Host "$($env:VERSION_PATH) version: $fileVersion"
+          Write-Host "Tag version: $($env:TAG_VERSION)"
+
+          if ($fileVersion -ne $env:TAG_VERSION) {
+            Write-Host "::error::Version mismatch! Tag is v$($env:TAG_VERSION) but $($env:VERSION_PATH) has $fileVersion"
+            exit 1
+          }
+
+          Write-Host "Version matches."
+
+      - name: Setup .NET
+        if: inputs.dotnet-version != ''
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Setup MSBuild
+        if: inputs.setup-msbuild
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
+
+      - name: Cache the WebAssembly toolchain
+        if: inputs.wasm-toolchain
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/AppData/Local/cameraunlock-core/toolchain
+            !~/AppData/Local/cameraunlock-core/toolchain/*.tar.gz
+          key: wasm-toolchain-${{ runner.os }}-${{ hashFiles('cameraunlock-core/scripts/wasm-toolchain.mjs') }}
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          # Without pixi-version, setup-pixi installs the newest pixi release.
+          pixi-version: v0.81.0
+          run-install: false
+
+      - name: Build and package
+        shell: pwsh
+        env:
+          PACKAGE_TASK: ${{ inputs.package-task }}
+          PIXI_ENVIRONMENT: ${{ inputs.pixi-environment }}
+        run: |
+          # The only build command in this file, and it is the same one a
+          # developer runs. Anything the mod needs doing first belongs in that
+          # task's depends-on chain, not in a step here. On a tag build the
+          # manifest checks it runs (Copy-SharedBundle, validate-manifest) also
+          # refuse a config.canonical_since above the tag's version, which any
+          # other build packages as a pre-release.
+          if ($env:PIXI_ENVIRONMENT) {
+            pixi run -e $env:PIXI_ENVIRONMENT $env:PACKAGE_TASK
+          } else {
+            pixi run $env:PACKAGE_TASK
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::'pixi run $($env:PACKAGE_TASK)' failed."
+            exit 1
+          }
+
+      # `package` runs the fast suite, test-unit, and leaves out the legacy config
+      # differential so that a push build does not spend ten to thirty minutes on a
+      # frozen import. `test` is test-unit plus test-differential, so running the
+      # differential here makes a release run the full suite, each half once.
+      #
+      # The release script records a pass in tests/config_differential/passed.json
+      # and commits it with the version bump. Where the mod's core has
+      # DifferentialGate.psm1, this step re-hashes the files that record lists and
+      # skips the test when none changed, and runs it otherwise. It never writes
+      # the record: a tag build has nowhere to commit it.
+      - name: Config differential test
+        shell: pwsh
+        env:
+          PIXI_ENVIRONMENT: ${{ inputs.pixi-environment }}
+        run: |
+          if (-not (Test-Path -LiteralPath 'tests/config_differential')) {
+            Write-Host 'No tests/config_differential, so package ran the whole suite.'
+            exit 0
+          }
+          $gate = 'cameraunlock-core/powershell/DifferentialGate.psm1'
+          if (Test-Path -LiteralPath $gate) {
+            Import-Module (Resolve-Path $gate)
+            try {
+              Invoke-ConfigDifferential -Root . -Environment $env:PIXI_ENVIRONMENT -NoRecord
+            } catch {
+              Write-Host "::error::Config differential: $($_.Exception.Message)"
+              exit 1
+            }
+            exit 0
+          }
+          if ($env:PIXI_ENVIRONMENT) {
+            pixi run -e $env:PIXI_ENVIRONMENT test-differential
+          } else {
+            pixi run test-differential
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::'pixi run test-differential' failed. A repo with tests/config_differential declares that task; see cameraunlock-core scripts/templates/pixi-test-tasks.toml."
+            exit 1
+          }
+
+      - name: Generate release notes
+        shell: pwsh
+        env:
+          ARTIFACT_PATHS: ${{ inputs.artifact-paths }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $artifactPaths = $env:ARTIFACT_PATHS -split '\s+' | Where-Object { $_ }
+
+          & cameraunlock-core/scripts/generate-release-notes.ps1 `
+            -Version $env:RELEASE_VERSION `
+            -ArtifactPaths $artifactPaths `
+            -ProjectName $env:PROJECT_NAME
+
+      - name: Find release ZIPs
+        id: find_zips
+        shell: pwsh
+        env:
+          PACKAGE_TASK: ${{ inputs.package-task }}
+        run: |
+          # Every mod's package task writes release/<Name>-v<version>-installer.zip;
+          # the NexusMods and Steam Workshop variants are optional and only some mods produce them.
+          $installerZip = Get-ChildItem release/*-installer.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nexusZip = Get-ChildItem release/*-nexus.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          $workshopZip = Get-ChildItem release/*-workshop.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if (-not $installerZip) {
+            Write-Host "::error::No release/*-installer.zip after 'pixi run $env:PACKAGE_TASK'. The package task must write the installer ZIP into release/."
+            exit 1
+          }
+
+          echo "installer_zip=$($installerZip.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer: $($installerZip.Name)"
+          if ($nexusZip) {
+            echo "nexus_zip=$($nexusZip.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "NexusMods: $($nexusZip.Name)"
+          }
+          if ($workshopZip) {
+            echo "workshop_zip=$($workshopZip.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "Steam Workshop: $($workshopZip.Name)"
+          }
+
+      # A package task that leaves release/headstart/cameraunlock-package.toml publishes a Headstart
+      # package (universal-head-tracking docs/packages.md), and this run then has the catalog pin it.
+      # The catalog first sees the package once the release is out, so this step asks it before
+      # there is one: that the token reaches the catalog repo, and that the catalog's own rules, as
+      # its main branch has them now, take the manifest (HeadstartCatalog.psm1). That runs the
+      # catalog repo's scripts/pin.py from its main branch in this job, unpinned: whoever can push
+      # to that repo's main can run code here, before the release is created. Its files sit
+      # outside release/assets/; a dev build publishes them under a manifest of its own.
+      - name: Check the Headstart package against the catalog
+        shell: pwsh
+        env:
+          CAMERAUNLOCK_CATALOG_TOKEN: ${{ secrets.CAMERAUNLOCK_CATALOG_TOKEN }}
+          # See the note in the version step: the tag is read from the environment.
+          REF_NAME: ${{ github.ref_name }}
+          PIXI_ENVIRONMENT: ${{ inputs.pixi-environment }}
+        run: |
+          if (-not (Test-Path -LiteralPath 'release/headstart/cameraunlock-package.toml')) {
+            Write-Host 'No release/headstart/cameraunlock-package.toml, so this release is no Headstart package.'
+            exit 0
+          }
+          if (-not $env:CAMERAUNLOCK_CATALOG_TOKEN) {
+            Write-Host "::error::The package task wrote a Headstart package manifest, but CAMERAUNLOCK_CATALOG_TOKEN is not set, so the catalog could not be asked to pin it. Set it (a fine-grained token with Actions: write and Contents: read on itsloopyo/cameraunlock-catalog only) with 'gh secret set CAMERAUNLOCK_CATALOG_TOKEN --repo ${{ github.repository }}' and re-run."
+            exit 1
+          }
+          $module = './cameraunlock-core/powershell/HeadstartCatalog.psm1'
+          if (-not (Test-Path -LiteralPath $module)) {
+            Write-Host "::error::This repo's cameraunlock-core has no powershell/HeadstartCatalog.psm1, which checks and pins a Headstart package. Run 'pixi run update-submodule', commit, and tag again."
+            exit 1
+          }
+          Import-Module $module -Force
+          # The check runs the catalog's pin.py as its main branch has it. The token leaves the
+          # environment first, so that script and the python that runs it are not handed it.
+          $token = $env:CAMERAUNLOCK_CATALOG_TOKEN
+          Remove-Item Env:CAMERAUNLOCK_CATALOG_TOKEN
+          try {
+            Test-HeadstartPackage -ManifestPath 'release/headstart/cameraunlock-package.toml' -Repo "${{ github.repository }}" `
+              -Tag $env:REF_NAME -Token $token -ProjectRoot $PWD.Path -PixiEnvironment $env:PIXI_ENVIRONMENT
+          } catch {
+            Write-Host $_.Exception.Message
+            Write-Host "::error::$($_.Exception.Message -replace '\r?\n', ' ') Nothing has been published."
+            exit 1
+          }
+
+      - name: Create GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          INSTALLER_ZIP: ${{ steps.find_zips.outputs.installer_zip }}
+          NEXUS_ZIP: ${{ steps.find_zips.outputs.nexus_zip }}
+          WORKSHOP_ZIP: ${{ steps.find_zips.outputs.workshop_zip }}
+        shell: pwsh
+        run: |
+          $installerZip = $env:INSTALLER_ZIP
+          $nexusZip = $env:NEXUS_ZIP
+          $workshopZip = $env:WORKSHOP_ZIP
+          $assets = @($installerZip)
+          if ($nexusZip) { $assets += $nexusZip }
+          if ($workshopZip) { $assets += $workshopZip }
+          # A package whose manifest has files[].release_asset rows also writes a launcher ZIP
+          # without those files, and leaves each file in release/assets/ under the name the row
+          # gives, for the launcher to download from this release.
+          $launcherZip = Get-ChildItem release/*-launcher.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($launcherZip) {
+            $releaseAssets = @(Get-ChildItem release/assets -File -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            $assets += $launcherZip.FullName
+            $assets += $releaseAssets
+            Write-Host "Launcher: $($launcherZip.Name), $($releaseAssets.Count) release asset(s)"
+          }
+          if (Test-Path -LiteralPath 'release/headstart/cameraunlock-package.toml') {
+            $headstartFiles = @(Get-ChildItem release/headstart -File | ForEach-Object FullName)
+            $assets += $headstartFiles
+            Write-Host "Headstart package: $($headstartFiles.Count) file(s)"
+          }
+
+          gh release create $env:RELEASE_TAG `
+            --title "$($env:PROJECT_NAME) $($env:RELEASE_TAG)" `
+            --notes-file "release-notes.txt" `
+            @assets
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to create GitHub release"
+            exit 1
+          }
+
+          Write-Host "Released: https://github.com/${{ github.repository }}/releases/tag/$($env:RELEASE_TAG)"
+
+      - name: Sync Lopari catalog pin
+        shell: pwsh
+        env:
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+          # See the note in discord-announce-step.yml: a tag name is attacker-controlled
+          # text and must not be interpolated into a run block that holds a token.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $version = $env:REF_NAME -replace '^v', ''
+          function Get-PinnedVersion {
+            $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+            $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+            $entry = @($mods) | Where-Object { $_.repo -eq $repo }
+            if (-not $entry) { return $null }
+            # See the note on the prerequisites step above: the served catalog is already
+            # public-only, External is our stand-in for "ships no installer zip", and a
+            # first release genuinely has no pin to find until lopari stamps one.
+            if (@($entry)[0].install_strategy -eq 'External') { return $null }
+            return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
+          }
+          $state = Get-PinnedVersion
+          if (-not $state) {
+            Write-Host "::notice::$repo has no syncable Lopari catalog pin (no entry, or External install strategy) - the /run/ page serves its own install steps."
+            exit 0
+          }
+          if ($state.pinned -eq $version) {
+            Write-Host "Catalog already pins $version."
+            exit 0
+          }
+          function Request-Repin {
+            Invoke-RestMethod -Method Post `
+              -Uri 'https://api.github.com/repos/itsloopyo/lopari.app/actions/workflows/update-pins.yml/dispatches' `
+              -Headers @{ Authorization = "Bearer $env:LOPARI_APP_ACTIONS_TOKEN"; Accept = 'application/vnd.github+json' } `
+              -ContentType 'application/json' -Body '{"ref":"main"}'
+          }
+          Request-Repin
+          Write-Host "Requested lopari.app catalog re-pin; waiting for $version to go live..."
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          $tick = 0
+          while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 15
+            $tick++
+            try {
+              $state = Get-PinnedVersion
+            } catch {
+              # A transient fetch failure is part of what the poll absorbs;
+              # a persistent one runs into the deadline below.
+              continue
+            }
+            if ($state.pinned -eq $version) {
+              Write-Host "Catalog pin is live: $version."
+              exit 0
+            }
+            Write-Host "  still pinned at $($state.pinned)..."
+            # Two releases dispatching within a minute of each other put two pin
+            # runs on the same base commit; the loser's push is rejected and
+            # nothing retries it before the hourly schedule. Ask again.
+            if ($tick % 5 -eq 0) {
+              Write-Host "  re-requesting the catalog re-pin..."
+              Request-Repin
+            }
+          }
+          Write-Host "::error::Timed out waiting for lopari.app to pin $version (still $($state.pinned)). Check https://github.com/itsloopyo/lopari.app/actions, then re-run this job - the release exists; only the pin sync and announcement are pending."
+          exit 1
+
+      - name: Announce release to Discord
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          # Read through the environment, never interpolated into the script body.
+          # ${{ }} is substituted textually before pwsh parses the run block, so a tag
+          # name containing a double quote closes the assignment and the remainder runs
+          # as code - in a job that holds the release webhook and contents:write.
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
+            exit 1
+          }
+          $tag  = $env:REF_NAME
+          $repo = "${{ github.repository }}"
+          $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
+          $url  = "https://github.com/$repo/releases/tag/$tag"
+          $description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+          $notes = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }).body
+          if ($notes) {
+            $notes = ($notes -replace "`r`n", "`n").Trim()
+            # Discord refuses an embed whose description is over 4096 characters, and
+            # the refusal fails this step after the release is already public. The
+            # links come first so a cut never takes them.
+            $room = 4000 - $description.Length
+            if ($notes.Length -gt $room) {
+              $more = "`n[Full release notes]($url)"
+              $notes = $notes.Substring(0, $room - $more.Length)
+              $lastLine = $notes.LastIndexOf("`n")
+              if ($lastLine -gt 0) { $notes = $notes.Substring(0, $lastLine) }
+              $notes += $more
+            }
+            $description += "`n`n$notes"
+          }
+          $payload = @{
+            username = 'Mod Releases'
+            embeds   = @(@{
+              title       = "$name Head Tracking $tag"
+              url         = $url
+              description = $description
+              color       = 5814783
+            })
+          } | ConvertTo-Json -Depth 5
+          Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload
+          Write-Host "Announced $tag to Discord."
+
+      # Last, and run whether or not the Lopari pin and the announcement worked: neither links the
+      # catalog, and a catalog that is slow or down holds back only Headstart's download.
+      - name: Pin the release in the Headstart catalog
+        if: ${{ !cancelled() && steps.release.outcome == 'success' && hashFiles('release/headstart/cameraunlock-package.toml') != '' }}
+        shell: pwsh
+        env:
+          CAMERAUNLOCK_CATALOG_TOKEN: ${{ secrets.CAMERAUNLOCK_CATALOG_TOKEN }}
+          # See the note in the version step: the tag is read from the environment.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          Import-Module ./cameraunlock-core/powershell/HeadstartCatalog.psm1 -Force
+          try {
+            Sync-HeadstartCatalogPin -Repo "${{ github.repository }}" -Version ($env:REF_NAME -replace '^v', '') `
+              -Channel stable -Token $env:CAMERAUNLOCK_CATALOG_TOKEN
+          } catch {
+            Write-Host "::error::$($_.Exception.Message)"
+            exit 1
+          }

@@ -1,0 +1,5 @@
+key		ToggleKey	Home	true
+chord		ChordToggle	true	false
+key		UdpPort	5555	false
+range	70000
+key		InvertTrackerZ	true	false

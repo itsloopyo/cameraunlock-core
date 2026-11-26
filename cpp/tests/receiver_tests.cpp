@@ -1,0 +1,673 @@
+// Receiver loopback tests: PollingUdpReceiver recenter trailer and offset
+// behavior through the real socket drain path, plus UdpReceiver's supervisor
+// reclaiming a port it could not get, or lost, to another process.
+
+#include "cameraunlock/protocol/polling_udp_receiver.h"
+#include "cameraunlock/protocol/opentrack_packet.h"
+#include "cameraunlock/protocol/udp_receiver.h"
+#include "cameraunlock/protocol/udp_socket.h"
+
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <future>
+#include <iostream>
+#include <string>
+#include <thread>
+
+#ifndef _WIN32
+#include <netdb.h>
+#endif
+
+namespace {
+
+int g_failures = 0;
+
+void Check(bool cond, const char* name) {
+    if (cond) {
+        std::cout << "  [PASS] " << name << "\n";
+    } else {
+        std::cout << "  [FAIL] " << name << "\n";
+        ++g_failures;
+    }
+}
+
+constexpr uint16_t kReceiverPort = 14261;
+
+/// The port the receiver actually bound, set once the range walk succeeds.
+uint16_t g_receiverPort = kReceiverPort;
+
+// Address-already-in-use, as this platform's sockets report it.
+#ifdef _WIN32
+constexpr int kExpectedInUseError = WSAEADDRINUSE;
+#else
+constexpr int kExpectedInUseError = EADDRINUSE;
+#endif
+
+constexpr uint16_t kSupervisedPort = 14263;
+constexpr uint16_t kSupervisedSenderPort = 14264;
+constexpr uint16_t kReusePort = 14265;
+constexpr uint16_t kPressPort = 14266;
+constexpr uint16_t kPressSenderPort = 14267;
+constexpr uint16_t kWaitPort = 14268;
+constexpr uint16_t kWaitSenderPort = 14269;
+constexpr uint16_t kStartFailurePort = 14270;
+constexpr uint16_t kLoopbackPort = 14271;
+constexpr uint16_t kLoopbackSenderPort = 14272;
+
+size_t BuildPacket(uint8_t out[54], double x, double y, double z,
+                   double yaw, double pitch, double roll,
+                   const uint8_t* recenterCounter = nullptr) {
+    std::memcpy(out + 0,  &x,     sizeof(double));
+    std::memcpy(out + 8,  &y,     sizeof(double));
+    std::memcpy(out + 16, &z,     sizeof(double));
+    std::memcpy(out + 24, &yaw,   sizeof(double));
+    std::memcpy(out + 32, &pitch, sizeof(double));
+    std::memcpy(out + 40, &roll,  sizeof(double));
+    if (recenterCounter == nullptr) {
+        return 48;
+    }
+    out[48] = 'H'; out[49] = 'C'; out[50] = 'A'; out[51] = 'M';
+    out[52] = cameraunlock::OpenTrackPacket::kTrailerVersion;
+    out[53] = *recenterCounter;
+    return 54;
+}
+
+bool SendToPort(cameraunlock::UdpSocket& sender, uint16_t port,
+                const uint8_t* data, size_t length) {
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    int sent = sendto(sender.GetHandle(), reinterpret_cast<const char*>(data),
+                      static_cast<int>(length), 0,
+                      reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    return sent == static_cast<int>(length);
+}
+
+bool SendTo(cameraunlock::UdpSocket& sender, const uint8_t* data, size_t length) {
+    return SendToPort(sender, g_receiverPort, data, length);
+}
+
+/// Another process competing for the tracker port. Raw winsock because
+/// UdpSocket deliberately omits SO_REUSEADDR, and the hijack case needs it.
+SOCKET OpenCompetitor(uint16_t port, bool reuseAddr) {
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return INVALID_SOCKET;
+#ifdef _WIN32
+    if (reuseAddr) {
+        BOOL on = TRUE;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&on), sizeof(on));
+    }
+#else
+    (void)reuseAddr;
+#endif
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+#ifdef _WIN32
+        closesocket(s);
+#else
+        close(s);
+#endif
+        return INVALID_SOCKET;
+    }
+    return s;
+}
+
+void CloseCompetitor(SOCKET s) {
+    if (s == INVALID_SOCKET) return;
+#ifdef _WIN32
+    closesocket(s);
+#else
+    close(s);
+#endif
+}
+
+/// True once the receiver reports a packet newer than `sinceUs`, within
+/// `timeoutMs`. Polls rather than sleeps so a fast path stays fast.
+bool WaitForPacketAfter(cameraunlock::UdpReceiver& rx, int64_t sinceUs,
+                        cameraunlock::UdpSocket& sender, uint16_t port,
+                        const uint8_t* pkt, size_t len, int timeoutMs) {
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 50) {
+        if (!SendToPort(sender, port, pkt, len)) return false;
+        if (rx.GetLastReceiveTimestamp() > sinceUs) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return rx.GetLastReceiveTimestamp() > sinceUs;
+}
+
+bool WaitUntilRunning(cameraunlock::UdpReceiver& rx, int timeoutMs) {
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 25) {
+        if (rx.IsRunning()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    return rx.IsRunning();
+}
+
+bool PollUntilReceived(cameraunlock::PollingUdpReceiver& rx) {
+    for (int i = 0; i < 500; i++) {
+        if (rx.Poll()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
+}
+
+/// True if any Poll within `ms` took a pose.
+bool PollFor(cameraunlock::PollingUdpReceiver& rx, int ms) {
+    bool took = false;
+    for (int i = 0; i < ms; i++) {
+        took = rx.Poll() || took;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return took;
+}
+
+bool NearEqual(float a, float b, float eps = 1e-4f) {
+    return std::fabs(a - b) <= eps;
+}
+
+/// True once the threaded receiver has published `expectedYaw`, within
+/// `timeoutMs`. The packet is sent once: a burst that has to be repeated to
+/// land is a burst whose first packets were dropped.
+bool WaitForRotation(cameraunlock::UdpReceiver& rx, float expectedYaw, int timeoutMs) {
+    float yaw, pitch, roll;
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 10) {
+        if (rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, expectedYaw)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, expectedYaw);
+}
+
+}  // namespace
+
+int RunReceiverTests() {
+    using cameraunlock::PollingUdpReceiver;
+    using cameraunlock::UdpSocket;
+
+    std::cout << "PollingUdpReceiver loopback tests:\n";
+    g_failures = 0;
+
+    // Both binds used to be fixed ports, which flakes when a previous run's
+    // socket is still in TIME_WAIT or a real tracker is listening. The receiver
+    // walks a range because SendTo has to know where to aim; the sender takes
+    // an ephemeral port because nothing ever sends to it.
+    PollingUdpReceiver rx;
+    uint16_t receiverPort = 0;
+    for (uint16_t candidate = kReceiverPort; candidate < kReceiverPort + 32; ++candidate) {
+        if (rx.Initialize(candidate)) {
+            receiverPort = candidate;
+            break;
+        }
+    }
+    if (receiverPort == 0) {
+        Check(false, "receiver binds a loopback test port");
+        return g_failures;
+    }
+    g_receiverPort = receiverPort;
+
+    UdpSocket sender;
+    if (!sender.Open(0)) {
+        Check(false, "sender opens an ephemeral port");
+        return g_failures;
+    }
+
+    uint8_t pkt[54];
+
+    // Plain 48-byte packet: pose flows, no recenter request.
+    size_t len = BuildPacket(pkt, 100.0, 50.0, -25.0, 10.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "plain packet received");
+    Check(!rx.TryConsumeRecenterRequest(), "plain packet requests no recenter");
+
+    float x, y, z;
+    Check(rx.GetPosition(x, y, z) && NearEqual(x, 1.0f) && NearEqual(y, 0.5f) && NearEqual(z, -0.25f),
+          "position decoded without offset");
+
+    // The trailer is still parsed but never raises a request: Headcam owns
+    // centring, and the pipeline's centre is identity, so the zeroed stream it
+    // sends is already correct. An older app still sending the trailer is
+    // ignored rather than acted on.
+    uint8_t counter = 7;
+    len = BuildPacket(pkt, 100.0, 50.0, -25.0, 10.0, 5.0, -2.0, &counter);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "trailered packet received");
+    Check(!rx.TryConsumeRecenterRequest(), "first trailer sighting requests no recenter");
+
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "repeat-counter packet received");
+    Check(!rx.TryConsumeRecenterRequest(), "repeated counter requests no recenter");
+
+    counter = 8;
+    len = BuildPacket(pkt, 100.0, 50.0, -25.0, 10.0, 5.0, -2.0, &counter);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "new-counter packet received");
+    Check(!rx.TryConsumeRecenterRequest(), "counter change requests no recenter");
+
+    // Recenter captures rotation AND position; the next reads are deltas.
+    rx.Recenter();
+    float yaw, pitch, roll;
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 0.f) && NearEqual(pitch, 0.f),
+          "rotation zeroed after recenter");
+    Check(rx.GetPosition(x, y, z) && NearEqual(x, 0.f) && NearEqual(y, 0.f) && NearEqual(z, 0.f),
+          "position zeroed after recenter");
+
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 10.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "post-recenter packet received");
+    Check(rx.GetPosition(x, y, z) && NearEqual(x, 0.1f) && NearEqual(y, 0.f) && NearEqual(z, 0.f),
+          "position reads as delta from the recentered origin");
+
+    rx.ResetOffset();
+    Check(rx.GetPosition(x, y, z) && NearEqual(x, 1.1f) && NearEqual(y, 0.5f) && NearEqual(z, -0.25f),
+          "ResetOffset restores raw position");
+
+    // A tracker that loses the head repeats one pose bit for bit: the jump to it is held.
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 40.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && !PollFor(rx, 200), "a large jump is held back");
+    Check(SendTo(sender, pkt, len) && !PollFor(rx, 200), "and stays held while the pose repeats bit for bit");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 10.f), "the pose the head was in is kept");
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 41.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "a pose that moves on is taken");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 41.f), "and published");
+
+    // A second app sending to the port is ignored until the first has gone silent.
+    UdpSocket second;
+    Check(second.Open(0), "a second sender opens an ephemeral port");
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 42.0, 5.0, -2.0);
+    Check(SendTo(second, pkt, len) && !PollFor(rx, 200), "a second source is ignored while the first sends");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 41.f), "and its pose does not reach the game");
+    std::this_thread::sleep_for(std::chrono::milliseconds(PollingUdpReceiver::kSourceHandoverMs + 100));
+    Check(SendTo(second, pkt, len) && PollUntilReceived(rx), "it takes over once the first has been silent");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 42.f), "and drives the pose from then on");
+    second.Close();
+
+    // Started again, the receiver keeps nothing of the last run: no position, no offset.
+    rx.Recenter();
+    rx.Shutdown();
+    Check(rx.Initialize(receiverPort), "the receiver starts again on its port");
+    Check(!rx.GetPosition(x, y, z), "a restarted receiver has no position until a packet arrives");
+    len = BuildPacket(pkt, 120.0, 50.0, -25.0, 42.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "a packet arrives after the restart");
+    Check(rx.GetPosition(x, y, z) && NearEqual(x, 1.2f) && NearEqual(y, 0.5f) && NearEqual(z, -0.25f),
+          "and its position carries no offset from before");
+
+    rx.Shutdown();
+    sender.Close();
+
+    // ---- UdpReceiver supervisor: keeping hold of a contested tracker port ----
+    std::cout << "UdpReceiver supervisor tests:\n";
+
+    using cameraunlock::UdpReceiver;
+
+    UdpSocket supervisedSender;
+    if (!supervisedSender.Open(kSupervisedSenderPort)) {
+        Check(false, "supervisor sender binds loopback test port");
+        return g_failures;
+    }
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0);
+
+    // The previous game is still holding the tracker port when this one starts.
+    SOCKET occupier = OpenCompetitor(kSupervisedPort, false);
+    Check(occupier != INVALID_SOCKET, "another process holds the tracker port");
+
+    UdpReceiver supervised;
+    std::string bindFailureLog;
+    supervised.SetLog([&](const std::string& message) { bindFailureLog += message + "\n"; });
+    Check(!supervised.Start(kSupervisedPort), "Start reports the port as unavailable");
+    // The log has to carry what the OS said, because a bind fails for reasons
+    // that are not a port conflict (a reserved port range refuses it with
+    // WSAEACCES while nothing holds the port) and a line naming the wrong
+    // cause sends the user hunting an app that is not running.
+    Check(bindFailureLog.find("bind failed with error") != std::string::npos,
+          "bind failure log names the failing call and the OS error code");
+    Check(bindFailureLog.find(std::to_string(kExpectedInUseError)) != std::string::npos,
+          "bind failure log carries the address-in-use code the OS actually returned");
+    Check(supervised.IsRetrying(), "supervisor waits for the port");
+    Check(!supervised.IsRunning(), "no receive thread while the port is held");
+
+    // The user remembers, and closes the other game.
+    CloseCompetitor(occupier);
+    Check(WaitUntilRunning(supervised, 5 * UdpReceiver::kRetryIntervalMs),
+          "binds within a few retry intervals of the port freeing up");
+    Check(WaitForPacketAfter(supervised, 0, supervisedSender, kSupervisedPort, pkt, len, 2000),
+          "tracker data flows once the port is reclaimed");
+
+#ifdef _WIN32
+    // Same scenario, except the game still running holds the port with
+    // SO_REUSEADDR - which is how our own older mod builds held it. Windows
+    // refuses a plain bind on top of that too, and it has to: a bind that
+    // succeeded into a shared port would set the receiver running, report
+    // tracking as live, and then sit deaf because the datagrams go to the
+    // other holder. Failing is what keeps the port recoverable.
+    SOCKET reuseOccupier = OpenCompetitor(kReusePort, true);
+    Check(reuseOccupier != INVALID_SOCKET, "a SO_REUSEADDR process holds the tracker port");
+
+    UdpReceiver againstReuse;
+    Check(!againstReuse.Start(kReusePort),
+          "Start refuses to share a port held with SO_REUSEADDR");
+    Check(againstReuse.IsRetrying() && !againstReuse.IsRunning(),
+          "supervisor waits rather than binding alongside and going deaf");
+
+    CloseCompetitor(reuseOccupier);
+    Check(WaitUntilRunning(againstReuse, 5 * UdpReceiver::kRetryIntervalMs),
+          "binds once the SO_REUSEADDR holder exits");
+    Check(WaitForPacketAfter(againstReuse, 0, supervisedSender, kReusePort, pkt, len, 2000),
+          "tracker data flows after reclaiming from a SO_REUSEADDR holder");
+    againstReuse.Stop();
+
+    // The reason there is no "bound but silent, so re-bind" path: nothing can
+    // take the stream away from a plain bind in the first place. Windows
+    // refuses a SO_REUSEADDR bind on top of one (WSAEACCES).
+    SOCKET hijacker = OpenCompetitor(kSupervisedPort, true);
+    Check(hijacker == INVALID_SOCKET,
+          "a bound port cannot be taken over by a SO_REUSEADDR process");
+    CloseCompetitor(hijacker);
+#endif
+
+    supervised.Stop();
+    Check(!supervised.IsRunning() && !supervised.IsRetrying(),
+          "Stop tears the supervisor and receive thread down");
+    supervisedSender.Close();
+
+    // ---- UdpReceiver: a CENTER press outranks the pose-freeze gate ----
+    //
+    // The gate holds a large jump back until the following packet proves the
+    // tracker is still moving, which is right for a tracker that lost the head
+    // and started repeating one pose. A recenter is indistinguishable from the
+    // outside: the app subtracts its new neutral, so the pose leaps and then
+    // sits still. The trailer says outright that the leap is deliberate, so it
+    // has to be read BEFORE the gate can drop the packet carrying it - the
+    // player pressing CENTER on their phone is the one thing that must not be
+    // mistaken for a dropout.
+    std::cout << "UdpReceiver remote recenter tests:\n";
+
+    UdpSocket pressSender;
+    Check(pressSender.Open(kPressSenderPort), "press sender binds loopback test port");
+
+    UdpReceiver pressRx;
+    Check(pressRx.Start(kPressPort), "press receiver binds loopback test port");
+    Check(WaitUntilRunning(pressRx, 2000), "press receiver thread running");
+
+    // Head held 20 degrees off centre, untrailered.
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitForPacketAfter(pressRx, 0, pressSender, kPressPort, pkt, len, 2000),
+          "off-centre pose received");
+    Check(!pressRx.TryConsumeRecenterRequest(), "a plain pose asks for no recenter");
+
+    // CENTER on the phone: the app zeroes its output and the trailer rides the
+    // burst. Sent once, landing 20 degrees from the last accepted pose.
+    uint8_t pressCounter = 1;
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &pressCounter);
+    Check(SendToPort(pressSender, kPressPort, pkt, len), "press packet sent");
+    Check(WaitForRotation(pressRx, 0.f, 1000),
+          "the trailered pose jumps past the freeze gate in one packet");
+    Check(!pressRx.TryConsumeRecenterRequest(), "and still asks for no recenter");
+
+    pressRx.Stop();
+    pressSender.Close();
+
+    // ---- UdpReceiver: the receive thread sleeps until a datagram arrives ----
+    //
+    // It waits on the socket with no timeout, so these hold the three things a
+    // wait can get wrong: a burst left half read, a tracker that goes quiet
+    // (the player's face out of frame) and comes back never being seen again,
+    // and Stop() hanging on a thread that is asleep.
+    std::cout << "UdpReceiver wait tests:\n";
+
+    UdpSocket waitSender;
+    if (!waitSender.Open(kWaitSenderPort)) {
+        Check(false, "wait sender binds loopback test port");
+        return g_failures;
+    }
+    UdpReceiver waitRx;
+    Check(waitRx.Start(kWaitPort), "wait receiver binds");
+
+    // Steps well under kConfirmJumpDegrees, so the pose gate passes each one.
+    bool burstSent = true;
+    for (int i = 1; i <= 200; i++) {
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, i * 0.05, 0.0, 0.0);
+        burstSent = SendToPort(waitSender, kWaitPort, pkt, len) && burstSent;
+    }
+    Check(burstSent, "a 200-packet burst is sent back to back");
+    Check(WaitForRotation(waitRx, 10.0f, 1000), "the last packet of the burst is published");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 10.5, 0.0, 0.0);
+    Check(SendToPort(waitSender, kWaitPort, pkt, len), "tracker resumes after 1.5s of silence");
+    Check(WaitForRotation(waitRx, 10.5f, 1000), "its first packet back is published");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto stopStart = std::chrono::steady_clock::now();
+    waitRx.Stop();
+    const auto stopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stopStart).count();
+    Check(stopMs < 1000, "Stop wakes an idle receive thread and returns promptly");
+
+    Check(waitRx.Start(kWaitPort), "the receiver starts again after Stop");
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0);
+    Check(SendToPort(waitSender, kWaitPort, pkt, len), "packet sent to the restarted receiver");
+    Check(WaitForRotation(waitRx, 3.0f, 1000), "the restarted receive thread wakes on it");
+    waitRx.Stop();
+    waitSender.Close();
+
+    // ---- UdpReceiver: a datagram that does not parse changes nothing ----
+    //
+    // Through the test seam, so the two senders and the times between them are exact.
+    std::cout << "UdpReceiver refused datagram tests:\n";
+    {
+        using cameraunlock::detail::UdpReceiverTestAccess;
+        UdpReceiver refusing;
+        refusing.SetLog([](const std::string&) {});
+        sockaddr_in stranger = {};
+        stranger.sin_family = AF_INET;
+        stranger.sin_port = htons(5000);
+        inet_pton(AF_INET, "192.0.2.7", &stranger.sin_addr);
+        sockaddr_in tracker = stranger;
+        inet_pton(AF_INET, "127.0.0.1", &tracker.sin_addr);
+
+        uint8_t garbage[54];
+        const uint8_t stale_counter = 9;
+        size_t garbage_len = BuildPacket(garbage, 0.0, 0.0, 0.0, 361.0, 0.0, 0.0, &stale_counter);
+        for (int i = 0; i < 20; i++) {
+            UdpReceiverTestAccess::Deliver(refusing, garbage, static_cast<int>(garbage_len), stranger, 1000000 + i * 1000);
+        }
+        Check(!refusing.GetRotation(yaw, pitch, roll) && refusing.GetLastReceiveTimestamp() == 0,
+              "a pose past 360 degrees is not published and is no arrival");
+
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1020000);
+        Check(refusing.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 12.0f),
+              "the tracker's first pose is taken although a stranger's refused datagrams came first");
+        Check(!refusing.IsRemoteConnection(), "and the stranger's address did not set the locality");
+        Check(refusing.GetRejectedPacketCount() == 0, "the tracker is the source followed, not a second one");
+
+        UdpReceiverTestAccess::Deliver(refusing, garbage, static_cast<int>(garbage_len), tracker, 1021000);
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 12.5, 0.0, 0.0);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1022000);
+        Check(refusing.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 12.5f) && refusing.GetFrozenPacketCount() == 0,
+              "a refused datagram between two poses leaves the gate where it was");
+        Check(refusing.GetDatagramCount() == 23 && refusing.GetPublishedPoseCount() == 2,
+              "every datagram is counted, and only the two poses as published");
+        cameraunlock::PoseSnapshot snapshot = refusing.GetSnapshot();
+        Check(snapshot.centers == 0, "a trailer on a refused datagram announces nothing");
+        Check(snapshot.sequence == 2 && NearEqual(snapshot.yaw, 12.5f) && snapshot.received_us == 1022000,
+              "the snapshot is the second published pose");
+
+        const uint8_t press = 1;
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &press);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1023000);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1024000);
+        snapshot = refusing.GetSnapshot();
+        Check(snapshot.centers == 1 && snapshot.sequence == 4 && NearEqual(snapshot.yaw, 0.0f),
+              "a burst carrying one counter is one announced press, in the snapshot of its poses");
+        const uint8_t short_datagram[12] = {};
+        UdpReceiverTestAccess::Deliver(refusing, short_datagram, sizeof(short_datagram), tracker, 1025000);
+        Check(refusing.GetDatagramCount() == 26 && refusing.GetPublishedPoseCount() == 4,
+              "a datagram too short to be a pose is counted and not published");
+    }
+
+    // ---- UdpReceiver: a host that gives the port up is told why Start() did not bind ----
+    std::cout << "UdpReceiver start failure tests:\n";
+    {
+        cameraunlock::UdpSocket holder;
+        Check(holder.Open(kStartFailurePort), "another socket holds the port");
+        UdpReceiver blocked;
+        blocked.SetLog([](const std::string&) {});
+        Check(!blocked.Start(kStartFailurePort), "Start does not bind a held port");
+        Check(blocked.StartFoundPortInUse(), "and says the port is in use");
+        Check(blocked.GetStartFailure().find("bind failed with error " + std::to_string(kExpectedInUseError)) == 0,
+              "with the OS's own reason");
+        blocked.Stop();
+
+        // The supervisor used to sleep out its tick between looks at its flag, so a Stop
+        // this soon after Start took what was left of it every time. With the tick far
+        // longer than the time allowed here, a Stop that returns at all was woken by Stop.
+        using cameraunlock::detail::UdpReceiverTestAccess;
+        constexpr auto kLongTick = std::chrono::seconds(30);
+        constexpr auto kStopAllowed = std::chrono::seconds(10);
+        const auto stopsWithoutTheTick = [&](bool settle) {
+            bool woken = true;
+            for (int i = 0; i < 5; i++) {
+                blocked.Start(kStartFailurePort);
+                if (settle) std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                std::future<void> stopped = std::async(std::launch::async, [&] { blocked.Stop(); });
+                if (stopped.wait_for(kStopAllowed) != std::future_status::ready) woken = false;
+            }
+            return woken;
+        };
+        UdpReceiverTestAccess::SetSupervisorTick(blocked, kLongTick);
+        Check(stopsWithoutTheTick(false), "Stop after a failed Start does not wait out the supervisor's tick");
+        holder.Close();
+
+        Check(blocked.Start(kStartFailurePort), "the same receiver binds once the port is free");
+        Check(!blocked.StartFoundPortInUse() && blocked.GetStartFailure().empty(),
+              "and a Start that binds reports no failure");
+        blocked.Stop();
+
+        Check(stopsWithoutTheTick(true), "Stop of a bound receiver does not wait out the supervisor's tick");
+    }
+
+    // ---- UdpReceiver: a snapshot is one datagram's, with a writer running ----
+    //
+    // Each pose carries its own number in x and the presses so far in y, so a snapshot
+    // that mixed two datagrams, or marked a pose with a press it did not come with, shows.
+    std::cout << "UdpReceiver snapshot tests:\n";
+    {
+        using cameraunlock::detail::UdpReceiverTestAccess;
+        UdpReceiver published;
+        published.SetLog([](const std::string&) {});
+        sockaddr_in tracker = {};
+        tracker.sin_family = AF_INET;
+        tracker.sin_port = htons(5000);
+        inet_pton(AF_INET, "127.0.0.1", &tracker.sin_addr);
+
+        // Every kHandshake poses the writer waits until the reader has read that pose, so
+        // the reader takes snapshots all through the publishes however the scheduler
+        // shares the cores out, and between handshakes the two run free of each other.
+        constexpr int kPoses = 200000;
+        constexpr int kHandshake = 100;
+        std::atomic<bool> done{false};
+        std::atomic<uint64_t> readerSaw{0};
+        std::thread writer([&] {
+            uint8_t datagram[54];
+            uint8_t counter = 0;
+            uint64_t presses = 0;
+            for (int i = 1; i <= kPoses; i++) {
+                const bool press = i % 7 == 0;
+                if (press) {
+                    counter++;
+                    presses++;
+                }
+                const size_t length = BuildPacket(datagram, static_cast<double>(i % 1000), static_cast<double>(presses % 1000),
+                                                  0.0, 1.0 + (i % 2) * 0.5, 0.0, 0.0, press ? &counter : nullptr);
+                UdpReceiverTestAccess::Deliver(published, datagram, static_cast<int>(length), tracker,
+                                               1000000 + static_cast<int64_t>(i) * 1000);
+                if (i % kHandshake == 0) {
+                    while (readerSaw.load(std::memory_order_acquire) < static_cast<uint64_t>(i)) {
+                        std::this_thread::yield();
+                    }
+                }
+            }
+            done.store(true, std::memory_order_release);
+        });
+
+        uint64_t torn = 0;
+        uint64_t backwards = 0;
+        uint64_t distinct = 0;
+        uint64_t lastSequence = 0;
+        while (!done.load(std::memory_order_acquire)) {
+            const cameraunlock::PoseSnapshot s = published.GetSnapshot();
+            if (s.sequence == 0) continue;
+            readerSaw.store(s.sequence, std::memory_order_release);
+            if (s.sequence < lastSequence) backwards++;
+            if (s.sequence != lastSequence) distinct++;
+            lastSequence = s.sequence;
+            const bool whole =
+                std::lround(s.x * 100.0f) == static_cast<long>(s.sequence % 1000) &&
+                std::lround(s.y * 100.0f) == static_cast<long>(s.centers % 1000) &&
+                s.centers == s.sequence / 7 &&
+                NearEqual(s.yaw, 1.0f + (s.sequence % 2) * 0.5f) &&
+                s.received_us == 1000000 + static_cast<int64_t>(s.sequence) * 1000;
+            if (!whole) torn++;
+        }
+        writer.join();
+        const cameraunlock::PoseSnapshot last = published.GetSnapshot();
+        Check(last.sequence == kPoses && last.centers == kPoses / 7, "every pose and every press is counted");
+        Check(distinct >= kPoses / kHandshake, "the reader saw the writer at work");
+        Check(torn == 0 && backwards == 0, "no snapshot mixed two datagrams or went back");
+        std::cout << "    (" << distinct << " distinct snapshots read during " << kPoses << " publishes)\n";
+        published.Stop();
+        Check(published.GetSnapshot().sequence == 0, "Stop forgets the snapshot");
+    }
+
+    // ---- UdpReceiver: loopback only ----
+    std::cout << "UdpReceiver loopback tests:\n";
+    {
+        UdpReceiver local;
+        local.SetLog([](const std::string&) {});
+        local.SetLoopbackOnly(true);
+        Check(local.Start(kLoopbackPort), "a loopback-only receiver starts");
+        cameraunlock::UdpSocket sender;
+        Check(sender.Open(kLoopbackSenderPort), "sender socket opens");
+
+        // An address of this machine that is not loopback, when it has one.
+        sockaddr_in outside = {};
+        char host[256] = {};
+        addrinfo hints = {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        addrinfo* found = nullptr;
+        if (gethostname(host, sizeof(host)) == 0 && getaddrinfo(host, nullptr, &hints, &found) == 0) {
+            for (addrinfo* a = found; a != nullptr; a = a->ai_next) {
+                const sockaddr_in* candidate = reinterpret_cast<const sockaddr_in*>(a->ai_addr);
+                if (cameraunlock::IsRemoteAddress(*candidate)) {
+                    outside = *candidate;
+                    break;
+                }
+            }
+            freeaddrinfo(found);
+        }
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0);
+        if (outside.sin_family == AF_INET) {
+            outside.sin_port = htons(kLoopbackPort);
+            sendto(sender.GetHandle(), reinterpret_cast<const char*>(pkt), static_cast<int>(len), 0,
+                   reinterpret_cast<const sockaddr*>(&outside), sizeof(outside));
+        } else {
+            std::cout << "  [SKIP] this machine has no address but loopback to send to\n";
+        }
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0);
+        Check(SendToPort(sender, kLoopbackPort, pkt, len), "a datagram is sent to 127.0.0.1");
+        Check(WaitForRotation(local, 5.0f, 1000), "and is received");
+        Check(local.GetDatagramCount() == 1, "and it is the only one: the one to the other address never arrived");
+        local.Stop();
+        sender.Close();
+    }
+
+    if (g_failures == 0) {
+        std::cout << "Receiver tests: all passed\n";
+    } else {
+        std::cout << "Receiver tests: " << g_failures << " failure(s)\n";
+    }
+    return g_failures;
+}
