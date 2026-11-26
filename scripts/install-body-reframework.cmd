@@ -400,12 +400,10 @@ for %%f in (openvr_api.dll openxr_loader.dll) do (
     )
 )
 
-:: Paths travel by environment variable - a game folder with an apostrophe in
-:: it would close the single-quoted literal early and fail to parse.
-set "CUL_VENDOR_ZIP=!VENDOR_ZIP!"
-set "CUL_GAME_PATH=!GAME_PATH!"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference = 'Stop'; try { Expand-Archive -LiteralPath $env:CUL_VENDOR_ZIP -DestinationPath $env:CUL_GAME_PATH -Force } catch { Write-Host $_.Exception.Message; exit 1 }"
+:: tar.exe, as the other install bodies use. Expand-Archive under Windows
+:: PowerShell failed on the GitHub Windows runner with "Cannot find an overload
+:: for ExtractToDirectory and the argument count: 3".
+"%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "!GAME_PATH!"
 if errorlevel 1 (
     echo   ERROR: Extraction failed.
     call :restore_preexisting_vr
