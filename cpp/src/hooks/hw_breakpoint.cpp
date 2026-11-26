@@ -58,6 +58,9 @@ bool TakeRegister1(int owner) {
 }
 thread_local std::uintptr_t t_returnAt = 0;
 thread_local Handler t_returnHandler = nullptr;
+// Where register 1 still stops this thread after its return breakpoint fired
+// in a record that could not clear it.
+thread_local std::uintptr_t t_staleReturnAt = 0;
 
 std::mutex g_lock;
 std::once_flag g_started;
@@ -123,20 +126,32 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* info) {
     // the debug registers; a thread whose registers lag a move stops at an
     // address no slot holds any more, and is ours all the same.
     const bool statusKnown = (context.ContextFlags & CONTEXT_DEBUG_REGISTERS) == CONTEXT_DEBUG_REGISTERS;
-    const bool returned = t_returnAt != 0 && ip == t_returnAt && (!statusKnown || (context.Dr6 & (Reg(1) << kReturnRegister)) != 0);
-    if (returned) {
+    const bool trapFlag = (context.EFlags & kTrapFlag) != 0;
+    // Dr6 keeps its bits until someone clears them, so the trap flag
+    // says whether the single step is this one.
+    const bool steppedToo = statusKnown && (context.Dr6 & kSingleStepStatus) != 0 && trapFlag;
+    // Register 1 stopped the thread: Dr6 says so where it is known; without it,
+    // a step the game's trap flag took to the same address is the game's.
+    const bool register1 = statusKnown ? (context.Dr6 & (Reg(1) << kReturnRegister)) != 0 : !trapFlag;
+    bool returned = false;
+    if (register1 && t_returnAt != 0 && ip == t_returnAt) {
         const Handler handler = t_returnHandler;
         t_returnAt = 0;
         t_returnHandler = nullptr;
-        // Register 1 has to be cleared, so the record's debug registers are
-        // written back even where it did not say it read them.
-        context.ContextFlags |= CONTEXT_DEBUG_REGISTERS;
-        Write(context, kReturnRegister, 0);
-        context.Dr6 &= ~(Reg(1) << kReturnRegister);
-        context.EFlags |= kResumeFlag;
+        // A record without the debug registers cannot clear register 1, which
+        // stops the thread here again until a record that has them does.
+        if (statusKnown) Write(context, kReturnRegister, 0);
+        else t_staleReturnAt = ip;
         Run(handler, context);
-        WriteSlots(context);
+        returned = true;
+    } else if (register1 && t_staleReturnAt != 0 && ip == t_staleReturnAt) {
+        if (statusKnown) {
+            Write(context, kReturnRegister, 0);
+            t_staleReturnAt = 0;
+        }
+        returned = true;
     }
+    if (returned && statusKnown) context.Dr6 &= ~(Reg(1) << kReturnRegister);
     bool ours = statusKnown && (context.Dr6 & OurStatusBits()) != 0;
     Slot* hit = nullptr;
     for (Slot& slot : g_slots) {
@@ -144,9 +159,9 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* info) {
         if (ip == slot.address.load(std::memory_order_acquire)) hit = &slot;
         if (!statusKnown && (hit == &slot || ip == slot.former.load(std::memory_order_acquire))) ours = true;
     }
+    if (!ours && !returned) return EXCEPTION_CONTINUE_SEARCH;
     // A slot on the same instruction as a return breakpoint fires too.
-    if (!ours) return returned ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
-    if (hit) {
+    if (ours && hit) {
         hit->hits.fetch_add(1, std::memory_order_relaxed);
         Run(hit->handler.load(std::memory_order_acquire), context);
     }
@@ -155,9 +170,6 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* info) {
     // A record without the debug registers would write back registers it never
     // read, over whatever else uses them; the arming pass reaches this thread.
     if (statusKnown) {
-        // Dr6 keeps its bits until someone clears them, so the trap flag
-        // says whether the single step is this one.
-        const bool steppedToo = (context.Dr6 & kSingleStepStatus) != 0 && (context.EFlags & kTrapFlag) != 0;
         context.Dr6 &= ~OurStatusBits();
         // The thread resumes with the debug registers this record holds, which
         // predate a move made meanwhile; the arming pass catches a move made
@@ -277,6 +289,7 @@ void OnReturn(CONTEXT& context, std::uintptr_t at, Handler handler) {
     // way) is replaced.
     t_returnAt = at;
     t_returnHandler = handler;
+    t_staleReturnAt = 0;
     Write(context, kReturnRegister, at);
 }
 

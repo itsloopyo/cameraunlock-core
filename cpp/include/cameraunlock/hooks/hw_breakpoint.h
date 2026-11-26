@@ -16,6 +16,10 @@
 // its own code (Far Cry 4's FC64.dll, far-cry-4-headtracking src/exec_breakpoint.cpp), or an instruction inside a
 // function with nothing to attach to (No Man's Sky's camera commit, no-mans-sky-headtracking
 // src/camera/commit_hook.cpp). x86 and x64.
+//
+// The first Set registers a vectored exception handler and starts a thread that arms new threads every second. Both
+// live for the rest of the process: there is no call that takes them out. A DLL that uses this must stay loaded
+// while the process runs; one unloaded by FreeLibrary leaves the handler and the thread running code that is gone.
 namespace cameraunlock::hooks::hw_breakpoint {
 
 // Called on the thread that reached the address, with its registers as they were there, before the instruction
