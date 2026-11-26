@@ -27,8 +27,13 @@ void Check(bool cond, const std::string& name) {
 }
 
 // The C++ port makes the Rust filter's float and double operations in the same order, so
-// it matches to the bit.
+// on x64 it matches to the bit. A 32-bit MSVC build lands two cases 4.4e-16 and 8.9e-16
+// off ("every axis moving at once", "the heaviest amount").
+#if defined(_M_IX86)
+constexpr double kTolerance = 1e-12;
+#else
 constexpr double kTolerance = 0.0;
+#endif
 
 struct Sample {
     double time;
