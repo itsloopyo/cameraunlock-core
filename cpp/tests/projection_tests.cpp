@@ -21,6 +21,8 @@
 #include <cameraunlock/unreal/ue_math.h>
 
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <iostream>
 
 namespace {
@@ -484,6 +486,15 @@ void TestEdgePinned() {
     Check(grazing && NearD(grazing->x, -1.0) && NearD(grazing->y, 0.0), "a point inside the front floor goes to the edge it lies towards");
 
     Check(!rd::ProjectOffsetToNdcEdgePinned({-1, 0, 0}, kIdentity, 1.0, 1.0, rule), "straight behind has no side to go to");
+
+    const auto noise = rd::ProjectOffsetToNdcEdgePinned({-1, 1e-7, 0}, kIdentity, 2.0, 1.0, rule);
+    Check(noise && NearD(noise->x, 1.0) && NearD(noise->y, 0.0), "with no cutoff, a side of rounding noise still picks an edge");
+    rule.behindMinEdge = 1e-7;
+    Check(!rd::ProjectOffsetToNdcEdgePinned({-1, 1e-7, 0}, kIdentity, 2.0, 1.0, rule),
+          "behindMinEdge refuses a point nearly straight behind, measured in the units behind names");
+    Check(rd::ProjectOffsetToNdcEdgePinned({-1, 1e-7, 0}, kIdentity, 0.5, 1.0, rule).has_value(),
+          "the same side over a narrower tangent clears the cutoff");
+    rule.behindMinEdge = 0.0;
 }
 
 void TestUnprojectRoundTrip() {
@@ -522,6 +533,16 @@ void TestReprojectNdc() {
     Check(leaned && NearD(leaned->x, -0.1) && NearD(leaned->y, 0.0), "a lean moves the aim by the parallax at its distance");
     const auto atInfinity = rd::ReprojectNdc({0, 0}, clean, drawn, std::nullopt, {});
     Check(atInfinity && NearD(atInfinity->x, 0.0) && NearD(atInfinity->y, 0.0), "without a distance the aim is at infinity and a lean does not move it");
+    const auto infinite = rd::ReprojectNdc(at, clean, drawn, std::numeric_limits<double>::infinity(), {});
+    const auto none = rd::ReprojectNdc(at, clean, drawn, std::nullopt, {});
+    Check(infinite && none && infinite->x == none->x && infinite->y == none->y, "an infinite distance is the same as none");
+    bool threw = false;
+    try {
+        rd::PointThroughNdc(at, clean.eye, clean.basis, clean.tanX, clean.tanY, std::numeric_limits<double>::infinity());
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    Check(threw, "PointThroughNdc refuses an infinite distance, which has no point");
 
     drawn = clean;
     drawn.basis = rd::ViewBasisFromRotator(FRotator{0, 170, 0});

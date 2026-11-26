@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cmath>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 
 #include "cameraunlock/unreal/ue_math.h"
 
@@ -151,13 +153,19 @@ struct EdgePinRule {
     // Whether a point in front but outside the frame is also pulled in to the
     // edge, rather than left where it projects.
     bool pinInFront = false;
+    // A point that does not project gives nothing, rather than an edge, when
+    // the larger of its two components is not above this, in the units
+    // `behind` names. Nearly straight behind, the side it lies on is rounding
+    // noise. 0 gives nothing only for exactly straight behind.
+    double behindMinEdge = 0;
 };
 
 // ProjectOffsetToNdc for a mark that must always show which way the shot went:
 // a point beside or behind the view is put on the frame's edge (the larger of
 // |x| and |y| is 1) on its side, instead of failing. Empty only for an offset
-// that does not project and has no right or up component (straight behind, or
-// at the eye), a result that is not finite, or a tangent that is not positive.
+// that does not project and is straight behind or at the eye (no component
+// above rule.behindMinEdge), a result that is not finite, or a tangent that is
+// not positive.
 inline std::optional<NdcPoint> ProjectOffsetToNdcEdgePinned(const unreal::FVector& offset, const ViewBasis& view, double tanX,
                                                             double tanY, const EdgePinRule& rule) {
     if (!(tanX > 0) || !(tanY > 0)) return std::nullopt;
@@ -173,6 +181,7 @@ inline std::optional<NdcPoint> ProjectOffsetToNdcEdgePinned(const unreal::FVecto
         y /= tanY;
     }
     const double edge = std::fmax(std::fabs(x), std::fabs(y));
+    if (!projects && !(edge > rule.behindMinEdge)) return std::nullopt;
     if (!projects || (rule.pinInFront && edge > 1.0)) {
         if (!(edge > 0)) return std::nullopt;
         x /= edge;
@@ -191,9 +200,12 @@ inline unreal::FVector UnprojectNdc(const NdcPoint& ndc, const ViewBasis& view, 
             view.forward.Z + a * view.right.Z + b * view.up.Z};
 }
 
-// The world point `distance` from `eye` along the ray through `ndc`.
+// The world point `distance` from `eye` along the ray through `ndc`. Throws
+// for a distance that is not finite: a point at infinity is the ray's
+// direction, UnprojectNdc.
 inline unreal::FVector PointThroughNdc(const NdcPoint& ndc, const unreal::FVector& eye, const ViewBasis& view, double tanX,
                                        double tanY, double distance) {
+    if (!std::isfinite(distance)) throw std::invalid_argument("PointThroughNdc: the distance is not finite");
     const unreal::FVector d = UnprojectNdc(ndc, view, tanX, tanY);
     const double s = distance / std::sqrt(detail::Dot(d, d));
     return {eye.X + d.X * s, eye.Y + d.Y * s, eye.Z + d.Z * s};
@@ -202,12 +214,13 @@ inline unreal::FVector PointThroughNdc(const NdcPoint& ndc, const unreal::FVecto
 // Where the aim through the point `at` of the clean picture lands in the drawn
 // one. With a distance, the aim is the point that far down the clean ray, so a
 // lean moves it by the parallax; without, it is the ray's direction, a point at
-// infinity that only a turn moves. `front` is tested on the offset from the
-// drawn eye, or without a distance on the unnormalised ray UnprojectNdc gives.
+// infinity that only a turn moves. A distance of +infinity is the same as
+// none. `front` is tested on the offset from the drawn eye, or without a
+// distance on the unnormalised ray UnprojectNdc gives.
 inline std::optional<NdcPoint> ReprojectNdc(const NdcPoint& at, const ViewFrame& clean, const ViewFrame& drawn,
                                             std::optional<double> distance, const InFrontRule& front) {
     unreal::FVector v = UnprojectNdc(at, clean.basis, clean.tanX, clean.tanY);
-    if (distance) {
+    if (distance && *distance != std::numeric_limits<double>::infinity()) {
         const unreal::FVector p = PointThroughNdc(at, clean.eye, clean.basis, clean.tanX, clean.tanY, *distance);
         v = {p.X - drawn.eye.X, p.Y - drawn.eye.Y, p.Z - drawn.eye.Z};
     }
