@@ -51,7 +51,7 @@ test-linux-probe = { cmd = "node scripts/test-linux-probe.mjs", depends-on = ["b
 # and nothing from a game install.
 # The strict header TU is built in Debug as well: config_table.h once drew C4702 (unreachable
 # code) in Debug and not in Release, and mods build their /W4 /WX tests in Debug.
-build-cpp = { cmd = "cmake -S cpp -B cpp/build-test -DCAMERAUNLOCK_BUILD_HOOKS=ON -DCAMERAUNLOCK_BUILD_DISCOVERY=ON -DCAMERAUNLOCK_BUILD_UNREAL=ON -DCAMERAUNLOCK_BUILD_REFRAMEWORK=ON -DCAMERAUNLOCK_BUILD_C=ON && cmake --build cpp/build-test --config Release && cmake --build cpp/build-test --config Debug --target cameraunlock_headers_strict", env = { CMAKE_BUILD_TYPE = "Release" } }
+build-cpp = { cmd = "cmake -S cpp -B cpp/build-test -DCAMERAUNLOCK_BUILD_HOOKS=ON -DCAMERAUNLOCK_BUILD_DISCOVERY=ON -DCAMERAUNLOCK_BUILD_UNREAL=ON -DCAMERAUNLOCK_BUILD_RE_ENGINE=ON -DCAMERAUNLOCK_BUILD_REFRAMEWORK=ON -DCAMERAUNLOCK_BUILD_C=ON && cmake --build cpp/build-test --config Release && cmake --build cpp/build-test --config Debug --target cameraunlock_headers_strict", env = { CMAKE_BUILD_TYPE = "Release" } }
 
 # Pipeline conformance vectors. data/pipeline-conformance.json is the executable
 # form of the "Check." paragraphs in docs/porting-the-pipeline.md, and the

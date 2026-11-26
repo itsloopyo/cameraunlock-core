@@ -102,6 +102,12 @@ if(TARGET cameraunlock_unreal AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_UNREAL)
 endif()
 
+if(TARGET cameraunlock_re_engine)
+    target_sources(cameraunlock_tests PRIVATE re_engine_tests.cpp)
+    target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_re_engine_game)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_RE_ENGINE)
+endif()
+
 if(TARGET cameraunlock_discovery)
     target_sources(cameraunlock_tests PRIVATE rtti_vtable_tests.cpp)
     target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_discovery)

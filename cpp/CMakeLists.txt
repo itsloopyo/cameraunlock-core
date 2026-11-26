@@ -216,6 +216,40 @@ if(CAMERAUNLOCK_BUILD_UNREAL)
     )
 endif()
 
+# Optional RE Engine runtime: reads the script VM and the game's executable
+# from inside a running RE Engine game without REFramework. Windows only, and
+# x64 only, as RE Engine ships no 32-bit game. It reads instructions with the
+# hde64 that cameraunlock_hooks compiles.
+option(CAMERAUNLOCK_BUILD_RE_ENGINE "Build the RE Engine runtime (requires CAMERAUNLOCK_BUILD_HOOKS, x64)" OFF)
+if(CAMERAUNLOCK_BUILD_RE_ENGINE)
+    if(NOT TARGET cameraunlock_hooks)
+        message(FATAL_ERROR "CAMERAUNLOCK_BUILD_RE_ENGINE requires CAMERAUNLOCK_BUILD_HOOKS=ON")
+    endif()
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "CAMERAUNLOCK_BUILD_RE_ENGINE is x64 only: RE Engine games are 64-bit")
+    endif()
+    add_library(cameraunlock_re_engine STATIC
+        src/re_engine/discovery.cpp
+        src/re_engine/exe.cpp
+    )
+    target_include_directories(cameraunlock_re_engine
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(cameraunlock_re_engine PUBLIC cameraunlock cameraunlock_hooks)
+
+    # Game() as the process's own executable. A tool that stands a memory image
+    # in for the game defines Game() itself and links only cameraunlock_re_engine.
+    add_library(cameraunlock_re_engine_game STATIC src/re_engine/game.cpp)
+    target_link_libraries(cameraunlock_re_engine_game PUBLIC cameraunlock_re_engine)
+
+    install(TARGETS cameraunlock_re_engine cameraunlock_re_engine_game
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+    )
+endif()
+
 # Optional REFramework utilities module (requires REFramework headers from consumer)
 option(CAMERAUNLOCK_BUILD_REFRAMEWORK "Build REFramework utilities" OFF)
 if(CAMERAUNLOCK_BUILD_REFRAMEWORK)

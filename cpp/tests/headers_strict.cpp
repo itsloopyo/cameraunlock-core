@@ -140,6 +140,8 @@
 #include "cameraunlock/protocol/socket_types.h"
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/protocol/udp_socket.h"
+#include "cameraunlock/re_engine/discovery.h"
+#include "cameraunlock/re_engine/exe.h"
 #include "cameraunlock/reframework/game_window.h"
 #include "cameraunlock/reframework/log_callback.h"
 #include "cameraunlock/reframework/manager_probe_checks.h"

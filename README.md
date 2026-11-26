@@ -266,6 +266,7 @@ plus native-only modules for in-process game modding.
 | `hooks/` | Function hooking (optional module) |
 | `discovery/` | Camera address discovery via float classification (optional module) |
 | `unreal/` | Unreal Engine runtime helpers: UE5 LWC math, GUObjectArray/FName reflection (optional module) |
+| `re_engine/` | RE Engine runtime without REFramework: script VM, stage list and transform matrix discovery, executable scans and guarded reads (optional module) |
 | `reframework/` | RE Engine (REFramework) utilities: camera chain, TDB inspection, game state probing (optional module) |
 
 Optional modules (all `OFF` by default):
@@ -275,6 +276,7 @@ Optional modules (all `OFF` by default):
 | `CAMERAUNLOCK_BUILD_HOOKS` | `cameraunlock_hooks` | A consumer's `minhook` target, else the vendored `vendor/minhook` |
 | `CAMERAUNLOCK_BUILD_DISCOVERY` | `cameraunlock_discovery` | `CAMERAUNLOCK_BUILD_HOOKS=ON` |
 | `CAMERAUNLOCK_BUILD_UNREAL` | `cameraunlock_unreal` | Windows |
+| `CAMERAUNLOCK_BUILD_RE_ENGINE` | `cameraunlock_re_engine`, `cameraunlock_re_engine_game` (`Game()` as the process's own executable) | Windows x64; `CAMERAUNLOCK_BUILD_HOOKS=ON` |
 | `CAMERAUNLOCK_BUILD_REFRAMEWORK` | `cameraunlock_reframework` | C++20; a consumer's REFramework headers, else the vendored `vendor/reframework` |
 
 Tests build by default (`CAMERAUNLOCK_BUILD_TESTS=ON`) into `cameraunlock_tests`.
