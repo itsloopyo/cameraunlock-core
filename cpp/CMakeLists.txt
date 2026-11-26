@@ -123,6 +123,7 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
         src/hooks/code_patch.cpp
         src/memory/x86_decode_x64.cpp
         src/memory/x86_decode_x86.cpp
+        src/memory/x64_analysis.cpp
         src/memory/hde32_any.c
         src/memory/hde64_any.c
         src/hooks/vtable_slot.cpp

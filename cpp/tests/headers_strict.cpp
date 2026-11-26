@@ -79,6 +79,7 @@
 #include "cameraunlock/dev/gameinput_state.h"
 #include "cameraunlock/dev/game_link.h"
 #include "cameraunlock/diagnostics/crash_handler.h"
+#include "cameraunlock/diagnostics/fail.h"
 #include "cameraunlock/discovery/camera_discovery.h"
 #include "cameraunlock/discovery/float_classifier.h"
 #include "cameraunlock/discovery/probe_selection.h"
@@ -120,6 +121,7 @@
 // SEH-only, so it #errors rather than degrading on a non-Windows build.
 #include "cameraunlock/memory/safe_memory.h"
 #include "cameraunlock/memory/x86_decode.h"
+#include "cameraunlock/memory/x64_analysis.h"
 #include "cameraunlock/memory/process_memory.h"
 #include "cameraunlock/memory/heap_search.h"
 #include "cameraunlock/memory/exe_mapper.h"

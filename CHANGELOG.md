@@ -9,6 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - x64 code analysis over a PE image
+
+`cameraunlock/memory/x64_analysis.h` (`cameraunlock::memory::x64`, in `cameraunlock_hooks`) reads an
+x64 MSVC exe's code from a `pe::Image`: every function chunk from the unwind table and the function
+it belongs to, rel32 and RIP-relative references by target, each function decoded with its jump
+tables told apart from its code, leaves with no unwind data, `MangledClass`, `FindVtable` (a class's
+one primary vtable by its type descriptor, with the reason when there is not one), instruction
+shapes and `insn::Clobbers`. It is Headstart's Bugbear analysis, moved. `pe::Image` gains `Has`,
+`TimeDateStamp`, `Exceptions` and `Find` (bytes in a section at an alignment), and
+`cameraunlock/diagnostics/fail.h` holds `Fail`, which writes why a check did not match.
+
 ### Added - a bytecode patcher for Java agent mods
 
 `com.cameraunlock.core.bytecode.Patch` writes a call into a mod's bridge class into a game method,

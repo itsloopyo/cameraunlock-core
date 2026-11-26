@@ -44,6 +44,7 @@ int RunUnrealCrosshairTests();
 #ifdef CAMERAUNLOCK_TESTS_HOOKS
 int RunHookManagerTests();
 int RunX86DecodeTests();
+int RunX64AnalysisTests();
 #endif
 int RunInputScriptTests();
 int RunDirectInputStateTests();
@@ -188,6 +189,7 @@ int main(int argc, char** argv) {
 #ifdef CAMERAUNLOCK_TESTS_HOOKS
     failures += RunHookManagerTests();
     failures += RunX86DecodeTests();
+    failures += RunX64AnalysisTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();

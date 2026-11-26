@@ -91,7 +91,7 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
 endif()
 
 if(TARGET cameraunlock_hooks)
-    target_sources(cameraunlock_tests PRIVATE x86_decode_tests.cpp)
+    target_sources(cameraunlock_tests PRIVATE x86_decode_tests.cpp x64_analysis_tests.cpp)
     target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_hooks)
     target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_HOOKS)
 endif()
