@@ -154,6 +154,14 @@
 #include "cameraunlock/tracking/tracking_mode.h"
 #include "cameraunlock/unreal/ue_math.h"
 #include "cameraunlock/unreal/ue_runtime.h"
+#include "cameraunlock/unreal/ue_call.h"
+#include "cameraunlock/unreal/ue_discovery.h"
+#include "cameraunlock/unreal/ue_names.h"
+#include "cameraunlock/unreal/ue_object_sweep.h"
+#include "cameraunlock/unreal/ue_objects.h"
+#include "cameraunlock/unreal/ue_params.h"
+#include "cameraunlock/unreal/ue_reflection.h"
+#include "cameraunlock/unreal/ue_screen.h"
 
 // A template is only compiled where it is instantiated, and nothing above instantiates one, so
 // core's table over its own config type is instantiated here to hold it to this warning level.

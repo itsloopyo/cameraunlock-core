@@ -33,6 +33,9 @@ int RunHeldPointerTests();
 #ifdef CAMERAUNLOCK_TESTS_DISCOVERY
 int RunRttiVtableTests();
 #endif
+#ifdef CAMERAUNLOCK_TESTS_UNREAL
+int RunUnrealReflectionTests();
+#endif
 #ifdef CAMERAUNLOCK_TESTS_HOOKS
 int RunHookManagerTests();
 int RunX86DecodeTests();
@@ -129,6 +132,9 @@ int main(int argc, char** argv) {
     failures += RunWordScanTests();
     failures += RunPeImageTests();
     failures += RunMsvcRttiTests();
+#ifdef CAMERAUNLOCK_TESTS_UNREAL
+    failures += RunUnrealReflectionTests();
+#endif
     failures += RunLeanClampTests();
     failures += RunHeldPointerTests();
     failures += RunInputScriptTests();
