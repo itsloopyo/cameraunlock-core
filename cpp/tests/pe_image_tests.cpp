@@ -202,6 +202,35 @@ void TheUnwindTableGivesFunctions() {
     Check(!g.Open().HasUnwindTable() && Throws([&] { g.Open().FunctionAt(0x1100); }), "an x86 image has none, and asking throws");
 }
 
+void BytesAreFoundInASection(bool x64) {
+    PeFixture f(x64);
+    const std::string b = Bits(x64);
+    f.Put(0x80 + 8, std::uint32_t{0x6034C5CE});
+    f.Text(0x2101, "camera");
+    f.Text(0x2204, "camera");
+    f.Text(0x3010, "camera");
+    const std::uint32_t word = 0x11223344;
+    f.Put(0x2302, word);
+    f.Put(0x2308, word);
+    const pe::Image image = f.Open();
+    Check(image.TimeDateStamp() == 0x6034C5CEu, "TimeDateStamp is the file header's" + b);
+    Check(image.Has(0x4FFC, 4) && !image.Has(0x4FFC, 5) && image.Has(0x5000, 0), "Has is whether the bytes lie inside the image" + b);
+    Check(!image.Has(0xFFFFFFFFFFFFFFF0ull, 0x20), "Has is false for a span that wraps round" + b);
+    Check(image.Find(image.Rdata(), "camera", 7) == std::vector<std::uint32_t>{0x2101, 0x2204}, "Find finds every match in the section, not past it" + b);
+    Check(image.Find(image.Rdata(), "camera", 7, 4) == std::vector<std::uint32_t>{0x2204}, "Find keeps only matches at the alignment" + b);
+    Check(image.Find(image.Rdata(), &word, 4, 8) == std::vector<std::uint32_t>{0x2308}, "Find matches every byte, not only the first" + b);
+    Check(image.Find(image.Data(), "camera", 7).size() == 1, "Find reads the section it is given" + b);
+    f.Code(0x2FFA, {'c', 'a', 'm', 'e', 'r', 'a'});  // its NUL is .data's first byte
+    Check(f.Open().Find(f.Open().Rdata(), "camera", 7).size() == 2, "a match cut off by the section's end is not one" + b);
+    Check(Throws([&] { image.Find(image.Rdata(), "", 0); }) && Throws([&] { image.Find(image.Rdata(), "c", 1, 0); }),
+          "Find refuses no bytes and an alignment of 0" + b);
+    const pe::Section past{"", 0x4800, 0x1000, 0};
+    Check(Throws([&] { image.Find(past, "c", 1); }), "Find refuses a section past the image" + b);
+    Check(image.Exceptions().size == 0, "an image with no exception directory has an empty one" + b);
+    f.Directory(3, 0x4000, 24);
+    Check(f.Open().Exceptions().rva == 0x4000 && f.Open().Exceptions().size == 24, "Exceptions is the exception directory" + b);
+}
+
 #ifdef _WIN32
 void ThisExeReadsAsLoaded() {
     std::cout << "This executable:\n";
@@ -227,6 +256,7 @@ int RunPeImageTests() {
         CallsAndPushesAreFoundByTarget(x64);
         AStringIsFoundOnce(x64);
         AnImportIsFoundByName(x64);
+        BytesAreFoundInASection(x64);
     }
     PatternsAreChecked();
     AFunctionStartsAfterItsPadding();

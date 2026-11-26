@@ -51,6 +51,7 @@ void Image::ReadHeaders(std::size_t span) {
     else if (machine == kMachineAmd64 && magic == kMagic64) is64_ = true;
     else throw std::runtime_error("the image is neither a 32-bit x86 nor a 64-bit x64 PE");
 
+    timeDateStamp_ = ReadAt<std::uint32_t>(base_, span, nt + 8);
     size_ = ReadAt<std::uint32_t>(base_, span, opt + 56);
     // Before anything past the headers is read: the directories are read up to SizeOfImage.
     if (size_ > span)
@@ -86,6 +87,8 @@ void Image::ReadHeaders(std::size_t span) {
     if (imports.first && std::uint64_t{imports.first} + imports.second <= size_) imports_ = {"", imports.first, imports.second, 0};
 
     const auto exceptions = dir(kDirectoryException);
+    if (exceptions.first && std::uint64_t{exceptions.first} + exceptions.second <= size_)
+        exceptions_ = {"", exceptions.first, exceptions.second, 0};
     if (is64_ && exceptions.first && exceptions.second >= 12) {
         if (std::uint64_t{exceptions.first} + exceptions.second > size_) throw std::runtime_error("the image's exception directory runs past it");
         functions_.reserve(exceptions.second / 12);
@@ -173,6 +176,24 @@ std::vector<std::pair<std::uint32_t, std::uint32_t>> Image::Parts(std::uint32_t 
     std::vector<std::pair<std::uint32_t, std::uint32_t>> out;
     for (const Function& f : functions_)
         if (RootOfEntry(&f) == root) out.emplace_back(f.begin, f.end);
+    return out;
+}
+
+std::vector<std::uint32_t> Image::Find(const Section& section, const void* needle, std::size_t n, std::uint32_t align) const {
+    if (n == 0) throw std::invalid_argument("Image::Find was given no bytes to find");
+    if (align == 0) throw std::invalid_argument("Image::Find was given an alignment of 0");
+    if (!Has(section.rva, section.size)) throw std::out_of_range("Image::Find was given a section that runs past the image");
+    std::vector<std::uint32_t> out;
+    const std::uint8_t* p = base_ + section.rva;
+    const std::uint8_t* end = p + section.size;
+    const std::uint8_t first = *static_cast<const std::uint8_t*>(needle);
+    while (p + n <= end) {
+        const auto* hit = static_cast<const std::uint8_t*>(std::memchr(p, first, static_cast<std::size_t>(end - p) - n + 1));
+        if (!hit) break;
+        const auto rva = static_cast<std::uint32_t>(hit - base_);
+        if (rva % align == 0 && std::memcmp(hit, needle, n) == 0) out.push_back(rva);
+        p = hit + 1;
+    }
     return out;
 }
 

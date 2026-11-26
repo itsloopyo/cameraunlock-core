@@ -43,6 +43,10 @@ public:
     // Unchecked, as a scan over a section reads from it.
     const std::uint8_t* At(std::uint32_t rva) const { return base_ + rva; }
     std::uint32_t SizeOfImage() const { return size_; }
+    // Whether the `len` bytes at `rva` all lie inside the image.
+    bool Has(std::uint64_t rva, std::uint64_t len) const { return rva + len <= size_ && rva + len >= rva; }
+    // The file header's TimeDateStamp, which tells one build of an exe from another.
+    std::uint32_t TimeDateStamp() const { return timeDateStamp_; }
     std::uint64_t PointerBase() const { return pointerBase_; }
     // The optional header's ImageBase: where the image's own pointers point
     // before relocation.
@@ -72,6 +76,10 @@ public:
     const Section& Data() const { return Required(".data"); }
     // The import directory, from the optional header; size 0 when there is none.
     const Section& Imports() const { return imports_; }
+    // The exception directory (.pdata's RUNTIME_FUNCTION entries, 12 bytes
+    // each, as the file orders them), from the optional header; size 0 when
+    // there is none.
+    const Section& Exceptions() const { return exceptions_; }
 
     // Whether the image has an exception directory (.pdata): x64 images do.
     bool HasUnwindTable() const { return !functions_.empty(); }
@@ -86,6 +94,12 @@ public:
     // Every unwind entry of the function starting at `root`, by address.
     std::vector<std::pair<std::uint32_t, std::uint32_t>> Parts(std::uint32_t root) const;
 
+    // Every RVA in `section` where the `n` bytes at `needle` occur, at an RVA
+    // that is a multiple of `align`, in address order. Throws
+    // std::invalid_argument for no bytes or an alignment of 0, and
+    // std::out_of_range for a section that runs past the image.
+    std::vector<std::uint32_t> Find(const Section& section, const void* needle, std::size_t n, std::uint32_t align = 1) const;
+
 private:
     void ReadHeaders(std::size_t span);
     const Section& Required(const char* name) const;
@@ -99,9 +113,11 @@ private:
     std::uint64_t pointerBase_;
     std::uint64_t headerImageBase_ = 0;
     std::uint32_t size_ = 0;
+    std::uint32_t timeDateStamp_ = 0;
     bool is64_ = false;
     std::vector<Section> sections_;
     Section imports_;
+    Section exceptions_;
     std::vector<Function> functions_;  // by begin
 };
 
