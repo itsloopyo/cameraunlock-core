@@ -657,6 +657,13 @@ void TestGeneration(const Generation& g) {
     CHECK(d.objects.PathName(numbered) == unnumbered + "_3");
     CHECK(d.objects.FindPath(unnumbered + "_3") == numbered);
     CHECK(d.objects.FindPath(unnumbered) == 0);
+
+    // An index whose block is past the most blocks a pool holds is no name,
+    // whatever lies past the table.
+    if (g.pool) {
+        w.arena.Put<std::uint64_t>(w.namesAt + 8192 * 8, w.arena.Ptr(w.namesAt));
+        CHECK(NameString(w.arena, d.objects.names, 8192u << d.objects.names.blockShift).empty());
+    }
 }
 
 // The header is refused rather than guessed: while the engine has made few

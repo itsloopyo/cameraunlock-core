@@ -205,6 +205,9 @@ std::optional<NameTable> FindNameTable(const Memory& mem, const ModuleMap& modul
 
 std::string NameString(const Memory& mem, const NameTable& table, std::uint32_t index) {
     if (table.kind == NameTableKind::Pool) {
+        // The block table holds at most kMaxPoolBlocks pointers, so a garbage
+        // index past it reads as no name rather than past the table.
+        if ((index >> table.blockShift) >= static_cast<std::uint32_t>(kMaxPoolBlocks)) return {};
         const std::uintptr_t block = mem.Ptr(table.blocks + (index >> table.blockShift) * 8ull);
         if (!PlausiblePtr(block)) return {};
         const std::uintptr_t offset = index & ((1u << table.blockShift) - 1);
