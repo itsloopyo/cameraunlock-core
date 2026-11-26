@@ -66,17 +66,21 @@ public:
     ConfigWatchThread();
     ConfigWatchThread(const ConfigWatchThread&) = delete;
     ConfigWatchThread& operator=(const ConfigWatchThread&) = delete;
-    // Stops a running thread and waits for it. The wait ends when the thread says it is done or
-    // when it has ended, so a DLL's static destructor under ExitProcess, where Windows has already
-    // ended the thread, does not hang. A DLL that is unloaded while the process runs stops it first:
-    // the thread's last instructions are in that DLL.
+    // Stops a running thread and waits until it has touched the last of what it was handed, or has
+    // ended. It may still be returning through the code that started it, so a DLL unloaded while
+    // the process runs calls Stop before FreeLibrary. This never waits for the thread's end itself,
+    // which inside DllMain (a DLL's static destructor) would wait for the loader lock the thread
+    // needs to end; under ExitProcess Windows has already ended the thread.
     ~ConfigWatchThread();
 
     // Throws std::logic_error while running, and std::runtime_error naming the call and the
     // Windows error when a folder cannot be watched or the thread does not start.
     void Start(const std::vector<std::wstring>& folders, std::uint32_t retry_ms, std::function<bool()> step,
                std::function<void(const std::string&)> log);
-    // Throws std::logic_error when not started.
+    // Stops the thread and waits until it has ended, so once Stop returns none of the thread's
+    // instructions remain to run and the code that started it may be unloaded. Never call it from
+    // DllMain: the thread takes the loader lock to end. Throws std::logic_error when not started,
+    // and std::system_error when the wait fails.
     void Stop();
     // Start was called and Stop has not been, whether or not the thread has stopped by itself.
     bool Running() const { return state_ != nullptr; }
@@ -97,8 +101,9 @@ private:
 /// yet, or never settled, is read again 50 ms later, as no further notification may come for it.
 /// A notification for another file in the same folder finds nothing changed and reads nothing.
 ///
-/// Every line goes to `log`, UTF-8, without a prefix, as the owner's own log lines. `log` runs
-/// while the watcher holds its lock, on the caller's thread or the watcher's: it must not throw,
+/// Every line goes to `log`, UTF-8, without a prefix, as the owner's own log lines. `log` is called
+/// from the caller's thread and from the watcher's, at the same time, some calls with the
+/// watcher's lock held and some without: it must be thread-safe, must not throw, and must not
 /// call back into the watcher or wait on a thread that does. `read` runs on the watcher's thread
 /// with no lock held, and must not call Stop or destroy the watcher.
 template <class Config>
@@ -112,10 +117,10 @@ public:
     static constexpr std::uint32_t kRetryUnreadMs = 50;
     static constexpr int kMaxRereads = 8;
 
-    /// Throws std::invalid_argument for an empty `log`, and whatever ConfigOwner's constructor
-    /// throws for `options`.
+    /// Throws std::invalid_argument for an empty `log` or a path that is not fully qualified, and
+    /// whatever ConfigOwner's constructor throws for `options`.
     ConfigWatcher(ConfigOwnerOptions<Config> options, LogFn log)
-        : path_(options.path), log_(RequireLog(std::move(log))) {
+        : path_(detail::OwnerFullPath(options.path, "path")), log_(RequireLog(std::move(log))) {
         owner_ = std::make_unique<ConfigOwner<Config>>(std::move(options));
     }
 
@@ -196,7 +201,12 @@ public:
         log_("watching for edits, applied as they land");
     }
 
-    /// Ends Start's thread and waits for it. Throws std::logic_error when not started.
+    /// Ends Start's thread and waits until it has ended, so the code that started it may then be
+    /// unloaded: a DLL unloaded while the process runs calls Stop before FreeLibrary, never from
+    /// DllMain, where the wait would hold the loader lock the thread needs to end. Destroying a
+    /// running watcher stops the thread without waiting for its very end, so it never deadlocks in
+    /// a DLL's static destructor. Throws std::logic_error when not started, and std::system_error
+    /// when the wait fails.
     void Stop() { thread_.Stop(); }
 
     /// Start was called and Stop has not been, whether or not the thread has stopped by itself.

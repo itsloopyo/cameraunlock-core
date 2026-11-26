@@ -177,6 +177,10 @@ void Polled(const fs::path& dir) {
     Rig rig(dir);
     Check(Contains(Thrown<std::invalid_argument>([&] { Watcher(rig.Options(), nullptr); }), "needs a log"),
           "a watcher with no log throws std::invalid_argument");
+    ConfigOwnerOptions<HeadTrackingConfig> relative = rig.Options();
+    relative.path = L"games/Game.ini";
+    Check(!Thrown<std::invalid_argument>([&] { Watcher(std::move(relative), rig.Log()); }).empty(),
+          "a path that is not fully qualified throws std::invalid_argument");
     WriteBytes(rig.defaults, "[Light]\r\nLightMultiplier=1.5\r\n");
     WriteBytes(rig.game, kHead);
     Watcher watcher(rig.Options(), rig.Log());

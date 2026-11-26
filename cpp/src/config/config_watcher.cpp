@@ -130,7 +130,15 @@ void CloseAll(const std::vector<HANDLE>& handles, HANDLE stop, HANDLE stopped) {
 ConfigWatchThread::ConfigWatchThread() = default;
 
 ConfigWatchThread::~ConfigWatchThread() {
-    if (state_) Stop();
+    if (!state_) return;
+    SetEvent(state_->stop);
+    // Not the thread's handle alone: a DLL's static destructor runs inside DllMain under the
+    // loader lock, which the thread takes to end. `stopped` is set once it touches nothing of ours.
+    const HANDLE ends[] = {state_->stopped, state_->thread};
+    WaitForMultipleObjects(2, ends, FALSE, INFINITE);
+    CloseHandle(state_->stop);
+    CloseHandle(state_->stopped);
+    CloseHandle(state_->thread);
 }
 
 void ConfigWatchThread::Start(const std::vector<std::wstring>& folders, std::uint32_t retry_ms, std::function<bool()> step,
@@ -168,9 +176,8 @@ void ConfigWatchThread::Start(const std::vector<std::wstring>& folders, std::uin
     auto state = std::make_unique<State>();
     state->stop = stop;
     state->stopped = stopped;
-    // Detached, so no std::thread is left joinable at exit, and Stop waits for `stopped` or the
-    // thread's end: a join from a DLL's static destructor under FreeLibrary waits for a thread
-    // that needs the loader lock to end, while `stopped` is set before the thread returns.
+    // Detached, so no std::thread is left joinable at exit: Stop waits on the thread's own handle,
+    // and the destructor on that or `stopped`.
     std::thread thread;
     try {
         thread = std::thread([handles, stop, stopped, retry_ms, step = std::move(step), log = std::move(log)]() mutable {
@@ -201,8 +208,10 @@ void ConfigWatchThread::Start(const std::vector<std::wstring>& folders, std::uin
 void ConfigWatchThread::Stop() {
     if (!state_) throw std::logic_error("ConfigWatchThread::Stop with no Start");
     SetEvent(state_->stop);
-    const HANDLE ends[] = {state_->stopped, state_->thread};
-    WaitForMultipleObjects(2, ends, FALSE, INFINITE);
+    if (WaitForSingleObject(state_->thread, INFINITE) != WAIT_OBJECT_0) {
+        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                "waiting for the config watcher's thread to end");
+    }
     CloseHandle(state_->stop);
     CloseHandle(state_->stopped);
     CloseHandle(state_->thread);
