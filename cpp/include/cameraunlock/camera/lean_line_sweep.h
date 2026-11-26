@@ -195,5 +195,17 @@ inline LeanObstruction LineSweepQuery(void* context, const math::Vec3& start, co
     return out;
 }
 
+/// LineSweepQuery for a clamp that keeps no skin of its own, where the swept
+/// radius is the whole standoff. `context` is a LineSweep. `max_distance` is
+/// the lean alone, and a blocked answer's distance is the travel the sphere
+/// allows, never negative.
+inline LeanObstruction LineSweepTravelQuery(void* context, const math::Vec3& start, const math::Vec3& direction,
+                                            float max_distance) {
+    const float r = static_cast<const LineSweep*>(context)->settings.radius;
+    LeanObstruction out = LineSweepQuery(context, start, direction, max_distance + r);
+    if (out.blocked) out.distance = out.distance > r ? out.distance - r : 0.0f;
+    return out;
+}
+
 }  // namespace camera
 }  // namespace cameraunlock

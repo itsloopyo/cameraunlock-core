@@ -17,6 +17,7 @@ using cameraunlock::camera::LeanObstruction;
 using cameraunlock::camera::LineHit;
 using cameraunlock::camera::LineSweep;
 using cameraunlock::camera::LineSweepQuery;
+using cameraunlock::camera::LineSweepTravelQuery;
 using cameraunlock::math::Vec3;
 
 int g_failures = 0;
@@ -341,6 +342,30 @@ void TestNoNormalFailedMeasureIsUnanswered() {
     }
 }
 
+void TestTravelQueryForASkinlessClamp() {
+    World world;
+    LineSweep sweep = MakeSweep(world);
+    const Vec3 ahead(0.0f, 0.0f, 1.0f);
+    Check(!LineSweepTravelQuery(&sweep, Vec3::Zero(), ahead, 0.3f).blocked, "the travel query sees open space as clear");
+
+    world.walls.push_back({Vec3(0.0f, 0.0f, -1.0f), -0.35f});  // plane z = 0.35
+    const LeanObstruction o = LineSweepTravelQuery(&sweep, Vec3::Zero(), ahead, 0.3f);
+    Check(o.queried && o.blocked && NearEqual(o.distance, 0.25f), "the travel query hands back the travel alone, a radius short of the wall");
+    const LeanObstruction skinned = Ask(sweep, 0.3f);
+    Check(NearEqual(o.distance, skinned.distance - sweep.settings.radius), "it is the skinned answer less the radius");
+
+    world.walls[0].offset = -0.05f;  // closer than the radius
+    const LeanObstruction pressed = LineSweepTravelQuery(&sweep, Vec3::Zero(), ahead, 0.3f);
+    Check(pressed.blocked && pressed.distance == 0.0f, "a wall within the radius allows no travel, never a negative one");
+
+    world.walls[0].offset = -0.45f;
+    Check(!LineSweepTravelQuery(&sweep, Vec3::Zero(), ahead, 0.3f).blocked,
+          "a wall past the lean plus the radius is clear, as the skinless clamp asks only for the lean");
+
+    world.fail = true;
+    Check(!LineSweepTravelQuery(&sweep, Vec3::Zero(), ahead, 0.3f).queried, "a cast that cannot run leaves it unanswered");
+}
+
 }  // namespace
 
 int RunLeanLineSweepTests() {
@@ -365,6 +390,7 @@ int RunLeanLineSweepTests() {
     TestNoNormalEdgeTakesTheWorstAngle();
     TestNoNormalThinObjectBeforeAWallTakesTheWorstAngle();
     TestNoNormalFailedMeasureIsUnanswered();
+    TestTravelQueryForASkinlessClamp();
 
     if (g_failures == 0) {
         std::cout << "Lean line sweep tests: all passed\n";
