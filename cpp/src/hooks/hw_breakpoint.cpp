@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -68,6 +69,10 @@ std::set<DWORD> g_refused;  // under g_lock
 // A handler let an exception out, which may not unwind through the
 // exception dispatcher; the arming thread says so.
 std::atomic<bool> g_handlerThrew{false};
+// The first such exception's message, written once by the handler that set
+// g_handlerClaimed, read once g_handlerThrew is set.
+std::atomic<bool> g_handlerClaimed{false};
+char g_handlerError[256];
 
 // The enable pair, then the condition and length fields, zero for an execute breakpoint.
 Reg ControlBits(int reg) { return (Reg(3) << (reg * 2)) | (Reg(0xF) << (16 + reg * 4)); }
@@ -111,10 +116,17 @@ constexpr Reg kSingleStepStatus = 0x4000;
 constexpr DWORD kTrapFlag = 0x100;
 
 void Run(Handler handler, CONTEXT& context) {
+    const auto record = [](const char* what) {
+        if (g_handlerClaimed.exchange(true, std::memory_order_acq_rel)) return;
+        std::snprintf(g_handlerError, sizeof g_handlerError, "%s", what);
+        g_handlerThrew.store(true, std::memory_order_release);
+    };
     try {
         handler(context);
+    } catch (const std::exception& e) {
+        record(e.what());
     } catch (...) {
-        g_handlerThrew.store(true, std::memory_order_release);
+        record("an exception that is not a std::exception");
     }
 }
 
@@ -249,7 +261,7 @@ void Set(int slot, std::uintptr_t address, Handler handler) {
                     std::this_thread::sleep_for(kArmEvery);
                     if (!loggedThrow && g_handlerThrew.load(std::memory_order_acquire)) {
                         loggedThrow = true;
-                        log::Line("ERROR: a breakpoint's handler let an exception out; the game went on past it (logged once)");
+                        log::Line("ERROR: a breakpoint's handler let an exception out, the game went on past it (logged once): %s", g_handlerError);
                     }
                     // A snapshot that fails now is taken again next pass; the
                     // threads armed so far stay armed.
