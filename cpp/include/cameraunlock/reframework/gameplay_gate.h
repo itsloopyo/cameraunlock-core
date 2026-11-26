@@ -42,13 +42,25 @@ public:
     GameplayGate(void (*discover)(), GameplayCheckFn check)
         : m_discover(discover), m_check(check) {}
 
+    // The camera hook asks every render frame, and the managed invokes behind
+    // a check body cost far more than the answer changes.
+    static constexpr unsigned long long kDefaultCheckIntervalMs = 100;
+
+    // The same, refreshed at most every `checkIntervalMs`; 0 refreshes on
+    // every call. A cut scene starts on a frame of its own, and a gate read
+    // 100 ms apart let the head pose onto Requiem's first 80 ms of one
+    // (universal-head-tracking native/re/src/gate.h), so a gate in front of a
+    // camera hook that must not leak into a cut scene passes 0.
+    GameplayGate(void (*discover)(), GameplayCheckFn check, unsigned long long checkIntervalMs)
+        : m_discover(discover), m_check(check), m_checkIntervalMs(checkIntervalMs) {}
+
     GameplayGate(const GameplayGate&) = delete;
     GameplayGate& operator=(const GameplayGate&) = delete;
 
-    // Refresh if the throttle has elapsed, then report the cached state.
+    // Refresh if the interval has elapsed, then report the cached state.
     bool IsInGameplay();
 
-    // Refresh the cached state if the throttle has elapsed.
+    // Refresh the cached state if the interval has elapsed.
     void Refresh();
 
     // A title / main-menu / loading GUI element drew this frame. Menus on these
@@ -64,6 +76,7 @@ public:
 private:
     void (*m_discover)();
     GameplayCheckFn m_check;
+    unsigned long long m_checkIntervalMs = kDefaultCheckIntervalMs;
 
     PrimaryCameraProbe m_probe;
     bool m_inGameplay = false;

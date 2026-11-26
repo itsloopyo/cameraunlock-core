@@ -83,6 +83,14 @@ if(TARGET cameraunlock_discovery)
     target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_DISCOVERY)
 endif()
 
+# reframework/API.hpp is C++20, and the rest of the suite is C++17.
+if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
+    add_executable(cameraunlock_gameplay_gate_tests gameplay_gate_tests.cpp)
+    target_link_libraries(cameraunlock_gameplay_gate_tests PRIVATE cameraunlock_reframework)
+    set_target_properties(cameraunlock_gameplay_gate_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME cameraunlock_gameplay_gate_tests COMMAND cameraunlock_gameplay_gate_tests)
+endif()
+
 if(TARGET cameraunlock_hooks)
     target_sources(cameraunlock_tests PRIVATE hook_manager_tests.cpp)
     target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_hooks)

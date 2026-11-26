@@ -12,10 +12,6 @@
 
 namespace cameraunlock::reframework {
 
-// Refresh interval. The camera hook asks every render frame; the managed
-// invokes behind a check body cost far more than the answer changes.
-constexpr unsigned long long kCheckIntervalMs = 100;
-
 // How long a menu draw keeps suppressing after the last one, so a single
 // missed frame does not flicker tracking back on.
 constexpr unsigned long long kMenuHoldMs = 300;
@@ -46,7 +42,7 @@ void GameplayGate::NotifyMenuDrawn() {
 
 void GameplayGate::Refresh() {
     unsigned long long now = GetTickCount64();
-    if (now - m_lastCheckMs < kCheckIntervalMs) return;
+    if (now - m_lastCheckMs < m_checkIntervalMs) return;
     m_lastCheckMs = now;
 
     const auto api = ::reframework::API::get().get();
