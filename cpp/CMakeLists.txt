@@ -47,6 +47,7 @@ set(CAMERAUNLOCK_SOURCES
     src/discovery/probe_selection.cpp
     src/memory/pattern_scanner.cpp
     src/memory/pe_fingerprint.cpp
+    src/memory/memory_view.cpp
     src/input/hotkey_poller.cpp
     src/input/key_bindings.cpp
     src/logging/file_log.cpp
@@ -83,6 +84,12 @@ endif()
 if(WIN32)
     target_link_libraries(cameraunlock PUBLIC ws2_32)
     target_sources(cameraunlock PRIVATE src/dev/game_link.cpp)
+endif()
+
+# Reads of this process through VirtualQuery and SEH. Windows only, and not in
+# scripts/build-wasm.mjs's list, like the game link above.
+if(WIN32)
+    target_sources(cameraunlock PRIVATE src/memory/process_memory.cpp)
 endif()
 
 # Optional hook manager module (requires MinHook)

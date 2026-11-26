@@ -29,6 +29,7 @@ add_executable(cameraunlock_tests
     win32_profile_semantics_tests.cpp
     config_schema_tests.cpp
     safe_memory_tests.cpp
+    memory_view_tests.cpp
     lean_clamp_tests.cpp
     held_pointer_tests.cpp
     input_script_tests.cpp

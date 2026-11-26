@@ -98,12 +98,14 @@
 #include "cameraunlock/math/rotation_utils.h"
 #include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/math/vec3.h"
+#include "cameraunlock/memory/memory_view.h"
 #include "cameraunlock/memory/pattern_scanner.h"
 #include "cameraunlock/memory/pe_fingerprint.h"
 #include "cameraunlock/memory/rtti_vtable.h"
 #ifdef _WIN32
 // SEH-only, so it #errors rather than degrading on a non-Windows build.
 #include "cameraunlock/memory/safe_memory.h"
+#include "cameraunlock/memory/process_memory.h"
 #endif
 #include "cameraunlock/os/game_window.h"
 #include "cameraunlock/os/module_paths.h"
