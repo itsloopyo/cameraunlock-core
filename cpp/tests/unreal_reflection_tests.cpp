@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-CameraUnlock-Core
 // Tests for Unreal's pin-free reflection (cameraunlock/unreal/ue_discovery.h and
 // the headers it builds on), run against a synthetic process laid out the way
-// each engine generation lays it out.
+// each engine generation lays it out, and for the UMG crosshair mover's
+// refusal of a game without UMG.
 
 #include <cameraunlock/unreal/ue_call.h>
 #include <cameraunlock/unreal/ue_discovery.h>
@@ -10,6 +11,7 @@
 #include <cameraunlock/unreal/ue_objects.h>
 #include <cameraunlock/unreal/ue_params.h>
 #include <cameraunlock/unreal/ue_reflection.h>
+#include <cameraunlock/unreal/umg_crosshair.h>
 
 #include <array>
 #include <cstdint>
@@ -821,6 +823,23 @@ void TestScriptFunction() {
     CHECK(Throws([&] { RealOf(fn, "Playing", 2); }));
 }
 
+// A game with no UMG loaded: the crosshair mover refuses it where it is built.
+void TestCrosshairMoverNeedsUmg() {
+    std::cout << "  -- crosshair mover without UMG\n";
+    World w(kUE427);
+    const ReflectionDiscoveryResult r = DiscoverReflection(w.arena, w.arena.module, w.arena);
+    CHECK(r.found.has_value());
+    if (!r.found) return;
+    const Reflection refl(r.found->objects, r.found->layout);
+    std::string what;
+    try {
+        UmgCrosshairMover mover(refl, r.found->processEvent, CrosshairWidgets{});
+    } catch (const std::runtime_error& e) {
+        what = e.what();
+    }
+    CHECK(what == "/Script/UMG.Widget:SetRenderTranslation is not loaded");
+}
+
 void TestObjectAt() {
     std::cout << "  -- object array slots\n";
     Arena a;
@@ -887,6 +906,7 @@ int RunUnrealReflectionTests() {
     TestEnumValue();
     TestNetFunctionFlags();
     TestScriptFunction();
+    TestCrosshairMoverNeedsUmg();
     TestObjectAt();
     std::cout << (g_failures ? "  [FAIL] " : "  [PASS] ") << "Unreal reflection, " << g_failures << " failed\n";
     return g_failures;

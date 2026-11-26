@@ -35,6 +35,7 @@ int RunRttiVtableTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_UNREAL
 int RunUnrealReflectionTests();
+int RunUnrealCrosshairTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_HOOKS
 int RunHookManagerTests();
@@ -134,6 +135,7 @@ int main(int argc, char** argv) {
     failures += RunMsvcRttiTests();
 #ifdef CAMERAUNLOCK_TESTS_UNREAL
     failures += RunUnrealReflectionTests();
+    failures += RunUnrealCrosshairTests();
 #endif
     failures += RunLeanClampTests();
     failures += RunHeldPointerTests();

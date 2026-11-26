@@ -181,6 +181,7 @@ if(CAMERAUNLOCK_BUILD_UNREAL)
             src/unreal/ue_call.cpp
             src/unreal/ue_discovery.cpp
             src/unreal/ue_screen.cpp
+            src/unreal/umg_crosshair.cpp
         )
         target_link_libraries(cameraunlock_unreal PUBLIC cameraunlock)
     endif()
