@@ -175,20 +175,25 @@ endif()
 # reflection, SEH-guarded memory access). Windows-only.
 option(CAMERAUNLOCK_BUILD_UNREAL "Build Unreal Engine runtime helpers" OFF)
 if(CAMERAUNLOCK_BUILD_UNREAL)
-    add_library(cameraunlock_unreal STATIC src/unreal/ue_runtime.cpp src/unreal/umg_reticle.cpp)
-    # Pin-free reflection and the UMG crosshair mover read 64-bit UE4 and UE5
-    # layouts and call into the game, so they are built only for x64.
+    # The name table, object array and reflection readers serve 32-bit UE3
+    # games too.
+    add_library(cameraunlock_unreal STATIC
+        src/unreal/ue_runtime.cpp
+        src/unreal/umg_reticle.cpp
+        src/unreal/ue_names.cpp
+        src/unreal/ue_objects.cpp
+        src/unreal/ue_reflection.cpp
+    )
+    target_link_libraries(cameraunlock_unreal PUBLIC cameraunlock)
+    # ProcessEvent calls, discovery and the UMG crosshair mover read 64-bit UE4
+    # and UE5 layouts and call into the game, so they are built only for x64.
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         target_sources(cameraunlock_unreal PRIVATE
-            src/unreal/ue_names.cpp
-            src/unreal/ue_objects.cpp
-            src/unreal/ue_reflection.cpp
             src/unreal/ue_call.cpp
             src/unreal/ue_discovery.cpp
             src/unreal/ue_screen.cpp
             src/unreal/umg_crosshair.cpp
         )
-        target_link_libraries(cameraunlock_unreal PUBLIC cameraunlock)
     endif()
     target_include_directories(cameraunlock_unreal
         PUBLIC
