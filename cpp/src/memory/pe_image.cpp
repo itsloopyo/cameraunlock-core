@@ -185,11 +185,15 @@ Pattern::Pattern(const char* text) {
         if (!p[1]) throw std::invalid_argument(std::string("a pattern ends in half a byte: ") + text);
         if (p[0] == '?' && p[1] == '?') bytes_.push_back(-1);
         else {
-            const char pair[3] = {p[0], p[1], 0};
-            char* end = nullptr;
-            const unsigned long v = std::strtoul(pair, &end, 16);
-            if (end != pair + 2) throw std::invalid_argument(std::string("a pattern has a byte that is not hex: ") + text);
-            bytes_.push_back(static_cast<std::int16_t>(v));
+            const auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            const int hi = hex(p[0]), lo = hex(p[1]);
+            if (hi < 0 || lo < 0) throw std::invalid_argument(std::string("a pattern has a byte that is not two hex digits or ??: ") + text);
+            bytes_.push_back(static_cast<std::int16_t>(hi * 16 + lo));
         }
         p += 2;
     }

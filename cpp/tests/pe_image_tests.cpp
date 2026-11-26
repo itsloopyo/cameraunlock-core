@@ -95,6 +95,11 @@ void PatternsAreChecked() {
     Check(Throws([] { pe::Pattern("8B 4G"); }), "a byte that is not hex throws");
     Check(Throws([] { pe::Pattern(""); }), "an empty pattern throws");
     Check(pe::Pattern("8B41??85C0").Size() == 5, "spaces are optional");
+    Check(Throws([] { pe::Pattern("8B -1 85"); }), "a signed byte throws rather than becoming a wildcard");
+    Check(Throws([] { pe::Pattern("8B +5"); }), "a plus sign throws");
+    Check(Throws([] { pe::Pattern("8B 4 C0"); }), "a space inside a byte throws");
+    Check(Throws([] { pe::Pattern("8B ?5"); }), "half a wildcard throws");
+    Check(pe::Pattern("8b aF").Size() == 2, "hex digits in either case are read");
 }
 
 void CallsAndPushesAreFoundByTarget(bool x64) {

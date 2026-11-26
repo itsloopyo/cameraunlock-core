@@ -106,7 +106,8 @@ private:
 };
 
 // A byte pattern written as hex pairs, "??" for any byte: "8B 41 ?? 85 C0".
-// Throws std::invalid_argument for half a byte, a byte that is not hex, or a
+// Throws std::invalid_argument for half a byte, a byte that is not two hex
+// digits or ?? (a sign or whitespace inside one included), or a
 // pattern that does not start with a known byte.
 class Pattern {
 public:
