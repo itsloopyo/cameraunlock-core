@@ -5,6 +5,8 @@
 #include <MinHook.h>
 
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace cameraunlock::hooks {
 
@@ -169,6 +171,32 @@ void HookManager::RemoveAllHooks() {
 size_t HookManager::GetHookCount() const {
     std::lock_guard<std::recursive_mutex> hold(m_mutex);
     return m_hooks.size();
+}
+
+void InitializeHooksOrThrow() {
+    const HookStatus s = HookManager::Instance().Initialize();
+    if (s != HookStatus::Ok && s != HookStatus::ErrorAlreadyInitialized)
+        throw std::runtime_error(std::string("MinHook did not initialise: ") + HookStatusToString(s));
+    if (!HookManager::Instance().IsInitialized())
+        throw std::runtime_error("MinHook was started outside HookManager, so HookManager cannot make hooks");
+}
+
+void CreateHookOrThrow(void* target, void* detour, void** original, const char* what) {
+    const HookStatus s = HookManager::Instance().CreateHook(target, detour, original);
+    if (s != HookStatus::Ok)
+        throw std::runtime_error(std::string("no detour on ") + what + ": " + HookStatusToString(s));
+}
+
+void EnableHookOrThrow(void* target, const char* what) {
+    const HookStatus s = HookManager::Instance().EnableHook(target);
+    if (s != HookStatus::Ok)
+        throw std::runtime_error(std::string("detour on ") + what + " not enabled: " + HookStatusToString(s));
+}
+
+void InstallHookOrThrow(void* target, void* detour, void** original, const char* what) {
+    InitializeHooksOrThrow();
+    CreateHookOrThrow(target, detour, original, what);
+    EnableHookOrThrow(target, what);
 }
 
 ScopedHook::ScopedHook(void* target, void* detour, void** original) {

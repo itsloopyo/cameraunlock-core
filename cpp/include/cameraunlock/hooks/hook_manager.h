@@ -86,6 +86,45 @@ private:
     std::vector<void*> m_hooks;
 };
 
+// Throwing forms over HookManager::Instance(). Each throws std::runtime_error
+// naming `what` and the MinHook status:
+//   "MinHook did not initialise: <status>"
+//   "no detour on <what>: <status>"
+//   "detour on <what> not enabled: <status>"
+
+// Starts MinHook, or finds HookManager already started it. Throws when MinHook
+// was started by something else, since HookManager then refuses every hook.
+void InitializeHooksOrThrow();
+
+// Makes the detour without enabling it, so several can be made before any is
+// on. `original` receives the trampoline.
+void CreateHookOrThrow(void* target, void* detour, void** original, const char* what);
+
+void EnableHookOrThrow(void* target, const char* what);
+
+// InitializeHooksOrThrow, CreateHookOrThrow and EnableHookOrThrow.
+void InstallHookOrThrow(void* target, void* detour, void** original, const char* what);
+
+// The same for a target given as an address or a pointer, and a detour and an
+// original of their own function types (a 32-bit thiscall original is detoured
+// by a fastcall function, so the two types differ).
+template <class Target, class Detour, class Original>
+void CreateHookOrThrow(Target target, Detour detour, Original* original, const char* what) {
+    CreateHookOrThrow(reinterpret_cast<void*>(target), reinterpret_cast<void*>(detour),
+                      reinterpret_cast<void**>(original), what);
+}
+
+template <class Target>
+void EnableHookOrThrow(Target target, const char* what) {
+    EnableHookOrThrow(reinterpret_cast<void*>(target), what);
+}
+
+template <class Target, class Detour, class Original>
+void InstallHookOrThrow(Target target, Detour detour, Original* original, const char* what) {
+    InstallHookOrThrow(reinterpret_cast<void*>(target), reinterpret_cast<void*>(detour),
+                       reinterpret_cast<void**>(original), what);
+}
+
 // RAII hook guard - automatically removes hook on destruction
 class ScopedHook {
 public:
