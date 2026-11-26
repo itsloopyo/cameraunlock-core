@@ -35,6 +35,7 @@ int RunRttiVtableTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_RE_ENGINE
 int RunReEngineTests();
+int RunReEngineTdbTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_UNREAL
 int RunUnrealReflectionTests();
@@ -138,6 +139,7 @@ int main(int argc, char** argv) {
     failures += RunMsvcRttiTests();
 #ifdef CAMERAUNLOCK_TESTS_RE_ENGINE
     failures += RunReEngineTests();
+    failures += RunReEngineTdbTests();
 #endif
 #ifdef CAMERAUNLOCK_TESTS_UNREAL
     failures += RunUnrealReflectionTests();

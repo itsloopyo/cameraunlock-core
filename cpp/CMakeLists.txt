@@ -229,8 +229,12 @@ if(CAMERAUNLOCK_BUILD_RE_ENGINE)
         message(FATAL_ERROR "CAMERAUNLOCK_BUILD_RE_ENGINE is x64 only: RE Engine games are 64-bit")
     endif()
     add_library(cameraunlock_re_engine STATIC
+        src/re_engine/app_entries.cpp
         src/re_engine/discovery.cpp
         src/re_engine/exe.cpp
+        src/re_engine/scene.cpp
+        src/re_engine/tdb.cpp
+        src/re_engine/tdb_reader.cpp
     )
     target_include_directories(cameraunlock_re_engine
         PUBLIC
