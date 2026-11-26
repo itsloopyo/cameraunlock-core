@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-CameraUnlock-Core
 #include <cameraunlock/memory/heap_search.h>
+#include <cameraunlock/memory/safe_memory.h>
 
 #include <Windows.h>
 #include <psapi.h>
@@ -19,8 +20,7 @@ std::uintptr_t NextMatch(std::uintptr_t a, std::uintptr_t end, std::uintptr_t va
     __try {
         for (; a < end; a += sizeof(std::uintptr_t))
             if (*reinterpret_cast<const volatile std::uintptr_t*>(a) == value) return a;
-    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION || GetExceptionCode() == STATUS_GUARD_PAGE_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
-                                                                                                                 : EXCEPTION_CONTINUE_SEARCH) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
     }
     return end;
 }
