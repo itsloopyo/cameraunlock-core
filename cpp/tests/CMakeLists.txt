@@ -42,6 +42,7 @@ add_executable(cameraunlock_tests
     follow_turn_tests.cpp
     fov_axis_tests.cpp
     viewmodel_tests.cpp
+    deferred_rig_lean_tests.cpp
     tracking_mode_tests.cpp
     ini_editor_tests.cpp
     checked_file_writer_tests.cpp

@@ -40,6 +40,7 @@
 
 #include "cameraunlock/ads/ads_fade.h"
 #include "cameraunlock/ads/aim_mode.h"
+#include "cameraunlock/ads/deferred_rig_lean.h"
 #include "cameraunlock/ads/lean_handover.h"
 #include "cameraunlock/camera/fov_axis.h"
 #include "cameraunlock/camera/head_bones.h"
