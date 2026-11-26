@@ -131,7 +131,7 @@ void PlantedHook() {
     CHECK(planted::PlantedHook(above, kFn, kGame, kGameEnd) == std::optional<std::uintptr_t>(kDetour));
 }
 #else
-// On x86 only the relative jumps are read: FF 25 is jmp [abs32] there, and 48 B8 is two other instructions.
+// On x86 FF 25 is jmp [abs32], and 48 B8 is two other instructions, not a jump.
 void PlantedHook() {
     std::printf("-- a hook another mod planted at a game function (x86)\n");
     std::uint8_t code[64] = {};
@@ -144,8 +144,20 @@ void PlantedHook() {
     code[0] = 0xEB;
     code[1] = 0x10;
     CHECK(planted::JumpAt(read, base) == std::optional<std::uintptr_t>(base + 0x12));
+    // jmp [abs32] reads its target from the absolute address, here code + 0x20.
     code[0] = 0xFF;
     code[1] = 0x25;
+    const auto slot = static_cast<std::uint32_t>(base + 0x20);
+    std::memcpy(code + 2, &slot, 4);
+    const auto target = static_cast<std::uint32_t>(0x10203040);
+    std::memcpy(code + 0x20, &target, 4);
+    CHECK(planted::JumpAt(read, base) == std::optional<std::uintptr_t>(0x10203040));
+    // A slot that does not read is no jump.
+    const auto unreadable = static_cast<std::uint32_t>(base + 0x1000);
+    std::memcpy(code + 2, &unreadable, 4);
+    CHECK(!planted::JumpAt(read, base));
+    code[0] = 0x48;
+    code[1] = 0xB8;
     CHECK(!planted::JumpAt(read, base));
     code[0] = 0xE9;
     const std::int32_t rel = 0x1000;

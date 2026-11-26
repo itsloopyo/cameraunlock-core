@@ -20,7 +20,7 @@ namespace cameraunlock::hooks::planted {
 // goes, or nothing when the bytes there are not a jump this knows.
 //   E9 rel32            jmp rel32
 //   EB rel8             jmp rel8
-//   FF 25 disp32        jmp [rip+disp32]   (x64; the target is read from memory)
+//   FF 25 disp32        jmp [rip+disp32] on x64, jmp [disp32] on x86 (the target is read from memory)
 //   48 B8 imm64 FF E0   mov rax, imm64; jmp rax
 template <class Read>
 std::optional<std::uintptr_t> JumpAt(const Read& read, std::uintptr_t at) {
@@ -33,13 +33,16 @@ std::optional<std::uintptr_t> JumpAt(const Read& read, std::uintptr_t at) {
         return at + 5 + static_cast<std::intptr_t>(rel);
     }
     if (b[0] == 0xEB) return at + 2 + static_cast<std::intptr_t>(static_cast<std::int8_t>(b[1]));
-    if (b[0] == 0xFF && b[1] == 0x25 && sizeof(std::uintptr_t) == 8) {
+    if (b[0] == 0xFF && b[1] == 0x25) {
         if (!read(at, b, 6)) return std::nullopt;
         std::int32_t disp;
         std::memcpy(&disp, b + 2, 4);
-        std::uint64_t target = 0;
-        if (!read(at + 6 + static_cast<std::intptr_t>(disp), &target, 8)) return std::nullopt;
-        return static_cast<std::uintptr_t>(target);
+        // x64 reads the target relative to the next instruction, x86 at the absolute address.
+        const std::uintptr_t slot = sizeof(std::uintptr_t) == 8 ? at + 6 + static_cast<std::intptr_t>(disp)
+                                                                 : static_cast<std::uintptr_t>(static_cast<std::uint32_t>(disp));
+        std::uintptr_t target = 0;
+        if (!read(slot, &target, sizeof(target))) return std::nullopt;
+        return target;
     }
     if (b[0] == 0x48 && b[1] == 0xB8 && sizeof(std::uintptr_t) == 8) {
         if (!read(at, b, 12) || b[10] != 0xFF || b[11] != 0xE0) return std::nullopt;
