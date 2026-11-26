@@ -42,6 +42,7 @@ int RunRigLeanTests();
 int RunZoomCompensationTests();
 int RunQuatHelpersTests();
 int RunHeadBonesTests();
+int RunFollowTurnTests();
 int RunTrackingModeTests();
 int RunIniEditorTests();
 int RunCheckedFileWriterTests();
@@ -122,6 +123,7 @@ int main(int argc, char** argv) {
     failures += RunZoomCompensationTests();
     failures += RunQuatHelpersTests();
     failures += RunHeadBonesTests();
+    failures += RunFollowTurnTests();
     failures += RunTrackingModeTests();
     failures += RunIniEditorTests();
     failures += RunCheckedFileWriterTests();

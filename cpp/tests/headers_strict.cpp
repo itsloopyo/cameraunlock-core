@@ -74,6 +74,7 @@
 #include "cameraunlock/discovery/camera_discovery.h"
 #include "cameraunlock/discovery/float_classifier.h"
 #include "cameraunlock/discovery/probe_selection.h"
+#include "cameraunlock/effects/follow_turn.h"
 #include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/input/chord_hotkeys.h"
