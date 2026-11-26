@@ -172,6 +172,8 @@ void AFunctionStartsAfterItsPadding() {
     f.data[0x1161] = 0xCC;
     Check(pe::FunctionStart(f.Open(), 0x1170, 0x100) == 0x1162u, "one int3 after a ret is padding");
     Check(Throws([&] { pe::FunctionStart(f.Open(), 0x11F0, 0x20); }), "no start within reach throws");
+    Check(Throws([&] { pe::FunctionStart(f.Open(), 0x2100, 0x100); }) && Throws([&] { pe::FunctionStart(f.Open(), 0xFFFFFF00u, 0x100); }),
+          "a place outside .text throws rather than being read");
 }
 
 void TheUnwindTableGivesFunctions() {

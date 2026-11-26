@@ -347,7 +347,9 @@ std::optional<std::uint32_t> ImportSlot(const Image& image, const std::string& d
 
 std::uint32_t FunctionStart(const Image& image, std::uint32_t inside, std::uint32_t reach) {
     const std::uint8_t* base = image.At(0);
-    const std::uint32_t text = image.Text().rva;
+    const Section& t = image.Text();
+    if (!t.Contains(inside)) throw std::out_of_range("FunctionStart: RVA " + std::to_string(inside) + " is not in .text");
+    const std::uint32_t text = t.rva;
     for (std::uint32_t at = inside; at > text + 4 && inside - at < reach; --at) {
         if (base[at - 1] != 0xCC || base[at] == 0xCC) continue;
         std::uint32_t run = at - 1;

@@ -161,7 +161,7 @@ std::optional<std::uint32_t> ImportSlot(const Image& image, const std::string& d
 // The start of the function holding `inside` in an image with no unwind table:
 // the first byte after the int3 padding the compiler put before it (two or
 // more, or one after a ret), looked for up to `reach` bytes back. Throws when
-// there is none that near.
+// there is none that near, or `inside` is not in .text.
 std::uint32_t FunctionStart(const Image& image, std::uint32_t inside, std::uint32_t reach);
 
 }  // namespace cameraunlock::memory::pe
