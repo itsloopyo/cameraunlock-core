@@ -31,6 +31,7 @@ add_executable(cameraunlock_tests
     config_schema_tests.cpp
     safe_memory_tests.cpp
     memory_view_tests.cpp
+    word_scan_tests.cpp
     pe_image_tests.cpp
     msvc_rtti_tests.cpp
     lean_clamp_tests.cpp

@@ -25,6 +25,7 @@ int RunWin32ProfileSemanticsTests();
 int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 int RunMemoryViewTests();
+int RunWordScanTests();
 int RunPeImageTests();
 int RunMsvcRttiTests();
 int RunLeanClampTests();
@@ -125,6 +126,7 @@ int main(int argc, char** argv) {
     failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
     failures += RunMemoryViewTests();
+    failures += RunWordScanTests();
     failures += RunPeImageTests();
     failures += RunMsvcRttiTests();
     failures += RunLeanClampTests();
