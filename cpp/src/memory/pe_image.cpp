@@ -264,7 +264,12 @@ std::uint32_t Rel32(const Image& image, std::uint32_t operand) {
 }
 
 std::uint32_t Through(const Image& image, std::uint32_t function) {
-    for (int hops = 0; hops < 8 && image.U8(function) == 0xE9; ++hops) function = Rel32(image, function + 1);
+    // A jmp out of the image (another tool's hook into its trampoline) is where
+    // the chain stops: its target is returned, not followed.
+    for (int hops = 0; hops < 8; ++hops) {
+        if (std::uint64_t{function} + 5 > image.SizeOfImage() || image.U8(function) != 0xE9) break;
+        function = Rel32(image, function + 1);
+    }
     return function;
 }
 

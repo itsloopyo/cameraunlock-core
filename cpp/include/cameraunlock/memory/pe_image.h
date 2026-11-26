@@ -130,6 +130,7 @@ std::optional<std::uint32_t> FindLast(const Image& image, std::uint32_t from, st
 // a jmp, or an x64 RIP-relative memory operand with no immediate after it).
 std::uint32_t Rel32(const Image& image, std::uint32_t operand);
 // A function reached through any chain of `jmp rel32` thunks, up to 8 of them.
+// A jmp leaving the image ends the chain: its target is returned as it is.
 std::uint32_t Through(const Image& image, std::uint32_t function);
 
 // Every `call rel32` in .text that lands on `target`: the RVA of each call.

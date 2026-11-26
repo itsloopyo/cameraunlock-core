@@ -58,6 +58,13 @@ void TheImageIsReadAsTheLoaderLaysItOut(bool x64) {
     f.Code(0x1100, {0xE9, 0xFB, 0x00, 0x00, 0x00});  // jmp 0x1200
     f.Code(0x1200, {0xE9, 0xFB, 0x00, 0x00, 0x00});  // jmp 0x1300
     Check(pe::Through(f.Open(), 0x1100) == 0x1300u, "Through follows a chain of jmp thunks" + b);
+    f.Code(0x1300, {0xE9});  // jmp 0x10000000, past the image: another tool's hook
+    f.Put(0x1301, static_cast<std::int32_t>(0x10000000 - 0x1305));
+    Check(pe::Through(f.Open(), 0x1100) == 0x10000000u, "Through stops at a jmp out of the image and returns its target" + b);
+    f.Code(0x1300, {0xCC, 0xCC, 0xCC, 0xCC, 0xCC});
+    f.Code(0x4FFD, {0xE9, 0x00, 0x00});
+    Check(pe::Through(f.Open(), 0x4FFD) == 0x4FFDu, "a jmp cut off by the image's end is not followed" + b);
+    f.Code(0x4FFD, {0x00, 0x00, 0x00});
     Check(pe::Find(image, 0x1000, 0x1000, pe::Pattern("CC CC")) == 0x1000u, "Find finds the first match" + b);
     Check(pe::FindLast(image, 0x1000, 0x10, pe::Pattern("CC CC")) == 0x100Eu, "FindLast finds the last match in the span" + b);
     Check(pe::FindAll(image, 0x1000, 0x10, pe::Pattern("CC ?? CC")).size() == 14, "?? matches any byte" + b);
