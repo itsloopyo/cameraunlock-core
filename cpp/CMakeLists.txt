@@ -127,13 +127,15 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
         src/memory/hde64_any.c
         src/hooks/vtable_slot.cpp
         src/hooks/hook_or_point.cpp
+        src/hooks/hw_breakpoint.cpp
     )
     target_include_directories(cameraunlock_hooks
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
     )
-    target_link_libraries(cameraunlock_hooks PUBLIC minhook)
+    # cameraunlock for the file log, which the breakpoints' arming thread writes to.
+    target_link_libraries(cameraunlock_hooks PUBLIC minhook cameraunlock)
 
     install(TARGETS cameraunlock_hooks
         ARCHIVE DESTINATION lib

@@ -2,11 +2,13 @@
 // Copyright (c) 2026 itsloopyo
 
 // Tests for the code patching helpers in cameraunlock/hooks, in an executable of their own: the hook-or-point test
-// fills the address space around a page.
+// fills the address space around a page, and the breakpoints arm every thread of the process. `--on-return` runs
+// the breakpoint tests that use OnReturn, which takes debug register 1 from slot 3 for the rest of the process.
 
 #include <cameraunlock/hooks/code_patch.h>
 #include <cameraunlock/hooks/hook_manager.h>
 #include <cameraunlock/hooks/hook_or_point.h>
+#include <cameraunlock/hooks/hw_breakpoint.h>
 #include <cameraunlock/hooks/planted_jump.h>
 #include <cameraunlock/hooks/vtable_slot.h>
 
@@ -28,6 +30,7 @@ namespace {
 namespace hooks = cameraunlock::hooks;
 namespace code_patch = cameraunlock::hooks::code_patch;
 namespace planted = cameraunlock::hooks::planted;
+namespace breakpoint = cameraunlock::hooks::hw_breakpoint;
 
 int g_checks = 0;
 int g_failures = 0;
@@ -408,15 +411,270 @@ void HookOrPoint() {
 #endif
 }
 
+// ---- debug-register breakpoints, with the code left as it is
+
+int g_stopped = 0;
+int g_inner = 0;
+std::uintptr_t g_returnTo = 0;
+__declspec(noinline) int Stopped1(int a, int b) {
+    g_sink = g_sink + 1;
+    return a * 10 + b;
+}
+__declspec(noinline) int Stopped2(int a, int b) {
+    g_sink = g_sink + 1;
+    return a * 100 + b;
+}
+__declspec(noinline) int Stopped3(int a, int b) {
+    g_sink = g_sink + 1;
+    return a * 1000 + b;
+}
+__declspec(noinline) int Stopped4(int a, int b) {
+    g_sink = g_sink + 1;
+    return a * 10000 + b;
+}
+int (*volatile g_callStopped1)(int, int) = &Stopped1;
+void OnStopped(CONTEXT& context) {
+    ++g_stopped;
+    // At the entry the stack pointer holds the caller's return address.
+    g_returnTo = *reinterpret_cast<const std::uintptr_t*>(breakpoint::StackPointer(context));
+}
+// Stops again inside itself, at its own breakpoint and at another slot's, as
+// a frame hook's render handler does when it calls the view setter.
+void OnStoppedReentering(CONTEXT&) {
+    static thread_local int depth = 0;
+    ++g_inner;
+    if (depth > 0) return;
+    ++depth;
+    g_sink = Stopped3(0, 0) + Stopped1(0, 0);
+    --depth;
+}
+void OnStoppedThrowing(CONTEXT&) { throw std::runtime_error("a handler that throws"); }
+// The arming pass reaches the calling thread from its own thread, once a second.
+void WaitForArming() { std::this_thread::sleep_for(std::chrono::milliseconds(2500)); }
+
+bool InThisExe(std::uintptr_t address) {
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    return address > base && address < base + nt->OptionalHeader.SizeOfImage;
+}
+
+// What a breakpoint is put on: it reads what its first argument points at.
+__declspec(noinline) int __cdecl ReadFirst(const int* p) { return *static_cast<const volatile int*>(p); }
+int(__cdecl* volatile g_read)(const int*) = &ReadFirst;
+int g_swapped = 42;
+void HandTheSwapped(CONTEXT& context) {
+#ifdef _WIN64
+    context.Rcx = reinterpret_cast<DWORD64>(&g_swapped);
+#else
+    *reinterpret_cast<const int**>(breakpoint::StackPointer(context) + 4) = &g_swapped;
+#endif
+}
+
+void Breakpoints() {
+    std::printf("-- debug-register breakpoints\n");
+    unsigned char before[16];
+    std::memcpy(before, reinterpret_cast<const void*>(&Stopped1), sizeof(before));
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped1), &OnStopped);
+    WaitForArming();
+    CHECK(Stopped1(3, 4) == 34);
+    CHECK(Stopped1(5, 6) == 56);
+    CHECK(g_stopped == 2);
+    CHECK(breakpoint::Hits(0) == 2);
+    CHECK(InThisExe(g_returnTo));
+    CHECK(std::memcmp(before, reinterpret_cast<const void*>(&Stopped1), sizeof(before)) == 0);
+
+    // Moved twice before this thread is armed again: it still stops where the
+    // slot was two moves ago, which is passed over, and is armed on the spot.
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped2), &OnStopped);
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped3), &OnStopped);
+    CHECK(Stopped1(1, 2) == 12);
+    CHECK(g_stopped == 2);
+    CHECK(Stopped2(1, 2) == 102);
+    CHECK(Stopped3(1, 2) == 1002);
+    CHECK(g_stopped == 3);
+
+    // Debug registers 2 and 0, a handler stopping again inside itself, and a
+    // thread started after the breakpoints went in.
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped1), &OnStopped);
+    breakpoint::Set(1, reinterpret_cast<std::uintptr_t>(&Stopped2), &OnStopped);
+    breakpoint::Set(2, reinterpret_cast<std::uintptr_t>(&Stopped3), &OnStoppedReentering);
+    WaitForArming();
+    g_stopped = 0;
+    CHECK(Stopped2(2, 3) == 203);
+    CHECK(g_stopped == 1);
+    CHECK(Stopped3(2, 3) == 2003);
+    CHECK(g_inner == 2);
+    CHECK(g_stopped == 2);
+    int later = 0;
+    std::thread([&later] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        later = Stopped1(4, 5) + Stopped2(4, 5);
+    }).join();
+    CHECK(later == 45 + 405);
+    CHECK(g_stopped == 4);
+
+    CHECK(Throws([] { breakpoint::Set(breakpoint::kSlots, reinterpret_cast<std::uintptr_t>(&Stopped1), &OnStopped); }));
+    CHECK(Throws([] { breakpoint::Set(-1, reinterpret_cast<std::uintptr_t>(&Stopped1), &OnStopped); }));
+    CHECK(Throws([] { breakpoint::Set(1, 0, &OnStopped); }));
+    CHECK(Throws([] { breakpoint::Set(1, reinterpret_cast<std::uintptr_t>(&Stopped2), nullptr); }));
+    CHECK(Throws([] { breakpoint::Hits(breakpoint::kSlots); }));
+}
+
+// The handler changes what the function runs with, on a thread running before the breakpoint was set, on one
+// started after, and on one whose debug registers were cleared after it was armed.
+void BreakpointsChangeTheThread() {
+    std::printf("-- a breakpoint's handler changes what the code runs with\n");
+    const int mine = 7;
+    const std::uint64_t hits = breakpoint::Hits(0);
+    HANDLE running = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE go = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    int seen = 0;
+    std::thread early([&] {
+        SetEvent(running);
+        WaitForSingleObject(go, INFINITE);
+        seen = g_read(&mine);
+    });
+    WaitForSingleObject(running, INFINITE);
+    // Set arms every other thread before it returns.
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&ReadFirst), &HandTheSwapped);
+    SetEvent(go);
+    early.join();
+    CHECK(seen == 42 && breakpoint::Hits(0) == hits + 1);
+
+    ResetEvent(running);
+    ResetEvent(go);
+    int again = 0;
+    std::thread cleared([&] {
+        SetEvent(running);
+        WaitForSingleObject(go, INFINITE);
+        again = g_read(&mine);
+    });
+    WaitForSingleObject(running, INFINITE);
+    WaitForArming();
+    CONTEXT wiped{};
+    wiped.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    CHECK(GetThreadContext(cleared.native_handle(), &wiped) && wiped.Dr3 == reinterpret_cast<std::uintptr_t>(&ReadFirst));
+    wiped.Dr0 = wiped.Dr1 = wiped.Dr2 = wiped.Dr3 = wiped.Dr7 = 0;
+    CHECK(SetThreadContext(cleared.native_handle(), &wiped));
+    WaitForArming();
+    SetEvent(go);
+    cleared.join();
+    CloseHandle(go);
+    CloseHandle(running);
+    CHECK(again == 42 && breakpoint::Hits(0) == hits + 2);
+}
+
+// Slot 3 is debug register 1: four breakpoints at once.
+void FourthSlot() {
+    std::printf("-- four breakpoints at once\n");
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped1), &OnStopped);
+    breakpoint::Set(1, reinterpret_cast<std::uintptr_t>(&Stopped2), &OnStopped);
+    breakpoint::Set(2, reinterpret_cast<std::uintptr_t>(&Stopped3), &OnStopped);
+    breakpoint::Set(3, reinterpret_cast<std::uintptr_t>(&Stopped4), &OnStopped);
+    WaitForArming();
+    g_stopped = 0;
+    const std::uint64_t fourth = breakpoint::Hits(3);
+    CHECK(Stopped1(1, 1) + Stopped2(1, 1) + Stopped3(1, 1) + Stopped4(1, 1) == 11 + 101 + 1001 + 10001);
+    CHECK(g_stopped == 4 && breakpoint::Hits(3) == fourth + 1);
+    CONTEXT context{};
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    CHECK(Throws([&] { breakpoint::OnReturn(context, reinterpret_cast<std::uintptr_t>(&Stopped1), &OnStopped); }));
+
+    // A handler that throws: the thread goes on past the breakpoint.
+    breakpoint::Set(3, reinterpret_cast<std::uintptr_t>(&Stopped4), &OnStoppedThrowing);
+    CHECK(Stopped4(2, 2) == 20002);
+}
+
+// ---- OnReturn, in a process of its own
+
+int g_returned = 0;
+void ReturnSeen(CONTEXT& context) {
+    ++g_returned;
+#ifdef _WIN64
+    context.Rax = 99;
+#else
+    context.Eax = 99;
+#endif
+}
+void StopAndWaitForReturn(CONTEXT& context) {
+    breakpoint::OnReturn(context, *reinterpret_cast<const std::uintptr_t*>(breakpoint::StackPointer(context)), &ReturnSeen);
+}
+
+void OnReturn() {
+    std::printf("-- a handler runs another when its call returns\n");
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped1), &StopAndWaitForReturn);
+    WaitForArming();
+    CHECK(g_callStopped1(1, 2) == 99);
+    CHECK(g_returned == 1);
+    // Once: the return breakpoint was cleared where it fired.
+    breakpoint::Set(0, reinterpret_cast<std::uintptr_t>(&Stopped2), &OnStopped);
+    g_returned = 0;
+    CHECK(g_callStopped1(1, 2) == 12);
+    CHECK(g_returned == 0);
+    CONTEXT wiped{};
+    wiped.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    CHECK(GetThreadContext(GetCurrentThread(), &wiped) && (wiped.Dr7 & 0xC) == 0);
+    CHECK(Throws([] { breakpoint::Set(3, reinterpret_cast<std::uintptr_t>(&Stopped4), &OnStopped); }));
+    CONTEXT context{};
+    // A context without the debug registers in it, then one with them but no address.
+    CHECK(Throws([&] { breakpoint::OnReturn(context, reinterpret_cast<std::uintptr_t>(&Stopped1), &ReturnSeen); }));
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    CHECK(Throws([&] { breakpoint::OnReturn(context, 0, &ReturnSeen); }));
+}
+
+void Registers() {
+    std::printf("-- general registers and the stack pointer from a context\n");
+    CONTEXT c{};
+#ifdef _WIN64
+    c.Rax = 1;
+    c.Rsp = 0x1000;
+    c.Rdi = 7;
+    c.R15 = 15;
+    CHECK(breakpoint::GeneralRegister(c, 0) == 1 && breakpoint::GeneralRegister(c, 4) == 0x1000 && breakpoint::GeneralRegister(c, 7) == 7 &&
+          breakpoint::GeneralRegister(c, 15) == 15);
+    CHECK(breakpoint::StackPointer(c) == 0x1000);
+    CHECK(Throws([&] { breakpoint::GeneralRegister(c, 16); }));
+#else
+    c.Eax = 1;
+    c.Esp = 0x1000;
+    c.Edi = 7;
+    CHECK(breakpoint::GeneralRegister(c, 0) == 1 && breakpoint::GeneralRegister(c, 4) == 0x1000 && breakpoint::GeneralRegister(c, 7) == 7);
+    CHECK(breakpoint::StackPointer(c) == 0x1000);
+    CHECK(Throws([&] { breakpoint::GeneralRegister(c, 8); }));
+#endif
+    CHECK(Throws([&] { breakpoint::GeneralRegister(c, -1); }));
+}
+
+void ProtectionDiverted() {
+    std::printf("-- whether NtProtectVirtualMemory jumps into a module\n");
+    const auto protect = reinterpret_cast<std::uintptr_t>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtProtectVirtualMemory"));
+    const auto read = [](std::uintptr_t at, void* out, std::size_t n) {
+        std::memcpy(out, reinterpret_cast<const void*>(at), n);
+        return true;
+    };
+    CHECK(!breakpoint::ProtectionDivertedInto(0, 0));
+    CHECK(breakpoint::ProtectionDivertedInto(0, UINTPTR_MAX) == planted::JumpAt(read, protect).has_value());
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
-        PlantedHook();
-        Redirect();
-        SwapCode();
-        VtableSlots();
-        HookOrPoint();
+        if (argc > 1 && std::string(argv[1]) == "--on-return") {
+            OnReturn();
+        } else {
+            PlantedHook();
+            Redirect();
+            SwapCode();
+            VtableSlots();
+            HookOrPoint();
+            Registers();
+            ProtectionDiverted();
+            Breakpoints();
+            BreakpointsChangeTheThread();
+            FourthSlot();
+        }
     } catch (const std::exception& e) {
         ++g_failures;
         std::printf("  FAIL: a test threw: %s\n", e.what());
