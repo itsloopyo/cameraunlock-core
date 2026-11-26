@@ -125,6 +125,7 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
         src/memory/x86_decode_x86.cpp
         src/memory/hde32_any.c
         src/memory/hde64_any.c
+        src/hooks/vtable_slot.cpp
     )
     target_include_directories(cameraunlock_hooks
         PUBLIC

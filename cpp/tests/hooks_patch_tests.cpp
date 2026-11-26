@@ -5,6 +5,7 @@
 
 #include <cameraunlock/hooks/code_patch.h>
 #include <cameraunlock/hooks/planted_jump.h>
+#include <cameraunlock/hooks/vtable_slot.h>
 
 #include <Windows.h>
 
@@ -21,6 +22,7 @@
 
 namespace {
 
+namespace hooks = cameraunlock::hooks;
 namespace code_patch = cameraunlock::hooks::code_patch;
 namespace planted = cameraunlock::hooks::planted;
 
@@ -253,6 +255,69 @@ void SwapCode() {
     VirtualFree(page, 0, MEM_RELEASE);
 }
 
+// ---- vtable slots
+
+class SlotProbe {
+public:
+    virtual ~SlotProbe() = default;
+    virtual int Add(int x) { return x + 1; }
+};
+SlotProbe* volatile g_probe = nullptr;
+
+#ifdef _WIN64
+using AddFn = int (*)(void* self, int x);
+int DetourAdd(void* self, int x);
+#else
+using AddFn = int(__fastcall*)(void* self, void* edx, int x);
+int __fastcall DetourAdd(void* self, void* edx, int x);
+#endif
+AddFn g_originalAdd = nullptr;
+#ifdef _WIN64
+int DetourAdd(void* self, int x) { return g_originalAdd(self, x) + 100; }
+#else
+int __fastcall DetourAdd(void* self, void* edx, int x) { return g_originalAdd(self, edx, x) + 100; }
+#endif
+
+void VtableSlots() {
+    std::printf("-- vtable slots swapped and put back\n");
+    g_probe = new SlotProbe();
+    auto** vtable = *reinterpret_cast<void***>(g_probe);
+    void** slot = vtable + 1;
+    void* const game = *slot;
+    MEMORY_BASIC_INFORMATION before{};
+    CHECK(VirtualQuery(slot, &before, sizeof before) != 0);
+    CHECK(g_probe->Add(1) == 2);
+
+    hooks::SlotSwaps swaps;
+    g_originalAdd = reinterpret_cast<AddFn>(swaps.Swap(slot, reinterpret_cast<void*>(&DetourAdd), "the probe's Add"));
+    CHECK(reinterpret_cast<void*>(g_originalAdd) == game);
+    CHECK(swaps.Count() == 1);
+    CHECK(g_probe->Add(1) == 102);
+    MEMORY_BASIC_INFORMATION after{};
+    CHECK(VirtualQuery(slot, &after, sizeof after) && after.Protect == before.Protect);
+    swaps.RestoreAll();
+    CHECK(swaps.Count() == 0);
+    CHECK(*slot == game);
+    CHECK(g_probe->Add(1) == 2);
+
+    // Swapped twice, put back to the first: the latest swap is undone first.
+    swaps.Swap(slot, reinterpret_cast<void*>(&DetourAdd), "the probe's Add");
+    swaps.Swap(slot, reinterpret_cast<void*>(&DetourAdd), "the probe's Add again");
+    swaps.RestoreAll();
+    CHECK(*slot == game);
+
+    // A slot on an executable page keeps execute while it is written.
+    auto* page = static_cast<void**>(VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READ));
+    if (!page) throw std::runtime_error("no page for the test's slot");
+    CHECK(hooks::SwapSlot(page + 2, game, "a slot beside code") == nullptr);
+    CHECK(page[2] == game);
+    MEMORY_BASIC_INFORMATION code{};
+    CHECK(VirtualQuery(page, &code, sizeof code) && code.Protect == PAGE_EXECUTE_READ);
+    CHECK(Throws([&] { hooks::SwapSlot(reinterpret_cast<void**>(reinterpret_cast<std::uint8_t*>(page) + 1), game, "a slot off its alignment"); }));
+    VirtualFree(page, 0, MEM_RELEASE);
+    delete g_probe;
+}
+
 }  // namespace
 
 int main() {
@@ -260,6 +325,7 @@ int main() {
         PlantedHook();
         Redirect();
         SwapCode();
+        VtableSlots();
     } catch (const std::exception& e) {
         ++g_failures;
         std::printf("  FAIL: a test threw: %s\n", e.what());
