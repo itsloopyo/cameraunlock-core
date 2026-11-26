@@ -46,6 +46,7 @@ int RunFollowTurnTests();
 int RunFovAxisTests();
 int RunViewmodelTests();
 int RunDeferredRigLeanTests();
+int RunClockGateTests();
 int RunTrackingModeTests();
 int RunIniEditorTests();
 int RunCheckedFileWriterTests();
@@ -130,6 +131,7 @@ int main(int argc, char** argv) {
     failures += RunFovAxisTests();
     failures += RunViewmodelTests();
     failures += RunDeferredRigLeanTests();
+    failures += RunClockGateTests();
     failures += RunTrackingModeTests();
     failures += RunIniEditorTests();
     failures += RunCheckedFileWriterTests();
