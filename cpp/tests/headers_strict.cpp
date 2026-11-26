@@ -86,6 +86,7 @@
 #include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/gating/clock_gate.h"
 #include "cameraunlock/hooks/hook_manager.h"
+#include "cameraunlock/hooks/planted_jump.h"
 #include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/deferred_actions.h"
 #include "cameraunlock/input/hotkey_poller.h"

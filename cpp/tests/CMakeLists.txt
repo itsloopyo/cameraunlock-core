@@ -124,6 +124,14 @@ endif()
 
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)
 
+# The code patching helpers in the hooks target, in their own executable.
+if(TARGET cameraunlock_hooks)
+    add_executable(cameraunlock_hooks_patch_tests hooks_patch_tests.cpp)
+    target_link_libraries(cameraunlock_hooks_patch_tests PRIVATE cameraunlock_hooks)
+    target_compile_options(cameraunlock_hooks_patch_tests PRIVATE /W4 /WX)
+    add_test(NAME cameraunlock_hooks_patch_tests COMMAND cameraunlock_hooks_patch_tests)
+endif()
+
 # The C interface, driven as a host drives it: through CameraUnlockCore.dll and the C header
 # alone. c_header.c compiles that header as C.
 if(CAMERAUNLOCK_BUILD_C)
