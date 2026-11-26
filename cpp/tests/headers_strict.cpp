@@ -99,6 +99,7 @@
 #include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/math/vec3.h"
 #include "cameraunlock/memory/memory_view.h"
+#include "cameraunlock/memory/msvc_rtti.h"
 #include "cameraunlock/memory/pattern_scanner.h"
 #include "cameraunlock/memory/pe_image.h"
 #include "cameraunlock/memory/pe_fingerprint.h"
