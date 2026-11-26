@@ -212,16 +212,19 @@ void BytesAreFoundInASection(bool x64) {
     const std::uint32_t word = 0x11223344;
     f.Put(0x2302, word);
     f.Put(0x2308, word);
+    f.Text(0x2400, "cameras");
     const pe::Image image = f.Open();
     Check(image.TimeDateStamp() == 0x6034C5CEu, "TimeDateStamp is the file header's" + b);
     Check(image.Has(0x4FFC, 4) && !image.Has(0x4FFC, 5) && image.Has(0x5000, 0), "Has is whether the bytes lie inside the image" + b);
     Check(!image.Has(0xFFFFFFFFFFFFFFF0ull, 0x20), "Has is false for a span that wraps round" + b);
     Check(image.Find(image.Rdata(), "camera", 7) == std::vector<std::uint32_t>{0x2101, 0x2204}, "Find finds every match in the section, not past it" + b);
     Check(image.Find(image.Rdata(), "camera", 7, 4) == std::vector<std::uint32_t>{0x2204}, "Find keeps only matches at the alignment" + b);
-    Check(image.Find(image.Rdata(), &word, 4, 8) == std::vector<std::uint32_t>{0x2308}, "Find matches every byte, not only the first" + b);
+    Check(image.Find(image.Rdata(), &word, 4, 8) == std::vector<std::uint32_t>{0x2308}, "Find matches a needle of any bytes" + b);
+    Check(image.Find(image.Rdata(), "camera", 7, 0x400) == std::vector<std::uint32_t>{}, "Find matches every byte, not only the first" + b);
     Check(image.Find(image.Data(), "camera", 7).size() == 1, "Find reads the section it is given" + b);
     f.Code(0x2FFA, {'c', 'a', 'm', 'e', 'r', 'a'});  // its NUL is .data's first byte
-    Check(f.Open().Find(f.Open().Rdata(), "camera", 7).size() == 2, "a match cut off by the section's end is not one" + b);
+    const pe::Image cut = f.Open();
+    Check(cut.Find(cut.Rdata(), "camera", 7).size() == 2, "a match cut off by the section's end is not one" + b);
     Check(Throws([&] { image.Find(image.Rdata(), "", 0); }) && Throws([&] { image.Find(image.Rdata(), "c", 1, 0); }),
           "Find refuses no bytes and an alignment of 0" + b);
     const pe::Section past{"", 0x4800, 0x1000, 0};

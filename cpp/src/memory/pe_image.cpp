@@ -82,6 +82,13 @@ void Image::ReadHeaders(std::size_t span) {
             throw std::runtime_error("the image's " + section.name + " section runs past its SizeOfImage");
         sections_.push_back(std::move(section));
     }
+    const auto indexOf = [&](const char* name) {
+        const Section* s = SectionNamed(name);
+        return s ? static_cast<std::size_t>(s - sections_.data()) : kNoSection;
+    };
+    text_ = indexOf(".text");
+    rdata_ = indexOf(".rdata");
+    data_ = indexOf(".data");
 
     const auto imports = dir(kDirectoryImport);
     if (imports.first && std::uint64_t{imports.first} + imports.second <= size_) imports_ = {"", imports.first, imports.second, 0};
@@ -106,10 +113,9 @@ const Section* Image::SectionNamed(const std::string& name) const {
     return nullptr;
 }
 
-const Section& Image::Required(const char* name) const {
-    const Section* s = SectionNamed(name);
-    if (!s || s->size == 0) throw std::runtime_error(std::string("the image has no ") + name + " section");
-    return *s;
+const Section& Image::Required(std::size_t index, const char* name) const {
+    if (index == kNoSection || sections_[index].size == 0) throw std::runtime_error(std::string("the image has no ") + name + " section");
+    return sections_[index];
 }
 
 std::uint8_t Image::U8(std::uint32_t rva) const {

@@ -71,9 +71,9 @@ public:
     // The first section called `name`, or null.
     const Section* SectionNamed(const std::string& name) const;
     // .text, .rdata and .data; each throws std::runtime_error when the image lacks it.
-    const Section& Text() const { return Required(".text"); }
-    const Section& Rdata() const { return Required(".rdata"); }
-    const Section& Data() const { return Required(".data"); }
+    const Section& Text() const { return Required(text_, ".text"); }
+    const Section& Rdata() const { return Required(rdata_, ".rdata"); }
+    const Section& Data() const { return Required(data_, ".data"); }
     // The import directory, from the optional header; size 0 when there is none.
     const Section& Imports() const { return imports_; }
     // The exception directory (.pdata's RUNTIME_FUNCTION entries, 12 bytes
@@ -102,7 +102,8 @@ public:
 
 private:
     void ReadHeaders(std::size_t span);
-    const Section& Required(const char* name) const;
+    static constexpr std::size_t kNoSection = ~std::size_t{0};
+    const Section& Required(std::size_t index, const char* name) const;
     struct Function {
         std::uint32_t begin, end, unwind;
     };
@@ -116,6 +117,8 @@ private:
     std::uint32_t timeDateStamp_ = 0;
     bool is64_ = false;
     std::vector<Section> sections_;
+    // Indices into sections_, kept so a scan can ask for a section per byte.
+    std::size_t text_ = kNoSection, rdata_ = kNoSection, data_ = kNoSection;
     Section imports_;
     Section exceptions_;
     std::vector<Function> functions_;  // by begin
