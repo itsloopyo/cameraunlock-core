@@ -15,6 +15,12 @@
 // UObjectGlobalsLayout (typically from its per-build offset profile) via
 // SetRuntime() before any reflection call. Until then, every reflection
 // function returns empty/false.
+//
+// Deprecated: per-build RVAs and offsets break with every game patch. New code
+// finds the same globals, and the reflection layout, in the running game with
+// no per-build data through DiscoverReflection (ue_discovery.h), and reads them
+// through Objects and Reflection (ue_objects.h, ue_reflection.h). This file
+// stays for the mods already built on it.
 namespace cameraunlock::unreal {
 
 // Where the UObject/FName globals live in the game module and how their

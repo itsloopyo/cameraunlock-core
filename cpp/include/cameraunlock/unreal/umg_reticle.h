@@ -34,6 +34,12 @@
 //     viewport scales that by the game's DPI curve, so a consumer that wants
 //     screen pixels divides by UWidgetLayoutLibrary::GetViewportScale first.
 //     SetScale() keeps that in one place.
+//
+// Deprecated for new code: the DPI scale is not the only scale between a widget
+// and the viewport. Voices of the Void's HUD sits under a scale of its own and
+// DPI alone put its crosshair 23% short. UmgCrosshairMover (umg_crosshair.h)
+// finds SetRenderTranslation by reflection, measures each widget's own pixels
+// per unit off its painted geometry, and needs no per-build address.
 
 #include <cstdint>
 #include <cstring>
