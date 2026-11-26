@@ -77,6 +77,36 @@ struct Quat4 {
         return Quat4(x * inv, y * inv, z * inv, w * inv);
     }
 
+    /// Creates the unit quaternion of the rotation matrix whose columns are xColumn,
+    /// yColumn and zColumn: the directions the rotation takes +X, +Y and +Z to. The columns
+    /// must be unit length, at right angles, with zColumn = xColumn x yColumn; scaled or
+    /// mirrored axes give a wrong rotation. Only the result is normalised. Shepperd's
+    /// method. Unlike Normalized() it does not fall back to identity: the columns of a
+    /// rotation never sum to a zero quaternion, so a zero one is a caller's bad basis and
+    /// comes back NaN.
+    static Quat4 FromBasis(const Vec3& xColumn, const Vec3& yColumn, const Vec3& zColumn) {
+        const float r00 = xColumn.x, r01 = yColumn.x, r02 = zColumn.x;
+        const float r10 = xColumn.y, r11 = yColumn.y, r12 = zColumn.y;
+        const float r20 = xColumn.z, r21 = yColumn.z, r22 = zColumn.z;
+        const float trace = r00 + r11 + r22;
+        Quat4 q;
+        if (trace > 0) {
+            const float s = std::sqrt(trace + 1.0f) * 2.0f;
+            q = Quat4((r21 - r12) / s, (r02 - r20) / s, (r10 - r01) / s, 0.25f * s);
+        } else if (r00 > r11 && r00 > r22) {
+            const float s = std::sqrt(1.0f + r00 - r11 - r22) * 2.0f;
+            q = Quat4(0.25f * s, (r01 + r10) / s, (r02 + r20) / s, (r21 - r12) / s);
+        } else if (r11 > r22) {
+            const float s = std::sqrt(1.0f + r11 - r00 - r22) * 2.0f;
+            q = Quat4((r01 + r10) / s, 0.25f * s, (r12 + r21) / s, (r02 - r20) / s);
+        } else {
+            const float s = std::sqrt(1.0f + r22 - r00 - r11) * 2.0f;
+            q = Quat4((r02 + r20) / s, (r12 + r21) / s, 0.25f * s, (r10 - r01) / s);
+        }
+        const float n = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+        return Quat4(q.x / n, q.y / n, q.z / n, q.w / n);
+    }
+
     /// Creates a quaternion from YXZ Euler angles (yaw, pitch, roll in degrees).
     /// Matches C# QuaternionUtils.FromYawPitchRoll.
     static Quat4 FromYawPitchRoll(float yawDeg, float pitchDeg, float rollDeg) {
