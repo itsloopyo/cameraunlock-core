@@ -5,6 +5,7 @@
 #endif
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -24,9 +25,9 @@
 // dump.
 //
 // The filter is what keeps these from being blanket swallows: only
-// EXCEPTION_ACCESS_VIOLATION is handled. A breakpoint, a C++ exception
-// travelling through, a stack overflow - all keep unwinding to whoever owns
-// them.
+// EXCEPTION_ACCESS_VIOLATION and STATUS_GUARD_PAGE_VIOLATION are handled. A
+// breakpoint, a C++ exception travelling through, a stack overflow - all keep
+// unwinding to whoever owns them.
 //
 // The fault counter is passed in by the call site rather than kept here, so a
 // hook faulting every frame cannot bury a quieter one in a shared total.
@@ -36,10 +37,49 @@
 // destruction). That is also why the guarded types must be trivially copyable.
 namespace cameraunlock::memory {
 
-/// For `__except (AccessViolationFilter(GetExceptionCode()))`.
+/// For `__except (AccessViolationFilter(GetExceptionCode()))`. Handles an
+/// access violation only. A guard page hit keeps unwinding, since putting the
+/// guard back needs the faulting address: use MemoryFaultFilter for that.
 inline int AccessViolationFilter(DWORD code) {
     return code == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
                                               : EXCEPTION_CONTINUE_SEARCH;
+}
+
+/// For `__except (MemoryFaultFilter(GetExceptionInformation()))`. Handles an
+/// access violation, and a guard page hit with the guard put back first.
+///
+/// A guard page turns up under an address a pointer walk lands on when it is
+/// another thread's stack (a new thread's stack where a freed block was).
+/// Touching it clears the guard and raises STATUS_GUARD_PAGE_VIOLATION here
+/// rather than in the owning thread, so the guard is put back before the read
+/// is failed: without it that thread's stack could not grow, and left
+/// unhandled the exception takes the game down.
+inline int MemoryFaultFilter(const EXCEPTION_POINTERS* e) {
+    const DWORD code = e->ExceptionRecord->ExceptionCode;
+    if (code == STATUS_GUARD_PAGE_VIOLATION) {
+        // A guard that cannot be put back is left to crash where it was hit,
+        // not later in the owning thread's stack growth.
+        if (e->ExceptionRecord->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
+        const auto* at = reinterpret_cast<const void*>(e->ExceptionRecord->ExceptionInformation[1]);
+        MEMORY_BASIC_INFORMATION mbi;
+        DWORD was = 0;
+        if (!VirtualQuery(at, &mbi, sizeof mbi) ||
+            !VirtualProtect(const_cast<void*>(at), 1, mbi.Protect | PAGE_GUARD, &was))
+            return EXCEPTION_CONTINUE_SEARCH;
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+    return AccessViolationFilter(code);
+}
+
+/// memcpy under MemoryFaultFilter, with no staging: a fault part way through
+/// leaves `to` holding the bytes copied before it. False on a fault.
+inline bool GuardedMemcpy(void* to, const void* from, std::size_t n) {
+    __try {
+        std::memcpy(to, from, n);
+        return true;
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
+        return false;
+    }
 }
 
 /// Copies a trivially-copyable value out of `addr`. False on access violation,
@@ -56,11 +96,7 @@ bool SafeRead(std::uintptr_t addr, T& out) {
     static_assert(std::is_trivially_copyable<T>::value,
                   "SafeRead target must be trivially copyable");
     alignas(T) unsigned char staging[sizeof(T)];
-    __try {
-        std::memcpy(staging, reinterpret_cast<const void*>(addr), sizeof(T));
-    } __except (AccessViolationFilter(GetExceptionCode())) {
-        return false;
-    }
+    if (!GuardedMemcpy(staging, reinterpret_cast<const void*>(addr), sizeof(T))) return false;
     std::memcpy(&out, staging, sizeof(T));
     return true;
 }
@@ -83,7 +119,7 @@ bool SafeWrite(std::uintptr_t addr, const T& in) {
     __try {
         *reinterpret_cast<T*>(addr) = in;
         return true;
-    } __except (AccessViolationFilter(GetExceptionCode())) {
+    } __except (MemoryFaultFilter(GetExceptionInformation())) {
         return false;
     }
 }

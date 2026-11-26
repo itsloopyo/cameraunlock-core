@@ -166,6 +166,59 @@ void TestFaultCounter() {
           "a failed write increments the same counter");
 }
 
+EXCEPTION_POINTERS* Fault(EXCEPTION_RECORD& record, EXCEPTION_POINTERS& pointers, DWORD code) {
+    record = EXCEPTION_RECORD{};
+    record.ExceptionCode = code;
+    pointers = EXCEPTION_POINTERS{&record, nullptr};
+    return &pointers;
+}
+
+void TestMemoryFaultFilter() {
+    using cameraunlock::memory::MemoryFaultFilter;
+    std::cout << "MemoryFaultFilter:\n";
+    EXCEPTION_RECORD record;
+    EXCEPTION_POINTERS pointers;
+    Check(MemoryFaultFilter(Fault(record, pointers, EXCEPTION_ACCESS_VIOLATION)) == EXCEPTION_EXECUTE_HANDLER,
+          "an access violation is handled");
+    Check(MemoryFaultFilter(Fault(record, pointers, EXCEPTION_BREAKPOINT)) == EXCEPTION_CONTINUE_SEARCH,
+          "a breakpoint keeps unwinding");
+    Check(MemoryFaultFilter(Fault(record, pointers, EXCEPTION_STACK_OVERFLOW)) == EXCEPTION_CONTINUE_SEARCH,
+          "a stack overflow keeps unwinding");
+    Check(MemoryFaultFilter(Fault(record, pointers, EXCEPTION_INT_DIVIDE_BY_ZERO)) == EXCEPTION_CONTINUE_SEARCH,
+          "a divide by zero keeps unwinding");
+}
+
+bool HasGuard(const void* at) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    return VirtualQuery(at, &mbi, sizeof mbi) && (mbi.Protect & PAGE_GUARD);
+}
+
+// What another thread's stack looks like to a pointer walk: a committed page
+// with the guard on. Touching it clears the guard and raises
+// STATUS_GUARD_PAGE_VIOLATION, which AccessViolationFilter let through.
+void TestAGuardPageIsReadAsAFaultAndKeepsItsGuard() {
+    using cameraunlock::memory::SafeRead;
+    using cameraunlock::memory::SafeWrite;
+    std::cout << "guard page:\n";
+
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    auto* page = static_cast<unsigned char*>(
+        VirtualAlloc(nullptr, info.dwPageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE | PAGE_GUARD));
+    Check(page != nullptr, "a guard page allocated");
+    if (page == nullptr) return;
+    const auto at = reinterpret_cast<std::uintptr_t>(page);
+
+    std::uint32_t value = 0x77;
+    Check(!SafeRead(at, value) && value == 0x77, "SafeRead of a guard page returns false and leaves the value");
+    Check(HasGuard(page), "and the guard is back on the page");
+
+    Check(!SafeWrite(at, std::uint32_t{1}), "SafeWrite to a guard page returns false");
+    Check(HasGuard(page), "and the guard is back on the page");
+
+    VirtualFree(page, 0, MEM_RELEASE);
+}
+
 }  // namespace
 
 #endif  // _WIN32
@@ -178,6 +231,8 @@ int RunSafeMemoryTests() {
     TestFaultsAreAbsorbed();
     TestAPartialFaultLeavesTheDestinationAlone();
     TestFaultCounter();
+    TestMemoryFaultFilter();
+    TestAGuardPageIsReadAsAFaultAndKeepsItsGuard();
     return g_failures;
 #else
     std::cout << "  (skipped: SEH-guarded access is Windows-only)\n";
