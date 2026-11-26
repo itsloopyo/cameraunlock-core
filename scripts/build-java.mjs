@@ -10,8 +10,9 @@
 //                   binding looks for its library
 //   boot/Fixture.jar  an agent jar for BootTests: the boot class and java/tests/fixture
 //
-// java/src is compiled for Java 22, the first release where java.lang.foreign is final, so a
-// construct from a later release fails here and not in a mod on an older runtime.
+// java/src is compiled for Java 25, the first long-term release where java.lang.foreign and
+// java.lang.classfile are both final, so a construct from a later release fails here and not in a
+// mod on an older runtime.
 //
 // First, check-win32-imports.mjs holds the modules' imports of "cameraunlock_win32" to the
 // functions Win32Host and PosixHost register.

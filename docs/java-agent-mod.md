@@ -14,8 +14,9 @@ What core gives such a mod is in four places, and this page is how they fit.
 
 A mod builds core's jar from the submodule, `node cameraunlock-core/scripts/build-core-jar.mjs
 build/cameraunlock-core.jar`, compiles against it and puts its whole content into its own jar.
-There is no published artifact. `java/` needs Java 22 or later, the first release where
-`java.lang.foreign` is final, and `pixi run build-java` compiles it for 22 to hold that.
+There is no published artifact. `java/` needs Java 25 or later, the first long-term release where
+`java.lang.foreign` and `java.lang.classfile` are both final, and `pixi run build-java` compiles
+it for 25 to hold that.
 
 ## What the mod writes
 

@@ -80,9 +80,9 @@ build-vectors-c = "cmake -S scripts/pipeline-vectors/harness/c -B scripts/pipeli
 vectors-c = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/c/build/Release/conformance_harness_c.exe --expect-skips-file scripts/pipeline-vectors/harness/c/expected-skips.txt", depends-on = ["build-vectors-c"] }
 
 # java/ (docs/java-agent-mod.md): the binding to the C interface a Java mod compiles into its own
-# jar, and the boot class of a Java agent mod. build-java compiles it for Java 22, the first
-# release where java.lang.foreign is final, and puts the three libraries its tests load beside the
-# class folders. They come out of the C harness's build tree, which build-vectors-c configures.
+# jar, and the boot class of a Java agent mod. build-java compiles it for Java 25, the first
+# long-term release where java.lang.foreign and java.lang.classfile are final, and puts the three
+# libraries its tests load beside the class folders. They come out of the C harness's build tree, which build-vectors-c configures.
 # The DLL is Windows only; test-java-linux runs the module on Linux in a container.
 # The C interface as WebAssembly modules and their JVM classes (docs/core-jar.md), under cpp/build-wasm.
 # The toolchain is fetched once per user and checked against its pins (scripts/wasm-toolchain.mjs).
@@ -321,5 +321,5 @@ check = { depends-on = ["check-config-schema", "check-config-format", "check-can
 # 20.12 for Dirent.parentPath, which the wasm and java build scripts read.
 nodejs = ">=20.12"
 # For java/. 25 is the runtime the one Java agent mod's game ships (Project Zomboid 42), and
-# build-java compiles for 22 with it.
+# build-java compiles for 25 with it.
 openjdk = ">=25,<26"

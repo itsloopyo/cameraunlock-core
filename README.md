@@ -10,7 +10,7 @@ A cross-platform head tracking library for games. Provides complete tracking dat
 - **UI Compensation** - Reticle positioning that accounts for head tracking offset
 - **Thread-Safe Design** - Background UDP receiver safe to poll from the game thread
 - **Broad Compatibility** - Supports .NET 3.5 through .NET Standard 2.0, Unity 2018+, IL2CPP (source-shared)
-- **Java** - The C interface for Java 22 or later, on `CameraUnlockCore.dll` or compiled to WebAssembly and carried in one jar with no native file
+- **Java** - The C interface for Java 25 or later, on `CameraUnlockCore.dll` or compiled to WebAssembly and carried in one jar with no native file
 - **Release Tooling** - PowerShell modules, install script templates, and a reusable CI workflow shared by every mod repo
 
 ## Directory Structure
@@ -454,7 +454,7 @@ whose build cannot run on a CI runner, and compiles and tests nothing. No new mo
 - The DXBC hash of DirectX Shader Compiler v1.8.2505.1, vendored in `vendor/dxc-hash`
 
 ### Java
-- OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 22.
+- OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 25.
 - wasi-sdk 34 and Endive 1.1.0, for core's jar: fetched once per user by `scripts/wasm-toolchain.mjs`,
   pinned by SHA-256.
 - Node.js 20.12 or later from the pixi environment, for the WebAssembly and Java build scripts.
@@ -462,7 +462,7 @@ whose build cannot run on a CI runner, and compiles and tests nothing. No new mo
 ### Runtime
 - Unity assemblies provided by consuming projects (weak references)
 - BepInEx provided by mod loader
-- Java 22 or later for the Java binding and core's jar, started with `--enable-native-access=ALL-UNNAMED`
+- Java 25 or later for the Java binding and core's jar, started with `--enable-native-access=ALL-UNNAMED`
 
 ## License
 

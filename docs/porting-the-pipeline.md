@@ -120,7 +120,7 @@ keeps the engine boundary. A Rust mod that is a DLL already can do the same in p
 A host that can load a DLL and call C functions needs none of the above. `CameraUnlockCore.dll`
 ([c-interface.md](c-interface.md)) is the receiver, the interpolators, the processors, the lean
 clamp, the zoom compensation, the aim modes, the config owner and the hotkey poller as built from
-this repo, behind one call a frame. A Java agent (`java.lang.foreign`, Java 22 on), LuaJIT's
+this repo, behind one call a frame. A Java agent (`java.lang.foreign`, Java 25 on), LuaJIT's
 `ffi`, Python's `ctypes` and Rust all reach it. What is left for the host to write is the axis
 conversion at its engine's boundary and its world query for the lean, and neither is in the
 checks below. A port is for a host that cannot load a native library at all: stock Lua in a

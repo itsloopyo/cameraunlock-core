@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - core's Java needs Java 25 or later
+
+`pixi run build-java` and `scripts/build-core-jar.mjs` compile `java/` with `--release 25`, where
+they compiled for 22. 25 is the first long-term release where `java.lang.classfile` is final as
+well as `java.lang.foreign`, and core's Java is to write game classes with it.
+
+Consuming repos: a Java mod whose game runs a JVM older than 25 cannot load core's jar or the
+binding once it takes this version. A mod that compiles its own sources against core's jar with
+an older `--release` raises it to 25.
+
 ### Changed - `[View] Fxaa` is true by default
 
 A mod that can draw an FXAA pass into its game's frame now draws it unless the player sets

@@ -497,7 +497,7 @@ name. The table is here to check that declaration against, not to copy numbers o
 struct. A mod compiles it into its own jar from the submodule's source.
 [java-agent-mod.md](java-agent-mod.md) is the page for a mod that uses it.
 
-- Java 22 or later. `pixi run build-java` compiles it for 22.
+- Java 25 or later. `pixi run build-java` compiles it for 25.
 - `CameraUnlock.load()` loads `CameraUnlockCore.dll` from the folder its jar or class folder is in,
   and from nowhere else.
 - At load it compares `cameraunlock_abi()` with the version it was written for, then each
