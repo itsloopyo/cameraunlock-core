@@ -9,6 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a bytecode patcher for Java agent mods
+
+`com.cameraunlock.core.bytecode.Patch` writes a call into a mod's bridge class into a game method,
+after a named call inside it, before each of its returns, or at its start where a true answer
+returns at once, with `java.lang.classfile`. It is a port of Headstart's Java backend's patcher, which
+writes the same code. The differences: the bridge class is named by the caller (`Patch.apply`'s
+`bridge`); a patch is refused when it is made with no kind or target, as `AFTER_CALL` with no callee
+or another kind with one, or as `SKIP_AT_START` into a method that returns a value; and `apply`
+refuses a patch whose target is not declared in the class it is handed. `docs/java-agent-mod.md`, The
+bytecode patcher, says how a mod uses it.
+
 ### BREAKING - core's Java needs Java 25 or later
 
 `pixi run build-java` and `scripts/build-core-jar.mjs` compile `java/` with `--release 25`, where

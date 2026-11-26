@@ -3,7 +3,8 @@
 //
 //   node cameraunlock-core/scripts/build-core-jar.mjs <out.jar>
 //
-// The jar holds java/src (the binding, CameraUnlock.loadBundled, and the boot class), the C
+// The jar holds java/src (the binding, CameraUnlock.loadBundled, the boot class and the bytecode
+// patcher), the C
 // interface built as WebAssembly and compiled to JVM classes (cpp/build-wasm/core), the classes
 // of the Endive jars those run on, and under META-INF/licenses the notices that travel with them.
 // A mod compiles against it and puts its whole content into the mod's own jar, which a loader

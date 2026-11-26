@@ -33,7 +33,7 @@ cameraunlock-core/
 │   ├── tests/                                    # C++ tests
 │   └── CMakeLists.txt
 ├── java/
-│   ├── src/                                      # The binding to the C interface (DLL or WebAssembly module), its Win32 host and the boot class of a Java agent mod
+│   ├── src/                                      # The binding to the C interface (DLL or WebAssembly module), its Win32 host, and the boot class and bytecode patcher of a Java agent mod
 │   ├── harness/                                  # The pipeline vectors' harness and the bench for the binding
 │   └── tests/                                    # Its tests
 ├── powershell/                                   # 9 reusable .psm1 modules for mod release pipelines and tests
@@ -150,7 +150,8 @@ pipeline, config owner, hotkey poller and file log behind plain C functions, for
 Lua, Python or Rust host: [docs/c-interface.md](docs/c-interface.md).
 
 For a Java host the binding to it is here too, `java/src/com/cameraunlock/core/CameraUnlock.java`,
-with the boot class a Java agent mod is started through. The same binding runs on the C interface
+with the boot class a Java agent mod is started through and the bytecode patcher it writes game
+classes with (`com.cameraunlock.core.bytecode.Patch`, Java 25). The same binding runs on the C interface
 compiled to WebAssembly and carried as JVM classes in one jar with no native file, for a host that
 cannot ship a DLL ([docs/core-jar.md](docs/core-jar.md)). A mod builds that jar from the submodule:
 [docs/java-agent-mod.md](docs/java-agent-mod.md).
@@ -318,7 +319,7 @@ pixi run test-csharp    # dotnet test csharp
 pixi run pack           # dotnet pack to dist/
 pixi run test-powershell # the powershell/ modules, conformance checks and install bodies (Windows only)
 pixi run build-wasm     # the C interface as WebAssembly modules and JVM classes, under cpp/build-wasm (Windows only)
-pixi run test-java      # java/: the binding on the DLL and on the module, and the boot class (Windows only)
+pixi run test-java      # java/: the binding on the DLL and on the module, the boot class and the patcher (Windows only)
 pixi run vectors-java   # the pipeline vectors through the binding, on both (Windows only)
 pixi run bench-java     # what a load, a frame and a save cost on each (Windows only)
 ```

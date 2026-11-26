@@ -80,16 +80,18 @@ build-vectors-c = "cmake -S scripts/pipeline-vectors/harness/c -B scripts/pipeli
 vectors-c = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/c/build/Release/conformance_harness_c.exe --expect-skips-file scripts/pipeline-vectors/harness/c/expected-skips.txt", depends-on = ["build-vectors-c"] }
 
 # java/ (docs/java-agent-mod.md): the binding to the C interface a Java mod compiles into its own
-# jar, and the boot class of a Java agent mod. build-java compiles it for Java 25, the first
-# long-term release where java.lang.foreign and java.lang.classfile are final, and puts the three
-# libraries its tests load beside the class folders. They come out of the C harness's build tree, which build-vectors-c configures.
+# jar, and the boot class and bytecode patcher of a Java agent mod. build-java compiles it for Java
+# 25, the first long-term release where java.lang.foreign and java.lang.classfile are final, and
+# puts the three libraries its tests load beside the class folders. They come out of the C
+# harness's build tree, which build-vectors-c configures.
 # The DLL is Windows only; test-java-linux runs the module on Linux in a container.
 # The C interface as WebAssembly modules and their JVM classes (docs/core-jar.md), under cpp/build-wasm.
 # The toolchain is fetched once per user and checked against its pins (scripts/wasm-toolchain.mjs).
 build-wasm = "node scripts/build-wasm.mjs"
 build-java = { cmd = "cmake --build scripts/pipeline-vectors/harness/c/build --config Release --target cameraunlock_c cameraunlock_c_testing cameraunlock_c_other_abi && node scripts/build-java.mjs", depends-on = ["build-vectors-c", "build-wasm"] }
 # The binding against docs/c-interface.md's layout table and through CameraUnlockCoreTesting.dll,
-# a library of another ABI refused at load, and the boot class run as a game's launcher runs it.
+# a library of another ABI refused at load, the boot class run as a game's launcher runs it, and the
+# bytecode patcher on a fixture class.
 test-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests", depends-on = ["build-java"] }
 # The module on Linux, where PosixHost answers its Win32 calls, in a pinned Linux container.
 # Needs Docker with Linux containers, so it is not part of check.

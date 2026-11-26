@@ -14,7 +14,7 @@ binding, so nothing is written twice.
 
 | Part | From |
 |---|---|
-| The binding and the boot class | `java/src` |
+| The binding, the boot class and the bytecode patcher | `java/src` |
 | The C interface as JVM classes, `com.cameraunlock.core.wasm.CoreModule` | `cpp/` compiled to WebAssembly, then to Java bytecode by Endive's build-time compiler, which also copies code of its own into them (`CoreModuleMachineShaded`) |
 | The classes those run on | Endive 1.1.0: `runtime`, `wasm`, `wasi`, `log`, `annotations` |
 | The notices that travel with them | `META-INF/licenses/`, from `legal/` |

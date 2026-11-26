@@ -1,6 +1,8 @@
 package com.cameraunlock.core;
 
+import com.cameraunlock.core.bytecode.Patch;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -11,6 +13,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -74,6 +77,7 @@ public final class Tests {
         }
         logGoesToItsFile(testing.core, scratch);
         bootLoadsTheAgentAndStartsTheGame(scratch);
+        patchesAreWrittenIntoAGameMethod();
         System.out.println(failures == 0 ? "all " + checks + " checks passed" : failures + " of " + checks + " checks FAILED");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -88,6 +92,21 @@ public final class Tests {
 
     private static boolean near(float a, float b) {
         return Math.abs(a - b) <= 1e-4f;
+    }
+
+    interface Call {
+        void run() throws Exception;
+    }
+
+    private static String refusedArgument(Call call) {
+        try {
+            call.run();
+            return "";
+        } catch (IllegalArgumentException refused) {
+            return refused.getMessage();
+        } catch (Exception other) {
+            throw new IllegalStateException(other);
+        }
     }
 
     private static String refusal(Runnable call) {
@@ -1202,5 +1221,110 @@ public final class Tests {
         Ran unnamed = boot(game, "starts", false);
         check(unnamed.exit() != 0 && unnamed.output().contains("-Dcameraunlock.mainClass"),
                 "a JVM that was not told the game's main class says which argument is missing: exit " + unnamed.exit() + ", " + unnamed.output());
+    }
+
+    /** The bytecode patcher, as a Java agent's ClassFileTransformer calls it on a game class's bytes. */
+    private static void patchesAreWrittenIntoAGameMethod() throws Exception {
+        String bridge = PatchBridge.class.getName();
+        ClassLoader loader = Tests.class.getClassLoader();
+        Method update = PatchFixture.class.getDeclaredMethod("update", int.class);
+        Method align = PatchFixture.class.getDeclaredMethod("align", float.class);
+        Method draw = PatchFixture.class.getDeclaredMethod("draw", Object.class);
+        byte[] original;
+        try (InputStream in = Tests.class.getResourceAsStream("PatchFixture.class")) {
+            original = in.readAllBytes();
+        }
+        byte[] patched = Patch.apply(original, List.of(
+                new Patch(Patch.Kind.AFTER_CALL, 1, update, align, 0, -1),
+                new Patch(Patch.Kind.SKIP_AT_START, 2, draw, null, 1, -1),
+                new Patch(Patch.Kind.BEFORE_RETURN, 3, draw, null, 0, 1)), loader, bridge);
+
+        ClassLoader isolated = new ClassLoader(loader) {
+            @Override
+            protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+                if (name.equals(PatchFixture.class.getName())) {
+                    synchronized (getClassLoadingLock(name)) {
+                        Class<?> c = findLoadedClass(name);
+                        return c != null ? c : defineClass(name, patched, 0, patched.length);
+                    }
+                }
+                return super.loadClass(name, resolve);
+            }
+        };
+        Class<?> type = isolated.loadClass(PatchFixture.class.getName());
+        Object fixture = type.getConstructor().newInstance();
+        @SuppressWarnings("unchecked")
+        List<String> trace = (List<String>) type.getField("trace").get(fixture);
+        List<String> calls = new ArrayList<>();
+        boolean[] skip = {false};
+        PatchBridge.hooks = (site, a, b) -> {
+            calls.add(site + ":" + (a == null ? "null" : a.getClass().getSimpleName()) + ":" + b);
+            return site == 2 && skip[0];
+        };
+
+        type.getMethod("update", int.class).invoke(fixture, 1);
+        check(calls.equals(List.of("1:PatchFixture:null")), "the hook runs once, after the call: " + calls);
+        check(trace.equals(List.of("before", "align 1.0", "after")), "the method still runs whole: " + trace);
+
+        calls.clear();
+        trace.clear();
+        type.getMethod("draw", Object.class).invoke(fixture, "g");
+        check(calls.equals(List.of("2:String:null", "3:PatchFixture:g")), "start and return hooks both run: " + calls);
+        check(trace.equals(List.of("draw g", "drawn")), "draw runs when not skipped: " + trace);
+
+        calls.clear();
+        trace.clear();
+        type.getMethod("draw", Object.class).invoke(fixture, (Object) null);
+        check(calls.equals(List.of("2:null:null", "3:PatchFixture:null")), "the early return gets its hook too: " + calls);
+
+        calls.clear();
+        trace.clear();
+        skip[0] = true;
+        type.getMethod("draw", Object.class).invoke(fixture, "g");
+        check(trace.isEmpty(), "a true answer at the start returns at once: " + trace);
+        check(calls.equals(List.of("2:String:null")), "and runs nothing after: " + calls);
+
+        PatchBridge.hooks = null;
+        trace.clear();
+        type.getMethod("draw", Object.class).invoke(fixture, "g");
+        check(trace.equals(List.of("draw g", "drawn")), "with no hooks the patched code is the game's own: " + trace);
+
+        Method count = PatchFixture.class.getDeclaredMethod("count");
+        String nowhere = "";
+        try {
+            Patch.apply(original, List.of(new Patch(Patch.Kind.AFTER_CALL, 1, count, align, 0, -1)), loader, bridge);
+        } catch (IllegalStateException refused) {
+            nowhere = refused.getMessage();
+        }
+        check(nowhere.equals(PatchFixture.class.getName() + ".count after its call to align found nowhere to go in the method's code"),
+                "a call the method never makes refuses the patch, naming it: " + nowhere);
+
+        String noCallee = "";
+        try {
+            new Patch(Patch.Kind.AFTER_CALL, 1, update, null, 0, -1);
+        } catch (IllegalArgumentException refused) {
+            noCallee = refused.getMessage();
+        }
+        check(noCallee.contains("needs the callee"), "an AFTER_CALL patch with no callee is refused: " + noCallee);
+        check(refusedArgument(() -> new Patch(Patch.Kind.BEFORE_RETURN, 1, draw, align, 0, -1)).contains("only an AFTER_CALL patch takes a callee"),
+                "a callee on another kind is refused");
+        check(refusedArgument(() -> new Patch(Patch.Kind.SKIP_AT_START, 1, count, null, 0, -1)).contains("which returns int"),
+                "a skip into a method that returns a value is refused");
+        Method elsewhere = PatchBridge.class.getMethod("call", int.class, Object.class, Object.class);
+        check(refusedArgument(() -> Patch.apply(original, List.of(new Patch(Patch.Kind.BEFORE_RETURN, 1, elsewhere, null, -1, -1)), loader, bridge))
+                .endsWith("is not a patch for " + PatchFixture.class.getName()), "a patch for another class is refused");
+        boolean nullKind = false, nullTarget = false;
+        try {
+            new Patch(null, 1, draw, null, 0, -1);
+        } catch (NullPointerException refused) {
+            nullKind = "kind".equals(refused.getMessage());
+        }
+        try {
+            new Patch(Patch.Kind.BEFORE_RETURN, 1, null, null, 0, -1);
+        } catch (NullPointerException refused) {
+            nullTarget = "target".equals(refused.getMessage());
+        }
+        check(nullKind && nullTarget, "a patch with no kind or no target is refused, naming which");
+        check(Patch.internalName(PatchFixture.class).equals("com/cameraunlock/core/PatchFixture"), "a class's internal name has slashes");
     }
 }
