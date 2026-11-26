@@ -42,6 +42,7 @@ void HotkeyPollerSwap::Swap(std::unique_ptr<HotkeyPoller> next) {
         next->Start(kPollIntervalMs);
     } catch (const std::exception& e) {
         current_->Start(kPollIntervalMs);
+        current_->DisarmPresses();
         throw std::runtime_error(std::string("the new keys were not taken, the old ones stay: their polling thread did not start (") +
                                  e.what() + ")");
     }

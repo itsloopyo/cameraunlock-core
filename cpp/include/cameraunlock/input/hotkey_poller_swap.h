@@ -20,7 +20,8 @@ namespace cameraunlock::input {
 /// the swap does nothing until it is pressed again.
 ///
 /// Not thread-safe: Start, Swap and Current are called from one thread at a time. Gated's wrappers
-/// may run on any thread.
+/// may run on any thread. Swap is never called from an action registered on the poller polling
+/// now: it stops that poller, which joins the thread the action runs on.
 class HotkeyPollerSwap {
 public:
     static constexpr int kPollIntervalMs = 16;
@@ -45,8 +46,8 @@ public:
 
     /// Polls `next` in place of the poller polling now, and frees that one. Throws
     /// std::invalid_argument for a null poller and std::logic_error before Start. When `next`'s
-    /// thread does not start, the old poller is started again, `next` is freed, and
-    /// std::runtime_error says the old keys stay; when the old one's thread does not start again
+    /// thread does not start, the old poller is started again with its presses disarmed, `next` is
+    /// freed, and std::runtime_error says the old keys stay; when the old one's thread does not start again
     /// either, that error is thrown instead and no poller runs.
     void Swap(std::unique_ptr<HotkeyPoller> next);
 
