@@ -67,6 +67,17 @@ void TheImageIsReadAsTheLoaderLaysItOut(bool x64) {
     bad[0] = 0;
     Check(Throws([&] { pe::Image(bad.data(), bad.size(), f.base); }), "a missing MZ header throws" + b);
     Check(Throws([&] { pe::Image(f.data.data(), 0x4000, f.base); }), "a span shorter than SizeOfImage throws" + b);
+    {
+        // Headers alone claiming a large image with directories past the
+        // buffer: refused before any directory is read.
+        PeFixture big(x64);
+        big.Put(PeFixture::kOpt + 56, std::uint32_t{0x100000});
+        big.Directory(1, 0x1000, 0x40);
+        big.Directory(3, 0x1000, 0x24000);
+        const std::vector<std::uint8_t> headers(big.data.begin(), big.data.begin() + 0x400);
+        Check(Throws([&] { pe::Image(headers.data(), headers.size(), big.base); }),
+              "headers claiming more than the span throw before their directories are read" + b);
+    }
     std::vector<std::uint8_t> arm(f.data);
     arm[0x84] = 0x64;
     arm[0x85] = 0xAA;

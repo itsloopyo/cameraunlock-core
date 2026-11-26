@@ -38,9 +38,6 @@ Image::Image(const std::uint8_t* at, std::uint64_t pointerBase) : base_(at), poi
 
 Image::Image(const std::uint8_t* data, std::size_t size, std::uint64_t pointerBase) : base_(data), pointerBase_(pointerBase) {
     ReadHeaders(size);
-    if (size_ > size)
-        throw std::runtime_error("the image's SizeOfImage (" + std::to_string(size_) + ") is larger than the " + std::to_string(size) +
-                                 " bytes given");
 }
 
 void Image::ReadHeaders(std::size_t span) {
@@ -55,6 +52,10 @@ void Image::ReadHeaders(std::size_t span) {
     else throw std::runtime_error("the image is neither a 32-bit x86 nor a 64-bit x64 PE");
 
     size_ = ReadAt<std::uint32_t>(base_, span, opt + 56);
+    // Before anything past the headers is read: the directories are read up to SizeOfImage.
+    if (size_ > span)
+        throw std::runtime_error("the image's SizeOfImage (" + std::to_string(size_) + ") is larger than the " + std::to_string(span) +
+                                 " bytes given");
     headerImageBase_ = is64_ ? ReadAt<std::uint64_t>(base_, span, opt + 24) : ReadAt<std::uint32_t>(base_, span, opt + 28);
     const std::uint32_t directories = ReadAt<std::uint32_t>(base_, span, opt + (is64_ ? 108 : 92));
     const std::uint64_t directory = opt + (is64_ ? 112 : 96);
