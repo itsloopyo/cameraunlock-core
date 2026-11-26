@@ -384,6 +384,166 @@ void TestReprojectKeepsItsDistance() {
           "depth survives the move, so the behind-the-camera test still answers");
 }
 
+void TestReprojectAtTheDrawnFov() {
+    using cameraunlock::rendering::ProjectAimToNdc;
+    using cameraunlock::rendering::ReprojectWorldPoint;
+    // The drawn picture is wider than the game's: the game's projection at its
+    // own tangents must put the moved point where the drawn tangents show the
+    // real one.
+    const Basis clean = MakeBasis(30.0f, 4.0f, 0.0f);
+    const Basis drawn = MakeBasis(48.0f, -6.0f, 7.0f);
+    const auto c = BuildCameras(clean, drawn, 5.0f, 2.0f, -3.0f);
+    const float drawnTanX = 1.2f, drawnTanY = 0.675f, ratio = 0.8f;
+    const float p[3] = { 300.0f, 40.0f, 500.0f };
+
+    float rel[3];
+    for (int i = 0; i < 3; ++i) rel[i] = p[i] - c.drawnEye[i];
+    NormalizeVec(rel);
+    float wantX = 0.0f, wantY = 0.0f;
+    const bool wantOk = ProjectAimToNdc(rel, drawn.fwd, drawn.right, drawn.up, drawnTanX, drawnTanY, wantX, wantY);
+
+    float moved[3];
+    ReprojectWorldPoint(c, p, ratio, moved);
+    for (int i = 0; i < 3; ++i) rel[i] = moved[i] - c.cleanEye[i];
+    NormalizeVec(rel);
+    float gotX = 0.0f, gotY = 0.0f;
+    const bool gotOk = ProjectAimToNdc(rel, clean.fwd, clean.right, clean.up, drawnTanX * ratio, drawnTanY * ratio, gotX, gotY);
+    Check(wantOk && gotOk && Near(gotX, wantX, 1e-3f) && Near(gotY, wantY, 1e-3f),
+          "at a drawn FOV of its own, the moved point lands where the drawn view shows the real one");
+
+    float plain[3], unit[3];
+    ReprojectWorldPoint(c, p, plain);
+    ReprojectWorldPoint(c, p, 1.0f, unit);
+    Check(plain[0] == unit[0] && plain[1] == unit[1] && plain[2] == unit[2], "a ratio of 1 is the plain reprojection");
+}
+
+// ---- double-precision projection --------------------------------------------
+//
+// Unreal axes: +X forward, +Y right, +Z up.
+
+namespace rd = cameraunlock::rendering;
+using cameraunlock::unreal::FRotator;
+using cameraunlock::unreal::FVector;
+
+bool NearD(double a, double b, double eps = 1e-9) { return std::fabs(a - b) <= eps; }
+
+const rd::ViewBasis kIdentity{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+
+void TestDoubleProjectionBasics() {
+    std::cout << "Double-precision projection:\n";
+    const auto p = rd::ProjectPointToNdc({11, 3, 2}, {1, 1, 1}, kIdentity, 1.0, 0.5, {});
+    Check(p && NearD(p->x, 0.2) && NearD(p->y, 0.2), "a point ahead lands at its slope over the tangents");
+
+    const rd::ViewBasis yawed = rd::ViewBasisFromRotator(FRotator{0, 90, 0});
+    Check(NearD(yawed.forward.Y, 1.0) && NearD(yawed.right.X, -1.0) && NearD(yawed.up.Z, 1.0),
+          "yaw 90 faces +Y with its right along -X");
+
+    const FRotator r{12, -40, 7};
+    const auto viaRotator = rd::ProjectPointToNdc({30, -20, 8}, {2, 1, -1}, r, 0.9, 0.6, {});
+    const auto viaBasis = rd::ProjectPointToNdc({30, -20, 8}, {2, 1, -1}, rd::ViewBasisFromRotator(r), 0.9, 0.6, {});
+    Check(viaRotator && viaBasis && viaRotator->x == viaBasis->x && viaRotator->y == viaBasis->y,
+          "the rotator overload is the basis one");
+
+    Check(!rd::ProjectOffsetToNdc({-1, 0, 0}, kIdentity, 1.0, 1.0, {}), "a point behind the eye does not project");
+    Check(!rd::ProjectOffsetToNdc({1, 0, 0}, kIdentity, 0.0, 1.0, {}), "a tangent of zero does not project");
+}
+
+void TestInFrontRuleIsTheCallers() {
+    const FVector nearSide{1, 20, 0};
+    Check(rd::ProjectOffsetToNdc(nearSide, kIdentity, 1.0, 1.0, {}).has_value(), "{0, 0} takes anything past the eye's plane");
+    Check(!rd::ProjectOffsetToNdc(nearSide, kIdentity, 1.0, 1.0, {0.0, 0.1}),
+          "minCosine refuses a point further off the view than it allows");
+    Check(rd::ProjectOffsetToNdc(nearSide, kIdentity, 1.0, 1.0, {0.0, 0.04}).has_value(),
+          "minCosine takes a point within it");
+    Check(!rd::ProjectOffsetToNdc(nearSide, kIdentity, 1.0, 1.0, {1.0, 0.0}), "minDepth is strict");
+    Check(rd::ProjectOffsetToNdc(nearSide, kIdentity, 1.0, 1.0, {0.5, 0.0}).has_value(), "minDepth takes a deeper point");
+}
+
+void TestEdgePinned() {
+    std::cout << "Edge-pinned projection:\n";
+    rd::EdgePinRule rule;
+    rule.front = {0.05, 0.0};
+
+    const auto inside = rd::ProjectOffsetToNdcEdgePinned({10, 2, 1}, kIdentity, 1.0, 0.5, rule);
+    Check(inside && NearD(inside->x, 0.2) && NearD(inside->y, 0.2), "a point on screen projects as usual");
+
+    const auto beyond = rd::ProjectOffsetToNdcEdgePinned({1, 3, 1}, kIdentity, 1.0, 1.0, rule);
+    Check(beyond && NearD(beyond->x, 3.0) && NearD(beyond->y, 1.0), "off screen in front stays where it projects by default");
+    rule.pinInFront = true;
+    const auto pinned = rd::ProjectOffsetToNdcEdgePinned({1, 3, 1}, kIdentity, 1.0, 1.0, rule);
+    Check(pinned && NearD(pinned->x, 1.0) && NearD(pinned->y, 1.0 / 3.0), "pinInFront pulls it to the edge on its side");
+
+    rule.behind = rd::EdgeDirection::ViewUnits;
+    const auto behindView = rd::ProjectOffsetToNdcEdgePinned({-1, 2, 1}, kIdentity, 1.0, 0.5, rule);
+    Check(behindView && NearD(behindView->x, 1.0) && NearD(behindView->y, 0.5), "behind, in view units, goes to the edge along right and up");
+    rule.behind = rd::EdgeDirection::Ndc;
+    const auto behindNdc = rd::ProjectOffsetToNdcEdgePinned({-1, 2, 1}, kIdentity, 1.0, 0.5, rule);
+    Check(behindNdc && NearD(behindNdc->x, 1.0) && NearD(behindNdc->y, 1.0), "behind, in NDC, weighs right and up by the tangents");
+
+    const auto grazing = rd::ProjectOffsetToNdcEdgePinned({0.01, -5, 0}, kIdentity, 1.0, 1.0, rule);
+    Check(grazing && NearD(grazing->x, -1.0) && NearD(grazing->y, 0.0), "a point inside the front floor goes to the edge it lies towards");
+
+    Check(!rd::ProjectOffsetToNdcEdgePinned({-1, 0, 0}, kIdentity, 1.0, 1.0, rule), "straight behind has no side to go to");
+}
+
+void TestUnprojectRoundTrip() {
+    std::cout << "Unprojection:\n";
+    const rd::ViewBasis b = rd::ViewBasisFromRotator(FRotator{-15, 130, 20});
+    const rd::NdcPoint at{0.4, -0.3};
+    const FVector d = rd::UnprojectNdc(at, b, 0.9, 0.5);
+    Check(NearD(d.X * b.forward.X + d.Y * b.forward.Y + d.Z * b.forward.Z, 1.0), "the ray's forward component is 1");
+    const auto back = rd::ProjectOffsetToNdc(d, b, 0.9, 0.5, {});
+    Check(back && NearD(back->x, at.x) && NearD(back->y, at.y), "the ray projects back to the point it came through");
+
+    const FVector eye{100, -50, 20};
+    const FVector p = rd::PointThroughNdc(at, eye, b, 0.9, 0.5, 250.0);
+    const double dx = p.X - eye.X, dy = p.Y - eye.Y, dz = p.Z - eye.Z;
+    Check(NearD(std::sqrt(dx * dx + dy * dy + dz * dz), 250.0, 1e-9), "the point is the distance from the eye");
+    const auto seen = rd::ProjectPointToNdc(p, eye, b, 0.9, 0.5, {});
+    Check(seen && NearD(seen->x, at.x) && NearD(seen->y, at.y), "and lies on the ray");
+}
+
+void TestReprojectNdc() {
+    std::cout << "Reprojecting a clean picture point:\n";
+    rd::ViewFrame clean{{0, 0, 0}, kIdentity, 1.0, 0.5};
+    const rd::NdcPoint at{0.25, -0.5};
+    const auto same = rd::ReprojectNdc(at, clean, clean, std::nullopt, {});
+    Check(same && NearD(same->x, at.x) && NearD(same->y, at.y), "an untracked frame leaves the point where it is");
+
+    rd::ViewFrame drawn = clean;
+    drawn.basis = rd::ViewBasisFromRotator(FRotator{0, 10, 0});
+    const auto turned = rd::ReprojectNdc({0, 0}, clean, drawn, std::nullopt, {});
+    Check(turned && NearD(turned->x, -std::tan(10.0 * 3.14159265358979323846 / 180.0)) && NearD(turned->y, 0.0, 1e-12),
+          "a head turned right moves the aim left by the turn");
+
+    drawn = clean;
+    drawn.eye = {0, 1, 0};
+    const auto leaned = rd::ReprojectNdc({0, 0}, clean, drawn, 10.0, {});
+    Check(leaned && NearD(leaned->x, -0.1) && NearD(leaned->y, 0.0), "a lean moves the aim by the parallax at its distance");
+    const auto atInfinity = rd::ReprojectNdc({0, 0}, clean, drawn, std::nullopt, {});
+    Check(atInfinity && NearD(atInfinity->x, 0.0) && NearD(atInfinity->y, 0.0), "without a distance the aim is at infinity and a lean does not move it");
+
+    drawn = clean;
+    drawn.basis = rd::ViewBasisFromRotator(FRotator{0, 170, 0});
+    Check(!rd::ReprojectNdc(at, clean, drawn, std::nullopt, {}), "an aim behind the drawn view does not project");
+}
+
+void TestReprojectWorldPointDouble() {
+    // The double overload agrees with the float one on the same cameras.
+    const Basis clean = MakeBasis(30.0f, 4.0f, 0.0f);
+    const Basis drawn = MakeBasis(48.0f, -6.0f, 7.0f);
+    const auto c = BuildCameras(clean, drawn, 5.0f, 2.0f, -3.0f);
+    const float p[3] = { 300.0f, 40.0f, 500.0f };
+    float want[3];
+    rd::ReprojectWorldPoint(c, p, 0.8f, want);
+    const auto vec = [](const float* f) { return FVector{f[0], f[1], f[2]}; };
+    const rd::ViewBasis cb{vec(c.cleanFwd), vec(c.cleanRight), vec(c.cleanUp)};
+    const rd::ViewBasis db{vec(c.drawnFwd), vec(c.drawnRight), vec(c.drawnUp)};
+    const FVector got = rd::ReprojectWorldPoint(vec(p), vec(c.cleanEye), cb, vec(c.drawnEye), db, 0.8);
+    Check(NearD(got.X, want[0], 1e-2) && NearD(got.Y, want[1], 1e-2) && NearD(got.Z, want[2], 1e-2),
+          "the double-precision reprojection agrees with the float one");
+}
+
 }  // namespace
 
 int RunProjectionTests() {
@@ -401,6 +561,13 @@ int RunProjectionTests() {
     TestReprojectUntrackedFrameIsIdentity();
     TestReprojectLandsWhereTheDrawnCameraPutsIt();
     TestReprojectKeepsItsDistance();
+    TestReprojectAtTheDrawnFov();
+    TestDoubleProjectionBasics();
+    TestInFrontRuleIsTheCallers();
+    TestEdgePinned();
+    TestUnprojectRoundTrip();
+    TestReprojectNdc();
+    TestReprojectWorldPointDouble();
 
     if (g_failures == 0) {
         std::cout << "Projection tests: all passed\n";

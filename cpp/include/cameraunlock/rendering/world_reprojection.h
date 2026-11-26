@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cameraunlock/rendering/aim_ndc_projection.h"
+
 namespace cameraunlock::rendering {
 
 // The two cameras a tracked frame has: the one the game still believes it is
@@ -39,6 +41,34 @@ inline void ReprojectWorldPoint(const FrameCameras& c, const float p[3], float o
     for (int i = 0; i < 3; ++i) {
         out[i] = c.cleanEye[i] + x * c.cleanRight[i] + y * c.cleanUp[i] + z * c.cleanFwd[i];
     }
+}
+
+// ReprojectWorldPoint for a picture drawn at a field of view of its own (a FOV
+// setting the game does not know about). `cleanTanOverDrawnTan` is the clean
+// camera's half-field tangent over the drawn one's: the point's offset across
+// the drawn view is scaled by it, so the game's projection at its own FOV puts
+// the point where the drawn FOV shows it. 1 is ReprojectWorldPoint.
+inline void ReprojectWorldPoint(const FrameCameras& c, const float p[3], float cleanTanOverDrawnTan, float out[3]) {
+    const float v[3] = { p[0] - c.drawnEye[0], p[1] - c.drawnEye[1], p[2] - c.drawnEye[2] };
+    const float x = (v[0] * c.drawnRight[0] + v[1] * c.drawnRight[1] + v[2] * c.drawnRight[2]) * cleanTanOverDrawnTan;
+    const float y = (v[0] * c.drawnUp[0]    + v[1] * c.drawnUp[1]    + v[2] * c.drawnUp[2]) * cleanTanOverDrawnTan;
+    const float z = v[0] * c.drawnFwd[0]   + v[1] * c.drawnFwd[1]   + v[2] * c.drawnFwd[2];
+    for (int i = 0; i < 3; ++i) {
+        out[i] = c.cleanEye[i] + x * c.cleanRight[i] + y * c.cleanUp[i] + z * c.cleanFwd[i];
+    }
+}
+
+// The ratio overload in double precision, for a mod that holds its cameras as
+// eyes and bases (a world large enough that float positions lose centimetres).
+inline unreal::FVector ReprojectWorldPoint(const unreal::FVector& p, const unreal::FVector& cleanEye, const ViewBasis& clean,
+                                           const unreal::FVector& drawnEye, const ViewBasis& drawn, double cleanTanOverDrawnTan) {
+    const unreal::FVector v{p.X - drawnEye.X, p.Y - drawnEye.Y, p.Z - drawnEye.Z};
+    const double z = detail::Dot(v, drawn.forward);
+    const double x = detail::Dot(v, drawn.right) * cleanTanOverDrawnTan;
+    const double y = detail::Dot(v, drawn.up) * cleanTanOverDrawnTan;
+    return {cleanEye.X + clean.forward.X * z + clean.right.X * x + clean.up.X * y,
+            cleanEye.Y + clean.forward.Y * z + clean.right.Y * x + clean.up.Y * y,
+            cleanEye.Z + clean.forward.Z * z + clean.right.Z * x + clean.up.Z * y};
 }
 
 }  // namespace cameraunlock::rendering
